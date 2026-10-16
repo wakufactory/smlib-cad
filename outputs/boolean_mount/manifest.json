@@ -1,0 +1,34 @@
+{
+  "model": "boolean_mount",
+  "units": "model units",
+  "variants": [
+    {
+      "file": "boolean_mount_chord_1p5_angle_45.glb",
+      "chord_tolerance": 1.5,
+      "angle_tolerance_deg": 45,
+      "triangles": 458,
+      "bytes": 33760
+    },
+    {
+      "file": "boolean_mount_chord_0p5_angle_30.glb",
+      "chord_tolerance": 0.5,
+      "angle_tolerance_deg": 30,
+      "triangles": 512,
+      "bytes": 37648
+    },
+    {
+      "file": "boolean_mount_chord_0p1_angle_15.glb",
+      "chord_tolerance": 0.1,
+      "angle_tolerance_deg": 15,
+      "triangles": 1248,
+      "bytes": 90640
+    },
+    {
+      "file": "boolean_mount_chord_0p02_angle_7p5.glb",
+      "chord_tolerance": 0.02,
+      "angle_tolerance_deg": 7.5,
+      "triangles": 3616,
+      "bytes": 261140
+    }
+  ]
+}

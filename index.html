@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SMLib Modeler</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#dbe8f0;background:#0d1521}*{box-sizing:border-box}body{margin:0}header{height:56px;display:flex;align-items:center;gap:16px;padding:0 20px;border-bottom:1px solid #2c4154}h1{font-size:17px;margin:0}#status{font-size:12px;color:#96aabb}main{height:calc(100vh - 56px);display:grid;grid-template-columns:minmax(330px,420px) 1fr}aside{padding:18px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #2c4154;min-height:0}label{font-size:12px;color:#adc2d0}select,button,input{font:inherit}select,input{background:#152538;color:#dbe8f0;border:1px solid #36516a;border-radius:6px;padding:8px}textarea{flex:1;min-height:180px;resize:none;background:#101f2e;color:#e0eff7;border:1px solid #36516a;border-radius:8px;padding:14px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4}button{border:1px solid #416783;color:#dcecf6;background:#1b344a;border-radius:6px;padding:9px 12px;cursor:pointer}button.primary{background:#1784ab;border-color:#32a5ca;color:white}button:disabled{opacity:.45;cursor:default}.row{display:flex;gap:8px;align-items:center}.row button{flex:1}.row select{min-width:0;flex:1}#example{flex:0 0 auto}#message{font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;max-height:100px;color:#e7ad90}#viewport{position:relative;min-width:0;overflow:hidden}canvas{width:100%;height:100%;display:block}#shading-mode{position:absolute;top:14px;right:16px;background:#152538dd;z-index:1}#hint{position:absolute;bottom:14px;left:16px;font-size:12px;color:#a5bdc9;pointer-events:none}.controls{display:flex;gap:8px;align-items:center}.controls input{width:90px}@media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:48vh 1fr}aside{border-right:0;border-bottom:1px solid #2c4154;padding:10px}header{height:48px}main{height:calc(100vh - 48px)}}
+</style>
+</head>
+<body><header><h1>SMLib Modeler</h1><span id="status">ライブラリを確認中…</span></header>
+<main><aside>
+<div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体</option></select><button id="example">読込</button></div>
+<label for="source">モデル定義 · Ctrl/⌘ + Enter でプレビュー</label>
+<textarea id="source" spellcheck="false"></textarea>
+<div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span style="font-size:11px;color:#8faabb">小さいほど滑らか</span></div>
+<div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span style="font-size:11px;color:#8faabb">度 · 大きいほど粗い</span></div>
+<div class="controls"><label for="finish">全体加工</label><select id="finish"><option value="none">なし</option><option value="chamfer">面取り</option><option value="fillet">丸め</option></select><label for="finish-size">幅/半径</label><input id="finish-size" type="number" min="0.001" step="any" value="1" disabled></div>
+<div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
+<div class="row"><button class="primary" id="preview" disabled>プレビュー</button><button id="export" disabled>GLB を保存</button></div>
+<div id="message" role="status"></div>
+</aside><section id="viewport"><canvas id="canvas"></canvas><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option></select><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section></main>
+<script src="/app.js"></script></body></html>

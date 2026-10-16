@@ -1,0 +1,219 @@
+{
+  "source": "examples/all_primitives_materials.txt",
+  "chord_tolerance": 0.08,
+  "angle_tolerance_deg": 20,
+  "triangles": 6738,
+  "glb_bytes": 494008,
+  "objects": [
+    {
+      "name": "box",
+      "triangles": 12,
+      "material": {
+        "baseColor": [
+          0.85,
+          0.12,
+          0.1
+        ],
+        "metallic": 0.0,
+        "roughness": 0.75
+      },
+      "gltf_material_index": 0
+    },
+    {
+      "name": "sphere",
+      "triangles": 960,
+      "material": {
+        "baseColor": [
+          0.95,
+          0.45,
+          0.06
+        ],
+        "metallic": 0.15,
+        "roughness": 0.35
+      },
+      "gltf_material_index": 1
+    },
+    {
+      "name": "cylinder",
+      "triangles": 124,
+      "material": {
+        "baseColor": [
+          0.88,
+          0.75,
+          0.12
+        ],
+        "metallic": 0.7,
+        "roughness": 0.3
+      },
+      "gltf_material_index": 2
+    },
+    {
+      "name": "cone",
+      "triangles": 62,
+      "material": {
+        "baseColor": [
+          0.38,
+          0.75,
+          0.18
+        ],
+        "metallic": 0.0,
+        "roughness": 0.55
+      },
+      "gltf_material_index": 3
+    },
+    {
+      "name": "torus",
+      "triangles": 2048,
+      "material": {
+        "baseColor": [
+          0.05,
+          0.72,
+          0.49
+        ],
+        "metallic": 0.65,
+        "roughness": 0.22
+      },
+      "gltf_material_index": 4
+    },
+    {
+      "name": "pyramid",
+      "triangles": 6,
+      "material": {
+        "baseColor": [
+          0.07,
+          0.63,
+          0.82
+        ],
+        "metallic": 0.15,
+        "roughness": 0.65
+      },
+      "gltf_material_index": 5
+    },
+    {
+      "name": "cylindrical_box",
+      "triangles": 132,
+      "material": {
+        "baseColor": [
+          0.16,
+          0.38,
+          0.88
+        ],
+        "metallic": 0.8,
+        "roughness": 0.25
+      },
+      "gltf_material_index": 6
+    },
+    {
+      "name": "partial_sphere",
+      "triangles": 510,
+      "material": {
+        "baseColor": [
+          0.47,
+          0.28,
+          0.9
+        ],
+        "metallic": 0.2,
+        "roughness": 0.4
+      },
+      "gltf_material_index": 7
+    },
+    {
+      "name": "partial_cone",
+      "triangles": 68,
+      "material": {
+        "baseColor": [
+          0.78,
+          0.22,
+          0.73
+        ],
+        "metallic": 0.55,
+        "roughness": 0.32
+      },
+      "gltf_material_index": 8
+    },
+    {
+      "name": "partial_cylinder",
+      "triangles": 68,
+      "material": {
+        "baseColor": [
+          0.91,
+          0.25,
+          0.44
+        ],
+        "metallic": 0.05,
+        "roughness": 0.6
+      },
+      "gltf_material_index": 9
+    },
+    {
+      "name": "partial_torus",
+      "triangles": 1228,
+      "material": {
+        "baseColor": [
+          0.75,
+          0.38,
+          0.17
+        ],
+        "metallic": 0.85,
+        "roughness": 0.18
+      },
+      "gltf_material_index": 10
+    },
+    {
+      "name": "ellipsoid",
+      "triangles": 792,
+      "material": {
+        "baseColor": [
+          0.36,
+          0.82,
+          0.72
+        ],
+        "metallic": 0.3,
+        "roughness": 0.28
+      },
+      "gltf_material_index": 11
+    },
+    {
+      "name": "sphere_no_pole",
+      "triangles": 696,
+      "material": {
+        "baseColor": [
+          0.71,
+          0.68,
+          0.91
+        ],
+        "metallic": 0.1,
+        "roughness": 0.48
+      },
+      "gltf_material_index": 12
+    },
+    {
+      "name": "plane",
+      "triangles": 2,
+      "material": {
+        "baseColor": [
+          0.72,
+          0.8,
+          0.88
+        ],
+        "metallic": 0.0,
+        "roughness": 0.9
+      },
+      "gltf_material_index": 13
+    },
+    {
+      "name": "planar_circle",
+      "triangles": 30,
+      "material": {
+        "baseColor": [
+          0.9,
+          0.7,
+          0.45
+        ],
+        "metallic": 0.35,
+        "roughness": 0.5
+      },
+      "gltf_material_index": 14
+    }
+  ]
+}

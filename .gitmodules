@@ -1,0 +1,3 @@
+[submodule "usd-brep"]
+	path = usd-brep
+	url = https://github.com/NVIDIA-Omniverse/usd-brep
