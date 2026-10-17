@@ -22,6 +22,13 @@ def _number(value, name: str, minimum: float, maximum: float = math.inf) -> floa
     return float(value)
 
 
+def _scale(value) -> float:
+    if (isinstance(value, bool) or not isinstance(value, (int, float))
+            or not math.isfinite(value) or value <= 0):
+        raise ValueError("exportScale must be a positive finite number")
+    return float(value)
+
+
 def validate_document(document: object) -> tuple[str, str, dict]:
     """Validate the version 1 document written by the browser editor."""
     if not isinstance(document, dict):
@@ -43,6 +50,7 @@ def validate_document(document: object) -> tuple[str, str, dict]:
         "angle": _number(parameters.get("angle"), "angle", 1, 90),
         "finish": finish,
         "finishSize": _number(parameters.get("finishSize"), "finishSize", 0.001),
+        "exportScale": _scale(parameters.get("exportScale", 1)),
     }
 
 
@@ -55,11 +63,13 @@ def build_meshes(document: object, sm):
 
 
 def build_glb(document: object, sm) -> bytes:
-    return to_glb(build_meshes(document, sm))
+    _, _, parameters = validate_document(document)
+    return to_glb(build_meshes(document, sm), scale=parameters["exportScale"])
 
 
 def build_usdz(document: object, sm) -> bytes:
-    return to_usdz(build_meshes(document, sm))
+    _, _, parameters = validate_document(document)
+    return to_usdz(build_meshes(document, sm), scale=parameters["exportScale"])
 
 
 def main(argv: list[str] | None = None, *, format: str = "glb") -> int:

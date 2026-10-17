@@ -13,8 +13,11 @@ textarea,#message{overscroll-behavior:none}
 canvas{touch-action:none}
 @media(max-width:800px){main{height:calc(100dvh - 48px);grid-template-rows:minmax(0,48%) minmax(0,1fr)}}
 #preview-mode{position:absolute;top:14px;left:16px;z-index:1;background:#152538dd}
+#view-controls{position:absolute;top:56px;right:16px;z-index:1;display:flex;gap:12px;align-items:center;padding:7px 10px;border:1px solid #36516a;border-radius:6px;background:#152538dd}
+#view-controls label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}
+#view-controls input{margin:0;padding:0;accent-color:#57b7d9}
 #usd-model{display:block;width:100%;height:100%}
-canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#hint[hidden]{display:none}
+canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#view-controls[hidden],#hint[hidden]{display:none}
 #model-status{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:#adc2d0;pointer-events:none}
 </style>
 </head>
@@ -26,9 +29,10 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#h
 <div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span style="font-size:11px;color:#8faabb">小さいほど滑らか</span></div>
 <div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span style="font-size:11px;color:#8faabb">度 · 大きいほど粗い</span></div>
 <div class="controls"><label for="finish">全体加工</label><select id="finish"><option value="none">なし</option><option value="chamfer">面取り</option><option value="fillet">丸め</option></select><label for="finish-size">幅/半径</label><input id="finish-size" type="number" min="0.001" step="any" value="1" disabled></div>
+<div class="controls"><label for="export-scale">保存時の座標倍率</label><input id="export-scale" type="number" min="0" step="any" value="1"><span style="font-size:11px;color:#8faabb">GLB / USDZ · 原点基準 · 1 = そのまま</span></div>
 <div class="row"><label for="file-name">保存ファイル名</label><input id="file-name" type="text" value="model" placeholder="model" style="flex:1;min-width:0"><span style="font-size:11px;color:#8faabb">拡張子は自動</span></div>
 <div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
 <div class="row"><button class="primary" id="preview" disabled>プレビュー</button><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
 <div id="message" role="status"></div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option></select><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section></main>
+</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section></main>
 <script src="/app.js"></script></body></html>

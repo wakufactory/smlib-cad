@@ -50,6 +50,23 @@ class JsonToGlbTests(unittest.TestCase):
         self.assertEqual(scene["materials"][0]["pbrMetallicRoughness"]["baseColorFactor"],
                          [0.2, 0.4, 0.6, 1.0])
 
+    def test_export_scale_from_document_changes_positions(self):
+        scaled = {**MODEL, "parameters": {**MODEL["parameters"], "exportScale": 0.5}}
+        self.assertEqual(validate_document(MODEL)[2]["exportScale"], 1)
+        default_glb = build_glb(MODEL, FakeBrep())
+        scaled_glb = build_glb(scaled, FakeBrep())
+
+        def first_position(data):
+            json_length = struct.unpack_from("<I", data, 12)[0]
+            scene = json.loads(data[20:20 + json_length])
+            index = scene["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
+            accessor = scene["accessors"][index]
+            view = scene["bufferViews"][accessor["bufferView"]]
+            return struct.unpack_from("<3f", data, 20 + json_length + 8 + view["byteOffset"])
+
+        original = first_position(default_glb)
+        self.assertEqual(first_position(scaled_glb), tuple(value * 0.5 for value in original))
+
     def test_invalid_documents_are_rejected(self):
         cases = [
             {**MODEL, "version": 2},
@@ -59,6 +76,8 @@ class JsonToGlbTests(unittest.TestCase):
             {**MODEL, "parameters": {**MODEL["parameters"], "angle": 91}},
             {**MODEL, "parameters": {**MODEL["parameters"], "finish": "other"}},
             {**MODEL, "parameters": {**MODEL["parameters"], "finishSize": True}},
+            {**MODEL, "parameters": {**MODEL["parameters"], "exportScale": 0}},
+            {**MODEL, "parameters": {**MODEL["parameters"], "exportScale": "2"}},
         ]
         for case in cases:
             with self.subTest(case=case), self.assertRaises(ValueError):

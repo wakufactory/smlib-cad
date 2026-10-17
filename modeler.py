@@ -604,8 +604,24 @@ def tessellate(objects, sm, chord: float = 0.08, angle: float = 20, materials=No
     return output
 
 
-def to_glb(meshes):
+def _export_scale(scale):
+    if (isinstance(scale, bool) or not isinstance(scale, (int, float))
+            or not math.isfinite(scale) or scale <= 0):
+        raise ValueError("Export scale must be a positive finite number")
+    return float(scale)
+
+
+def _scaled_positions(positions, scale):
+    scaled = [float(value) * scale for value in positions]
+    # Both file formats store mesh points as 32-bit floats.
+    if not all(math.isfinite(value) and abs(value) <= 3.402823466e38 for value in scaled):
+        raise ValueError("Scaled coordinates exceed the exportable range")
+    return scaled
+
+
+def to_glb(meshes, scale=1):
     """Encode the exact preview triangles as a glTF 2.0 binary scene."""
+    scale = _export_scale(scale)
     blob = bytearray()
     doc = {"asset": {"version": "2.0", "generator": "USD BRep Modeler"},
            "scene": 0, "scenes": [{"nodes": []}], "nodes": [], "meshes": [],
@@ -642,7 +658,7 @@ def to_glb(meshes):
         def y_up(v):
             return [item for i in range(0, len(v), 3)
                     for item in (v[i], v[i+2], -v[i+1])]
-        p = accessor(y_up(mesh["positions"]), "POSITION", 34962)
+        p = accessor(y_up(_scaled_positions(mesh["positions"], scale)), "POSITION", 34962)
         n = accessor(y_up(mesh["normals"]), "NORMAL", 34962)
         index = len(doc["meshes"])
         doc["meshes"].append({"primitives": [{"attributes": {"POSITION": p, "NORMAL": n},
@@ -659,8 +675,9 @@ def to_glb(meshes):
             struct.pack("<I4s", len(blob), b"BIN\0") + blob)
 
 
-def to_usdz(meshes):
+def to_usdz(meshes, scale=1):
     """Package preview triangles and PBR materials as a Z-up USD stage."""
+    scale = _export_scale(scale)
     def triples(values):
         if len(values) % 3 or not all(math.isfinite(float(v)) for v in values):
             raise ValueError("Mesh vectors must contain finite triples")
@@ -694,6 +711,7 @@ def to_usdz(meshes):
         positions, normals = mesh["positions"], mesh["normals"]
         if not positions or len(positions) != len(normals) or len(positions) % 9:
             raise ValueError("Mesh positions and normals must contain matching triangles")
+        positions = _scaled_positions(positions, scale)
         material = normalize_material(mesh.get("material", {}))
         key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
         count = len(positions) // 3

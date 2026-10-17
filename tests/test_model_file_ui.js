@@ -4,20 +4,23 @@ const vm = require('node:vm');
 
 const values = {
   mode: 'text', source: 'box first 0 0 0 1 1 1', chord: '0.08', angle: '20',
-  finish: 'none', 'finish-size': '1', sample: 'default', 'file-name': 'model'
+  finish: 'none', 'finish-size': '1', sample: 'default', 'file-name': 'model',
+  'export-scale': '1'
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
   [id, {value, disabled: false, labels: [{textContent: id}], checkValidity: () => true}]));
-for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'usd-model', 'model-status', 'hint', 'example']) {
+for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'view-controls', 'show-axes', 'show-grid', 'usd-model', 'model-status', 'hint', 'example']) {
   elements[id] = elements[id] || {value: '', disabled: false};
 }
 elements['preview-mode'].value = 'webgl';
+elements['show-axes'].checked = true;
+elements['show-grid'].checked = true;
 elements['usd-model'].ready = Promise.resolve();
 elements.message.style = {};
 elements.source.addEventListener = () => {};
 elements.canvas = {getContext: () => null, addEventListener() {}};
 let savedBlob, downloadName;
-let exportPath, allowExport = false;
+let exportPath, requestBody, allowExport = false;
 const context = vm.createContext({
   Blob, console, setTimeout: () => {},
   URL: {createObjectURL(blob) {savedBlob = blob; return 'blob:test';}, revokeObjectURL() {}},
@@ -28,7 +31,8 @@ const context = vm.createContext({
   ResizeObserver: class {observe() {}},
   location: {protocol: 'https:'},
   window: {isSecureContext: true, HTMLModelElement: class {}},
-  fetch: async path => {
+  fetch: async (path, options) => {
+    if(options)requestBody=JSON.parse(options.body);
     if (allowExport && path === '/preview/usdz') {
       exportPath = path;
       return {ok: true, json: async () => ({url: '/preview/assets/test.usdz'})};
@@ -42,6 +46,9 @@ const context = vm.createContext({
 });
 vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
 const ModelFile = vm.runInContext('ModelFile', context);
+assert.equal(context.gridPoints([0, 0, 0], [0, 0, 0]).length / 3, 25);
+assert.equal(context.gridPoints([0, 0, 0], [1000, 1000, 0]).length / 3, 101 * 101);
+assert.equal(context.gridPoints([1e9, 0, 0], [1e9 + 1, 1, 0]).length, 0);
 vm.runInContext('examples = {circular: "group ring\\nend", sweeps: "profile p\\npolygon 0 0 1 0 0 1\\nend"}', context);
 for (const [sample, source] of [
   ['circular', 'group ring\nend'],
@@ -62,9 +69,10 @@ context.preview = async () => {previewCalls++;};
 const document = {
   format: 'smlib-model', version: 1, mode: 'text',
   source: 'box body 0 0 0 10 10 10\n',
-  parameters: {chord: 0.02, angle: 12, finish: 'fillet', finishSize: 0.5}
+  parameters: {chord: 0.02, angle: 12, finish: 'fillet', finishSize: 0.5, exportScale: 2.5}
 };
 assert.equal(JSON.stringify(ModelFile.parse(JSON.stringify(document))), JSON.stringify(document));
+assert.equal(ModelFile.parse(JSON.stringify({...document, parameters: {...document.parameters, exportScale: undefined}})).parameters.exportScale, 1);
 for (const invalid of [
   {...document, version: 2},
   {...document, mode: 'other'},
@@ -72,7 +80,9 @@ for (const invalid of [
   {...document, parameters: {...document.parameters, chord: 0}},
   {...document, parameters: {...document.parameters, angle: 91}},
   {...document, parameters: {...document.parameters, finish: 'other'}},
-  {...document, parameters: {...document.parameters, finishSize: null}}
+  {...document, parameters: {...document.parameters, finishSize: null}},
+  {...document, parameters: {...document.parameters, exportScale: 0}},
+  {...document, parameters: {...document.parameters, exportScale: '2'}}
 ]) assert.throws(() => ModelFile.parse(JSON.stringify(invalid)));
 
 (async () => {
@@ -80,6 +90,7 @@ for (const invalid of [
   elements.angle.value = '12';
   elements.finish.value = 'fillet';
   elements['finish-size'].value = '0.5';
+  elements['export-scale'].value = '2.5';
   elements['save-model'].onclick();
   assert.equal(downloadName, 'model.json');
   elements['file-name'].value = 'engine block.glb';
@@ -88,10 +99,18 @@ for (const invalid of [
   allowExport = true;
   await elements.export.onclick();
   assert.equal(exportPath, '/export');
+  assert.equal(requestBody.exportScale, 2.5);
   assert.equal(downloadName, 'engine block.glb');
   await elements['export-usdz'].onclick();
   assert.equal(exportPath, '/export/usdz');
+  assert.equal(requestBody.exportScale, 2.5);
   assert.equal(downloadName, 'engine block.usdz');
+  elements['export-scale'].value = '0';
+  exportPath = undefined;
+  await elements.export.onclick();
+  assert.equal(exportPath, undefined);
+  assert.match(elements.message.textContent, /座標倍率/);
+  elements['export-scale'].value = '2.5';
   elements['file-name'].value = '  ';
   exportPath = undefined;
   await elements['export-usdz'].onclick();
@@ -102,6 +121,7 @@ for (const invalid of [
   elements['file-name'].value = 'model';
   elements['save-model'].onclick();
   const json = await savedBlob.text();
+  assert.equal(JSON.parse(json).parameters.exportScale, 2.5);
   elements.source.value = 'box changed 0 0 0 2 2 2';
   elements.chord.value = '0.8';
   await context.loadModel({name: 'model.json', size: json.length, text: async () => json});
@@ -111,11 +131,12 @@ for (const invalid of [
   assert.equal(elements.angle.value, 12);
   assert.equal(elements.finish.value, 'fillet');
   assert.equal(elements['finish-size'].value, 0.5);
+  assert.equal(elements['export-scale'].value, 2.5);
   assert.equal(elements['finish-size'].disabled, false);
   assert.equal(elements['file-name'].value, 'model');
 
   const pythonSource = 'result = sm.create_box((0, 0, 0), 2, 3, 4)\n';
-  for (const id of ['chord', 'angle', 'finish-size']) elements[id].value = String(elements[id].value);
+  for (const id of ['chord', 'angle', 'finish-size', 'export-scale']) elements[id].value = String(elements[id].value);
   elements.mode.value = 'python';
   elements.mode.onchange();
   assert.equal(elements['save-model'].disabled, false);
@@ -145,10 +166,14 @@ for (const invalid of [
   assert.equal(elements['usd-model'].src, '/preview/assets/test.usdz');
   assert.equal(elements.canvas.hidden, true);
   assert.equal(elements['usd-model'].hidden, false);
+  assert.equal(elements['view-controls'].hidden, true);
   context.location.protocol = 'http:';
   elements['preview-mode'].onchange();
   assert.equal(elements['preview-mode'].value, 'webgl');
   assert.equal(elements.canvas.hidden, false);
+  assert.equal(elements['view-controls'].hidden, false);
+  assert.equal(elements['show-axes'].checked, true);
+  assert.equal(elements['show-grid'].checked, true);
   assert.match(elements.message.textContent, /HTTPS/);
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

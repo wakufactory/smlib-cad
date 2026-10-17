@@ -106,6 +106,14 @@ class ModelProcessTests(unittest.TestCase):
         self.assertEqual(run_model_request(request, "/export")[:4], b"glTF")
         self.assertEqual(run_model_request(request, "/export/usdz")[:2], b"PK")
         self.assertEqual(run_model_request(request, "/preview/usdz")[:2], b"PK")
+        original_glb = run_model_request(request, "/export")
+        original_preview = run_model_request(request, "/preview/usdz")
+        request["exportScale"] = 0.5
+        scaled_glb = run_model_request(request, "/export")
+        self.assertNotEqual(scaled_glb, original_glb)
+        self.assertNotEqual(run_model_request(request, "/export/usdz"), original_preview)
+        self.assertEqual(run_model_request(request, "/preview/usdz"), original_preview)
+        self.assertEqual(run_model_request(request, "/preview"), run_model_request({**request, "exportScale": 1}, "/preview"))
 
 
 if __name__ == "__main__":
