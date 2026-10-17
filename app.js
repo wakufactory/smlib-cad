@@ -172,7 +172,7 @@ $('shading-mode').onchange=draw;
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
 $('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;};
 $('example').onclick=()=>{
-  if(['gallery','circular','sweeps'].includes($('sample').value)){
+  if(['gallery','circular','sweeps','offsets'].includes($('sample').value)){
     $('mode').value='text';$('source').value=examples[$('sample').value]||'';
   }
   else $('source').value=examples[$('mode').value]||'';

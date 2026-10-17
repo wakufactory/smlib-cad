@@ -24,6 +24,13 @@ class FakeBrep:
         self.booleans = []
     def create_box(self, origin, w, d, h): return Solid()
     def create_sphere(self, center, r): return Solid()
+    def offset_brep(self, solid, distance):
+        self.last_offset = (solid, distance)
+        return Solid()
+    def shell_brep(self, solid, distance, faces_to_shell=()):
+        self.last_shell = (solid, distance, faces_to_shell)
+        return Solid()
+    def face_info(self, solid): return [{"index": 0, "bounds": [[0, 0, 0], [1, 1, 0]]}]
     def create_cylinder(self, center, r, h, axis=None):
         self.last_cylinder_axis = axis
         return Solid()
@@ -56,6 +63,21 @@ class FakeBrep:
 
 
 class ModelerTests(unittest.TestCase):
+    def test_offset_shell_and_face_log(self):
+        sm = FakeBrep()
+        objects, materials, log = evaluate(
+            "box a 0 0 0 10 10 10\nmaterial a 1 0 0 0 0.5\nfaces a\noffset a 1\nshell a -1 0 1", "text", sm)
+        self.assertEqual(sm.last_offset[1], 1)
+        self.assertEqual(sm.last_shell[1:], (-1, [0, 1]))
+        self.assertIn('a faces:', log)
+        self.assertIn('"index": 0', log)
+        self.assertIn("a", objects)
+        self.assertEqual(materials["a"]["baseColor"], [1, 0, 0])
+        for command in ("offset a 0", "offset missing 1", "offset a 1 0", "shell a nan",
+                        "shell a 1 1.5", "faces missing", "faces a extra"):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Line 2"):
+                evaluate("box a 0 0 0 10 10 10\n" + command, "text", sm)
+
     def test_profile_reuse_in_parts_and_groups(self):
         source = ("profile root\npolygon 1 0 2 0 2 3 1 3\nend\n"
                   "part piece\nprofile local\npolygon 0 0 1 0 0 1\nend\n"

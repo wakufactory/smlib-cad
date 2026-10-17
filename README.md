@@ -21,7 +21,7 @@ PYTHONPATH="$PWD/.build/smlib-core" \
   -m unittest discover -s usd-brep/source/SmPyCore/tests -v
 ```
 
-`_smlib_core` は下記のプリミティブに加え、`boolean_union`、`boolean_difference`、`boolean_intersection`、`chamfer_fillet`、`circular_fillet`、`transform_brep`、`tessellate` を公開します。楕円球は球を中心から X/Y/Z 方向へ拡大縮小した BRep です。USD は使いません。
+`_smlib_core` は下記のプリミティブに加え、Boolean、全エッジ加工、`face_info`、`offset_brep`、`shell_brep`、`transform_brep`、`tessellate` を公開します。楕円球は球を中心から X/Y/Z 方向へ拡大縮小した BRep です。USD は使いません。引数・戻り値・所有権の契約は [ツール境界 API 仕様](usd-brep/docs/smlib-core-tool-api.md) を参照してください。
 
 ## 入力
 
@@ -79,6 +79,9 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `union` / `subtract` / `intersect` | `出力名 左の形状名またはグループ名 右の形状名またはグループ名` |
 | `chamfer` | `形状名 幅`（その形状の全エッジを面取り） |
 | `fillet` | `形状名 半径`（その形状の全エッジを丸め） |
+| `offset` | `形状名 距離`（正は外側、負は内側） |
+| `shell` | `形状名 厚み [開口面の番号 ...]`（正は外側、負は内側。面指定なしは閉じた中空体） |
+| `faces` | `形状名`（現在の面番号と各面の座標範囲をログへ表示） |
 | `material` | `形状名 baseColorのR G B metallic roughness` |
 | `part` / `end` | ルート階層で `part 部品名` から `end` までを再利用可能な定義にする |
 | `use` | `use 部品名 [配置名]` で部品を新しく生成する |
@@ -123,6 +126,34 @@ result = sm.create_revolve(wall, (0, 0, 0), 30, 270, axis=(1, 0, 0), xdir=(0, 1,
 ```
 
 画面の「押し出し・回転体」→「読込」で、凹断面の押し出しと全回転・部分回転の3形状を読み込めます。ソースは `examples/extrude_revolve.txt`、JSONモデルは `examples/extrude_revolve.json`、生成済みGLBは `outputs/extrude_revolve.glb` です。再生成は `make glb MODEL=examples/extrude_revolve.json GLB=outputs/extrude_revolve.glb` で行います。
+
+### オフセットとシェル
+
+`offset 名前 距離` は形状全体の面を法線方向にずらします。正の距離は外側、負の距離は内側で、平行移動とは異なります。`shell 名前 厚み [面番号 ...]` は元の境界とオフセットした境界の間に壁を作り、指定した面を開口にします。いずれもテキスト命令では同じ名前の形状を新しい結果に置き換え、材質を保持します。距離・厚みは有限な非ゼロ値を指定します。
+
+```text
+box body 0 0 0 10 10 10
+offset body 1
+
+box cup 20 0 0 10 10 10
+faces cup
+shell cup -1 1
+```
+
+この未加工の `box` では面0が−Z面、面1が＋Z面なので、`shell cup -1 1` で外寸を保った上面開口の箱になります。面指定を省略すると閉じた中空体、`shell cup -1 0 1` なら上下に開口した角筒になります。面番号は0始まりです。Boolean・面取り・オフセットなどの加工後は変化し得るので、実行対象の形状に `faces 名前` を使って確認してください。範囲はその命令時点の座標であり、外側の `group` の未適用変換は含みません。番号のクリック選択は未対応です。
+
+Python API は新しい `Brep` を返し、元の形状を保持します。`_smlib_core.shell_brep` の開口面指定は **面番号の整数列** で、`_omni_solid` の `Face` ハンドル列とは異なります。
+
+```python
+body = sm.create_box((0, 0, 0), 10, 10, 10)
+print(sm.face_info(body))
+expanded = sm.offset_brep(body, 1)
+result = sm.shell_brep(body, -1, faces_to_shell=[1])
+```
+
+Python の詳細設定は `extended_offset=True`（凸部の隣接面を延長して交差）、`self_intersection=True`（自己交差の処理）です。シェルには `create_solid=True`（面入力の開いた端同士をつなぐ）もあります。テキスト命令ではこれらの既定値を使います。厚みが局所的な形状寸法や曲率に対して大きすぎる場合など、カーネルが処理できない形状は操作名・ステータスを含むエラーになります。
+
+画面の「オフセット・シェル」→「読込」で、外側オフセット・上面開口の箱・上下開口の角筒を試せます。ソースは `examples/offset_shell.txt`、JSONモデルは `examples/offset_shell.json`、GLBは `outputs/offset_shell.glb` です。再生成は `make glb MODEL=examples/offset_shell.json GLB=outputs/offset_shell.glb` で行います。
 
 ### グループ変換
 

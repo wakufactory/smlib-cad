@@ -329,6 +329,19 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                         if contained:
                             members.add(args[0])
                 objects[args[0]] = fn(left, right)
+            elif op == "faces":
+                if len(args) != 1 or args[0] not in objects:
+                    raise ValueError("faces: existing solid name required")
+                print(f"{args[0]} faces: {json.dumps(sm.face_info(objects[args[0]]))}")
+            elif op in ("offset", "shell"):
+                if len(args) < 2 or args[0] not in objects or (op == "offset" and len(args) != 2):
+                    raise ValueError(f"{op}: existing solid name and distance"
+                                     + (" followed by optional face indices required" if op == "shell" else " required"))
+                distance = float(args[1])
+                if not math.isfinite(distance) or distance == 0:
+                    raise ValueError("distance must be finite and nonzero")
+                options = {"faces_to_shell": [int(x) for x in args[2:]]} if op == "shell" else {}
+                objects[args[0]] = getattr(sm, f"{op}_brep")(objects[args[0]], distance, **options)
             elif op in ("chamfer", "fillet"):
                 if len(args) != 2 or args[0] not in objects:
                     raise ValueError(f"{op}: existing solid name and positive width/radius required")
@@ -360,8 +373,10 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
 
 def evaluate(source: str, mode: str, sm):
     if mode == "text":
-        objects, materials = parse_commands(source, sm)
-        return objects, materials, ""
+        output = io.StringIO()
+        with redirect_stdout(output):
+            objects, materials = parse_commands(source, sm)
+        return objects, materials, output.getvalue()
     if mode != "python":
         raise ValueError("mode must be text or python")
     # This is a local code editor. Python input has full local process access.

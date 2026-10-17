@@ -40,6 +40,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"python": EXAMPLE_SCRIPT, "text": EXAMPLE_TEXT,
                              "gallery": (ROOT / "examples" / "all_primitives_materials.txt").read_text(),
                              "sweeps": (ROOT / "examples" / "extrude_revolve.txt").read_text(),
+                             "offsets": (ROOT / "examples" / "offset_shell.txt").read_text(),
                              "circular": (ROOT / "examples" / "circular_csg_array.txt").read_text()})
         else:
             self.send_error(404)

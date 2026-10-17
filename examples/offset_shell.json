@@ -1,0 +1,12 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Offset every face outward; box edges remain sharp.\nbox expanded -24 -5 0 10 10 10\noffset expanded 1\nmaterial expanded 0.15 0.55 0.85 0.4 0.3\n\n# face 1 is the +Z face of this freshly created box (see faces output).\nbox cup -5 -5 0 10 10 10\nfaces cup\nshell cup -1 1\nmaterial cup 0.85 0.35 0.12 0.5 0.3\n\n# Remove two opposite faces to produce a rectangular tube.\nbox tube 14 -5 0 10 10 10\nshell tube -1 0 1\nmaterial tube 0.45 0.75 0.25 0.3 0.45\n",
+  "parameters": {
+    "chord": 0.08,
+    "angle": 20,
+    "finish": "none",
+    "finishSize": 1
+  }
+}
