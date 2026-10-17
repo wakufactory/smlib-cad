@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from modeler import apply_finish, evaluate, tessellate, to_glb
+from modeler import apply_finish, evaluate, tessellate, to_glb, to_usdz
 
 
 ROOT = Path(__file__).resolve().parent
@@ -46,20 +46,28 @@ def validate_document(document: object) -> tuple[str, str, dict]:
     }
 
 
-def build_glb(document: object, sm) -> bytes:
+def build_meshes(document: object, sm):
     source, mode, parameters = validate_document(document)
     objects, materials, _ = evaluate(source, mode, sm)
     objects = apply_finish(objects, sm, parameters["finish"], parameters["finishSize"])
     meshes = tessellate(objects, sm, parameters["chord"], parameters["angle"], materials)
-    return to_glb(meshes)
+    return meshes
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+def build_glb(document: object, sm) -> bytes:
+    return to_glb(build_meshes(document, sm))
+
+
+def build_usdz(document: object, sm) -> bytes:
+    return to_usdz(build_meshes(document, sm))
+
+
+def main(argv: list[str] | None = None, *, format: str = "glb") -> int:
+    parser = argparse.ArgumentParser(description=f"Convert a saved SMLib Modeler JSON document to {format.upper()}.")
     parser.add_argument("input", type=Path, help="JSON model saved by the browser editor")
-    parser.add_argument("-o", "--output", type=Path, help="output GLB path (default: input name with .glb)")
+    parser.add_argument("-o", "--output", type=Path, help=f"output {format.upper()} path (default: input name with .{format})")
     args = parser.parse_args(argv)
-    output = args.output or args.input.with_suffix(".glb")
+    output = args.output or args.input.with_suffix(f".{format}")
     try:
         if output.resolve() == args.input.resolve():
             raise ValueError("input and output paths must differ")
@@ -70,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
             import _smlib_core as sm
         except ImportError as exc:
             raise RuntimeError("_smlib_core is unavailable; run make in the CAD directory") from exc
-        data = build_glb(document, sm)
+        data = build_usdz(document, sm) if format == "usdz" else build_glb(document, sm)
         output.write_bytes(data)
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"error: {exc}", file=sys.stderr)

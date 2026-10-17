@@ -3,14 +3,36 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from modeler import EXAMPLE_SCRIPT, EXAMPLE_TEXT, apply_finish, evaluate, tessellate, to_glb
+from modeler import EXAMPLE_SCRIPT, EXAMPLE_TEXT, apply_finish, evaluate, tessellate, to_glb, to_usdz
 
 ROOT = Path(__file__).resolve().parent
+
+
+def allowed_host(host_header: str, bind_host: str, port: int) -> bool:
+    name, separator, request_port = host_header.rpartition(":")
+    if not separator or request_port != str(port):
+        return False
+    if name == "localhost":
+        return bind_host in ("127.0.0.1", "0.0.0.0")
+    try:
+        address = ipaddress.IPv4Address(name)
+    except ipaddress.AddressValueError:
+        return False
+    if bind_host == "0.0.0.0":
+        return (address.is_private or address.is_loopback or address.is_link_local) and not (
+            address.is_unspecified or address.is_multicast or address.is_reserved
+        )
+    return name == bind_host
+
+
+def allowed_origin(origin: str, host_header: str) -> bool:
+    return not origin or origin == f"http://{host_header}"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -46,16 +68,15 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        if self.path not in ("/preview", "/export"):
+        if self.path not in ("/preview", "/export", "/export/usdz"):
             self.send_error(404)
             return
         try:
             host = self.headers.get("Host", "")
             origin = self.headers.get("Origin", "")
-            if host not in (f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"):
+            if not allowed_host(host, self.server.server_address[0], self.server.server_port):
                 raise ValueError("Invalid Host header")
-            if origin and origin not in (f"http://127.0.0.1:{self.server.server_port}",
-                                         f"http://localhost:{self.server.server_port}"):
+            if not allowed_origin(origin, host):
                 raise ValueError("Cross-origin requests are not allowed")
             if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
                 raise ValueError("Content-Type must be application/json")
@@ -71,11 +92,12 @@ class Handler(BaseHTTPRequestHandler):
             objects = apply_finish(objects, sm, request.get("finish", "none"), request.get("finishSize", 1))
             meshes = tessellate(objects, sm, float(request.get("chord", 0.08)),
                                 angle=float(request.get("angle", 20)), materials=materials)
-            if self.path == "/export":
+            if self.path in ("/export", "/export/usdz"):
+                usdz = self.path == "/export/usdz"
+                data = to_usdz(meshes) if usdz else to_glb(meshes)
                 self.send_response(200)
-                data = to_glb(meshes)
-                self.send_header("Content-Type", "model/gltf-binary")
-                self.send_header("Content-Disposition", 'attachment; filename="model.glb"')
+                self.send_header("Content-Type", "model/vnd.usdz+zip" if usdz else "model/gltf-binary")
+                self.send_header("Content-Disposition", 'attachment; filename="model.usdz"' if usdz else 'attachment; filename="model.glb"')
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -87,10 +109,18 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--host", default="0.0.0.0", help="IPv4 listen address (default: 0.0.0.0; use 127.0.0.1 for local only)")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"Open http://127.0.0.1:{args.port}", flush=True)
+    try:
+        ipaddress.IPv4Address(args.host)
+    except ipaddress.AddressValueError:
+        parser.error("--host must be an IPv4 address")
+    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    if args.host == "0.0.0.0":
+        print(f"Listening on all IPv4 interfaces, port {args.port}. Open http://<this Mac's LAN IPv4>:{args.port}", flush=True)
+    else:
+        print(f"Open http://{args.host}:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

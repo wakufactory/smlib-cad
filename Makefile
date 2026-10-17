@@ -18,17 +18,21 @@ INCLUDES := -Iusd-brep/source/SMLib/inc -Iusd-brep/source/SM_API/inc -I$(PYTHON_
 CXXFLAGS := -std=c++17 -O1 -fPIC -arch arm64 -MMD -MP -Wno-inconsistent-missing-override -Wno-overloaded-virtual -Wno-unused-but-set-variable -Wno-unused-variable -Wno-parentheses-equality -Wno-deprecated-literal-operator
 MODEL ?= model.json
 PORT ?= 8765
+HOST ?= 0.0.0.0
 
 -include $(SMLIB_OBJ:.o=.d) $(SMAPI_OBJ:.o=.d) $(CORE_OBJ:.o=.d)
 
-.PHONY: all clean glb start
+.PHONY: all clean glb usdz start
 all: $(OUTPUT)
 
 start: $(OUTPUT)
-	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --port $(PORT)
+	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT)
 
 glb: $(OUTPUT)
 	@$(PYTHON) json_to_glb.py "$(MODEL)" $(if $(GLB),-o "$(GLB)")
+
+usdz: $(OUTPUT)
+	@$(PYTHON) json_to_usdz.py "$(MODEL)" $(if $(USDZ),-o "$(USDZ)")
 
 $(BUILD_DIR)/SMLib/%.o: usd-brep/source/SMLib/src/%.cpp
 	@mkdir -p $(@D)

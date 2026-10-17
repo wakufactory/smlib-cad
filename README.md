@@ -1,6 +1,6 @@
 # SMLib Modeler
 
-テキスト命令または Python コードで BRep を作り、ブラウザでプレビューして GLB に保存するローカルツールです。形状生成とテッセレーションには、同梱の `usd-brep` ソースから作る **USD 非依存** の `_smlib_core` Python 拡張を使います。USD ファイルや `pxr` API は使いません。
+テキスト命令または Python コードで BRep を作り、ブラウザでプレビューして GLB または USDZ に保存するローカルツールです。形状生成とテッセレーションには、同梱の `usd-brep` ソースから作る **USD 非依存** の `_smlib_core` Python 拡張を使います。USDZ はテッセレーション済みメッシュから直接生成し、`pxr` API は使いません。
 
 ## ビルドと起動（Apple Silicon）
 
@@ -11,7 +11,15 @@ uv pip install --target .deps/pybind11 pybind11==2.11.1
 make start
 ```
 
-`make start` は必要なネイティブ拡張をビルドしてからサーバーを起動します。`http://127.0.0.1:8765` を開きます。別のポートは `make start PORT=8766`、別の Python 3.12 は `make start PYTHON=/path/to/python3.12` で指定できます。停止は起動した端末で Ctrl+C を押します。`Makefile` はこのツールに必要な `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。公式の macOS 用 premake パッケージや OpenUSD は不要です。
+`make start` は必要なネイティブ拡張をビルドしてから、全IPv4インターフェース（`0.0.0.0`）でサーバーを起動します。このMacでは `http://127.0.0.1:8765`、同じLAN内の端末では `http://<MacのLAN内IPv4アドレス>:8765` を開きます。MacのIPv4アドレスは「システム設定 → ネットワーク」で確認できます。別のポートは `make start PORT=8766`、別の Python 3.12 は `make start PYTHON=/path/to/python3.12` で指定できます。停止は起動した端末で Ctrl+C を押します。`Makefile` はこのツールに必要な `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。公式の macOS 用 premake パッケージや OpenUSD は不要です。
+
+このMacからのみアクセスできるようにする場合は、待ち受け先を明示します。
+
+```bash
+make start HOST=127.0.0.1
+```
+
+通常起動では、LANからアクセスした端末もPythonコードを実行できます。認証とHTTPSはないため、信頼できるLANだけで使い、ルーターのポート転送などでインターネットに公開しないでください。macOSのファイアウォールが接続を確認した場合は、利用するネットワークでの着信を許可する必要があります。
 
 ネイティブバインディングの確認:
 
@@ -29,7 +37,7 @@ PYTHONPATH="$PWD/.build/smlib-core" \
 
 「JSON を保存」を押すと、現在のテキスト命令またはPythonコードと、曲面精度・角度条件・全体加工・幅/半径を `model.json` に保存します。「JSON を読み込む」でそのファイルを選ぶと、入力モード・コード・各設定が復元され、自動でプレビューが更新されます。JSON が壊れている場合や未対応の形式の場合は、編集中の内容を変更せずにエラーを表示します。
 
-ファイル形式は UTF-8 のJSONです。`format: "smlib-model"`、`version: 1`、`mode`（`"text"` または `"python"`）、`source`、`parameters` を持ちます。PythonモードのJSONを読み込んでプレビューする場合や `make glb` で変換する場合、保存されたPythonコードが実行されます。
+ファイル形式は UTF-8 のJSONです。`format: "smlib-model"`、`version: 1`、`mode`（`"text"` または `"python"`）、`source`、`parameters` を持ちます。PythonモードのJSONを読み込んでプレビューする場合や `make glb` / `make usdz` で変換する場合、保存されたPythonコードが実行されます。
 
 保存したJSONをGLBへ変換するには `make glb` を実行します。必要なら `_smlib_core` もビルドします。既定の入力は `model.json` で、同じ場所に `model.glb` を作ります。別の入力や出力先には `MODEL` と `GLB` を指定できます。モデル定義と全体パラメータは画面の「GLB を保存」と同じ処理に渡されます。
 
@@ -38,6 +46,15 @@ make glb
 make glb MODEL=design.json
 make glb MODEL=design.json GLB=outputs/design.glb
 ```
+
+USDZ は画面の「USDZ を保存」、または保存済みJSONから `make usdz` で作成できます。既定の入力は `model.json`、出力は同じ場所の `model.usdz` です。出力先の変更には `USDZ` を指定します。
+
+```bash
+make usdz
+make usdz MODEL=design.json USDZ=outputs/design.usdz
+```
+
+USDZ はプレビュー・GLB と同じテッセレーション結果を Z-up の USD Mesh として保存し、各形状の色・metallic・roughness を UsdPreviewSurface 材質に設定します。元の BRep や編集用のモデル定義は含まれません。USDZ は非圧縮で、テキスト形式の `model.usda` を格納するため、大きなモデルでは GLB よりファイルサイズが増えます。座標値は変換せず、USD上の単位は 1 = 1 m として記録します。
 
 ```json
 {
@@ -247,7 +264,7 @@ materials = {"result": {"baseColor": [0.85, 0.24, 0.12], "metallic": 0.65, "roug
 
 材質は完成したソリッド名ごとに指定します。`baseColor` は線形 RGB の3値、`metallic` と `roughness` はそれぞれ1値で、いずれも `0` から `1` の範囲です。省略したソリッドには既定の水色の材質を使います。Boolean 演算で作った形状には、演算後の名前を指定してください。GLB には glTF の PBR 材質として保存されます。ブラウザのプレビューは three.js の `MeshStandardMaterial` で同じ値を使い、環境マップなしの平行光と環境光で照らします。
 
-「プレビュー」で再計算します。プレビュー右上の表示切替で `Shading`（PBR 材質と照明）と `Wireframe`（テッセレーション後の三角形の辺）を切り替えられます。`Shading` の光は画面左上側からの平行光で、視点を回しても画面上の方向は固定です。切替時の再計算は不要です。描画には CDN から読み込む three.js 0.186.1 を使うため、ブラウザから `cdn.jsdelivr.net` へ接続できる必要があります。GLB は保存時にも同じソースから再計算するため、プレビュー後に編集した場合は最新の内容が保存されます。GLB は glTF 標準の Y-up 座標へ変換します。Python コードは任意のローカルコードとして実行されます。信頼できるコードだけを入力し、本ツールは `127.0.0.1` のみに公開してください。
+「プレビュー」で再計算します。プレビュー右上の表示切替で `Shading`（PBR 材質と照明）と `Wireframe`（テッセレーション後の三角形の辺）を切り替えられます。`Shading` の光は画面左上側からの平行光で、視点を回しても画面上の方向は固定です。切替時の再計算は不要です。描画には CDN から読み込む three.js 0.186.1 を使うため、ブラウザから `cdn.jsdelivr.net` へ接続できる必要があります。GLB は保存時にも同じソースから再計算するため、プレビュー後に編集した場合は最新の内容が保存されます。GLB は glTF 標準の Y-up 座標へ変換します。Python コードは任意のローカルコードとして実行されます。信頼できるコードだけを入力し、LAN公開時の注意事項は上の「ビルドと起動」を確認してください。
 
 ### 全プリミティブと材質のサンプル
 
@@ -275,7 +292,7 @@ PYTHONPATH="$PWD/.build/smlib-core:$PWD" \
   -m unittest discover -s tests -v
 PYTHONPYCACHEPREFIX=/tmp/cad-pycache \
   "$PWD/.packman-cache/python/3.12.14-macos-aarch64/bin/python3.12" \
-  -m py_compile modeler.py server.py json_to_glb.py
+  -m py_compile modeler.py server.py json_to_glb.py json_to_usdz.py
 node --check app.js
 node tests/test_model_file_ui.js
 ```

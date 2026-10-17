@@ -118,18 +118,19 @@ async function request(path){
   return response;
 }
 async function preview(){
-  $('preview').disabled=true;$('export').disabled=true;note('計算中…');
+  $('preview').disabled=true;$('export').disabled=true;$('export-usdz').disabled=true;note('計算中…');
   try{const data=await(await request('/preview')).json();currentMeshes=data.meshes;show(data.meshes);
     const triangles=data.meshes.reduce((n,m)=>n+m.positions.length/9,0);
     note(`${data.meshes.length} solid / ${triangles.toLocaleString()} triangles${data.log?'\n'+data.log:''}`);
-    $('export').disabled=false;
+    $('export').disabled=false;$('export-usdz').disabled=false;
   }catch(e){note(e.message,true);}finally{$('preview').disabled=false;}
 }
-async function exportGlb(){
-  $('export').disabled=true;note('GLB を生成中…');
-  try{const blob=await(await request('/export')).blob(),url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download='model.glb';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);note(`model.glb (${(blob.size/1024).toFixed(1)} KiB) を保存しました`);
-  }catch(e){note(e.message,true);}finally{$('export').disabled=false;}
+async function exportFile(format){
+  const id=format==='usdz'?'export-usdz':'export',name=`model.${format}`;
+  $(id).disabled=true;note(`${format.toUpperCase()} を生成中…`);
+  try{const blob=await(await request(format==='usdz'?'/export/usdz':'/export')).blob(),url=URL.createObjectURL(blob);
+    const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);note(`${name} (${(blob.size/1024).toFixed(1)} KiB) を保存しました`);
+  }catch(e){note(e.message,true);}finally{$(id).disabled=false;}
 }
 function modelDocument(){
   for(const id of ['chord','angle','finish-size']){
@@ -159,24 +160,24 @@ async function loadModel(file){
     $('chord').value=p.chord;$('angle').value=p.angle;
     $('finish').value=p.finish;$('finish-size').value=p.finishSize;
     $('finish-size').disabled=p.finish==='none';$('save-model').disabled=false;
-    $('export').disabled=true;
+    $('export').disabled=true;$('export-usdz').disabled=true;
   }catch(e){note(`JSONを読み込めません: ${e.message}`,true);return;}
   finally{$('model-file').value='';}
   await preview();
 }
-$('preview').onclick=preview;$('export').onclick=exportGlb;
+$('preview').onclick=preview;$('export').onclick=()=>exportFile('glb');$('export-usdz').onclick=()=>exportFile('usdz');
 $('save-model').onclick=saveModel;
 $('load-model').onclick=()=>$('model-file').click();
 $('model-file').onchange=e=>loadModel(e.target.files[0]);
 $('shading-mode').onchange=draw;
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
-$('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;};
+$('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;$('export-usdz').disabled=true;};
 $('example').onclick=()=>{
   if(['gallery','circular','sweeps','offsets'].includes($('sample').value)){
     $('mode').value='text';$('source').value=examples[$('sample').value]||'';
   }
   else $('source').value=examples[$('mode').value]||'';
-  $('export').disabled=true;
+  $('export').disabled=true;$('export-usdz').disabled=true;
 };
 $('source').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();preview();}});
 canvas.addEventListener('pointerdown',e=>{dragging=true;last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});

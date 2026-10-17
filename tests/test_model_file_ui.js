@@ -8,7 +8,7 @@ const values = {
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
   [id, {value, disabled: false, labels: [{textContent: id}], checkValidity: () => true}]));
-for (const id of ['message', 'status', 'preview', 'export', 'save-model', 'load-model', 'model-file', 'shading-mode', 'example']) {
+for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'example']) {
   elements[id] = elements[id] || {value: '', disabled: false};
 }
 elements.message.style = {};

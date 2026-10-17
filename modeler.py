@@ -1,4 +1,4 @@
-"""USD BRep script/command evaluator and dependency-free GLB writer."""
+"""USD BRep script/command evaluator and mesh exporters."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import math
 import re
 import struct
+import zipfile
 from contextlib import redirect_stdout
 
 
@@ -656,3 +657,73 @@ def to_glb(meshes):
     return (struct.pack("<4sII", b"glTF", 2, total) +
             struct.pack("<I4s", len(js), b"JSON") + js +
             struct.pack("<I4s", len(blob), b"BIN\0") + blob)
+
+
+def to_usdz(meshes):
+    """Package preview triangles and PBR materials as a Z-up USD stage."""
+    def triples(values):
+        if len(values) % 3 or not all(math.isfinite(float(v)) for v in values):
+            raise ValueError("Mesh vectors must contain finite triples")
+        return "[" + ", ".join(
+            "(" + ", ".join(format(float(v), ".9g") for v in values[i:i + 3]) + ")"
+            for i in range(0, len(values), 3)) + "]"
+
+    lines = ["#usda 1.0", "(", '    defaultPrim = "Model"', '    metersPerUnit = 1', '    upAxis = "Z"', ")",
+             'def Xform "Model"', "{", '    def Scope "Materials"', "    {"]
+    material_indices = {}
+    for mesh in meshes:
+        material = normalize_material(mesh.get("material", {}))
+        key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
+        if key in material_indices:
+            continue
+        index = len(material_indices)
+        material_indices[key] = index
+        color = "(" + ", ".join(format(v, ".9g") for v in material["baseColor"]) + ")"
+        lines.extend([
+            f'        def Material "Material_{index}"', "        {",
+            f'            token outputs:surface.connect = </Model/Materials/Material_{index}/PBR.outputs:surface>',
+            '            def Shader "PBR"', "            {",
+            '                uniform token info:id = "UsdPreviewSurface"',
+            f'                color3f inputs:diffuseColor = {color}',
+            f'                float inputs:metallic = {material["metallic"]:.9g}',
+            f'                float inputs:roughness = {material["roughness"]:.9g}',
+            '                token outputs:surface', "            }", "        }",
+        ])
+    lines.extend(["    }", '    def Xform "Geometry"', "    {"])
+    for index, mesh in enumerate(meshes):
+        positions, normals = mesh["positions"], mesh["normals"]
+        if not positions or len(positions) != len(normals) or len(positions) % 9:
+            raise ValueError("Mesh positions and normals must contain matching triangles")
+        material = normalize_material(mesh.get("material", {}))
+        key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
+        count = len(positions) // 3
+        bounds = [(min(positions[i::3]), max(positions[i::3])) for i in range(3)]
+        extent = triples([bounds[i][j] for j in range(2) for i in range(3)])
+        lines.extend([
+            f'        def Mesh "Mesh_{index}" (',
+            '            prepend apiSchemas = ["MaterialBindingAPI"]',
+            "        )", "        {",
+            f'            custom string sourceName = {json.dumps(mesh["name"], ensure_ascii=False)}',
+            f'            int[] faceVertexCounts = [{", ".join(["3"] * (count // 3))}]',
+            f'            int[] faceVertexIndices = [{", ".join(map(str, range(count)))}]',
+            f'            normal3f[] normals = {triples(normals)} (',
+            '                interpolation = "vertex"', "            )",
+            f'            point3f[] points = {triples(positions)}',
+            f'            float3[] extent = {extent}',
+            '            uniform token subdivisionScheme = "none"',
+            f'            rel material:binding = </Model/Materials/Material_{material_indices[key]}>',
+            "        }",
+        ])
+    lines.extend(["    }", "}", ""])
+    stage = "\n".join(lines).encode("utf-8")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED, allowZip64=False) as archive:
+        entry = zipfile.ZipInfo("model.usda")
+        entry.compress_type = zipfile.ZIP_STORED
+        # ZIP local header: 30 bytes + filename + extra. Align the file data.
+        padding = (-30 - len(entry.filename.encode("utf-8"))) % 64
+        if padding < 4:
+            padding += 64
+        entry.extra = struct.pack("<HH", 0, padding - 4) + bytes(padding - 4)
+        archive.writestr(entry, stage)
+    return buffer.getvalue()

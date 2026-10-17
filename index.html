@@ -16,7 +16,7 @@
 <div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span style="font-size:11px;color:#8faabb">度 · 大きいほど粗い</span></div>
 <div class="controls"><label for="finish">全体加工</label><select id="finish"><option value="none">なし</option><option value="chamfer">面取り</option><option value="fillet">丸め</option></select><label for="finish-size">幅/半径</label><input id="finish-size" type="number" min="0.001" step="any" value="1" disabled></div>
 <div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
-<div class="row"><button class="primary" id="preview" disabled>プレビュー</button><button id="export" disabled>GLB を保存</button></div>
+<div class="row"><button class="primary" id="preview" disabled>プレビュー</button><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
 <div id="message" role="status"></div>
 </aside><section id="viewport"><canvas id="canvas"></canvas><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option></select><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section></main>
 <script src="/app.js"></script></body></html>
