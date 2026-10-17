@@ -4,14 +4,16 @@
 
 ## ビルドと起動（Apple Silicon）
 
-このフォルダーで実行します。Python 3.12 と pybind11 2.11.1 が必要です。先の公式ビルド試行で Packman Python 3.12 は `.packman-cache/python/` に取得済みです。`Makefile` はそれを自動検出します。別の Python 3.12 を使う場合は `make PYTHON=/path/to/python3.12` を指定してください。
+このフォルダーで実行します。Python 3.12 と pybind11 2.11.1 が必要です。先の公式ビルド試行で Packman Python 3.12 は `.packman-cache/python/` に取得済みです。`Makefile` はそれを自動検出します。
 
 ```bash
 uv pip install --target .deps/pybind11 pybind11==2.11.1
 make start
 ```
 
-`make start` は必要なネイティブ拡張とローカルHTTPS証明書を用意してから、全IPv4インターフェース（`0.0.0.0`）でサーバーを起動します。このMacでは `https://127.0.0.1:8765`、同じLAN内の端末では `https://<MacのLAN内IPv4アドレス>:8765` を開きます。MacのIPv4アドレスは「システム設定 → ネットワーク」で確認できます。別のポートは `make start PORT=8766`、別の Python 3.12 は `make start PYTHON=/path/to/python3.12` で指定できます。停止は起動した端末で Ctrl+C を押します。`Makefile` はこのツールに必要な `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。公式の macOS 用 premake パッケージや OpenUSD は不要です。
+`make start` は必要なネイティブ拡張とローカルHTTPS証明書を用意し、全IPv4インターフェース（`0.0.0.0`）でサーバーを起動します。`make start-https` も同じ起動方法です。このMacでは `https://localhost:8765`、同じLAN内の端末では `https://<MacのLAN内IPv4アドレス>:8765` を開きます。MacのIPv4アドレスは「システム設定 → ネットワーク」で確認できます。停止は起動した端末で Ctrl+C を押します。
+
+ポートを変えるには `make start PORT=8766`、別の Python 3.12 を使うには `make start PYTHON=/path/to/python3.12` を指定します。HTTPが必要な場合は `make start-http` を使いますが、USDZ の `<model>` プレビューには信頼済みHTTPS接続が必要です。`Makefile` は `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。公式の macOS 用 premake パッケージや OpenUSD は不要です。
 
 このMacからのみアクセスできるようにする場合は、待ち受け先を明示します。
 
@@ -23,17 +25,11 @@ make start HOST=127.0.0.1
 
 ### HTTPS と USDZ の `<model>` プレビュー
 
-Safari の `<model>` 要素でプレビューするには、ローカルCAの証明書を信頼してHTTPSでアクセスします。`make start` と `make start-https` は同じHTTPS起動です。HTTPが必要な場合だけ `make start-http` を使います。
+初回起動時に `.certs/` にローカルCAとサーバー証明書を生成します。証明書には `localhost`、`127.0.0.1`、起動時に検出したMacのIPv4アドレスを含めます。別のLANアドレスを追加する場合は `make start CERT_IP=192.168.1.20` と指定してください。CAは保持し、必要なアドレスが増えた場合はサーバー証明書のみ更新します。
 
-```bash
-make start
-```
+接続するApple端末には `.certs/local-ca.mobileconfig` をAirDropなどで渡してインストールし、SSL/TLS用に信頼してください。iPhone・iPad・Vision Proではインストール後に「設定 → 一般 → 情報 → 証明書信頼設定」でルート証明書の完全な信頼を有効にします。Macでは `.certs/local-ca.crt` をキーチェーンに追加して信頼します。`.certs/local-ca.key` と `.certs/server.key` は共有しないでください。これらはGitの対象外です。
 
-初回起動時に `.certs/` にローカルCAとサーバー証明書を生成します。証明書には `localhost`、`127.0.0.1`、起動時に検出したMacのIPv4アドレスを含めます。別のLANアドレスを追加する場合は `make start-https CERT_IP=192.168.1.20` と指定してください。CAは保持し、必要なアドレスが増えた場合はサーバー証明書のみ更新します。Macでは `https://localhost:8765`、別端末では `https://<MacのLAN内IPv4アドレス>:8765` を開きます。
-
-接続するApple端末には `.certs/local-ca.mobileconfig` をAirDropなどで渡してインストールし、SSL/TLS用に信頼してください。iPhone・iPad・Vision Proではインストール後に「設定 → 一般 → 情報 → 証明書信頼設定」でルート証明書の完全な信頼を有効にします。Macでは `.certs/local-ca.crt` をキーチェーンに追加して信頼します。`.certs/local-ca.key` と `.certs/server.key` は共有しないでください。これらはGitの対象外です。HTTPSでも認証はないため、信頼できるLANでのみ利用してください。
-
-画面右側の「プレビュー方式」で「USDZ `<model>`」を選ぶと、現在のモデルをUSDZとして再計算し、同じサーバーから配信して表示します。「プレビュー」でも再計算できます。対応していないブラウザや信頼済みHTTPSでない接続ではWebGL表示を使ってください。`<model>` は対応版のSafariで動作し、表示・操作はブラウザ側に委ねられます。
+画面右側の「プレビュー方式」で「USDZ `<model>`」を選ぶと、現在のモデルを「保存時の座標倍率」を適用したUSDZとして再計算し、同じサーバーから配信して表示します。「プレビュー」でも再計算できます。対応していないブラウザや信頼済みHTTPSでない接続ではWebGL表示を使ってください。`<model>` は対応版のSafariで動作し、表示・操作はブラウザ側に委ねられます。
 
 ネイティブバインディングの確認:
 
@@ -49,7 +45,7 @@ PYTHONPATH="$PWD/.build/smlib-core" \
 
 「テキスト命令」は 1 行に 1 命令を書きます。`#` 以降はコメントです。単位は任意ですが、モデル内では統一してください。
 
-「保存ファイル名」に名前を入力してから JSON・GLB・USDZ の保存ボタンを押します。拡張子は形式に応じて自動で付きます。入力名の末尾が `.json`、`.glb`、`.usdz` の場合は、選んだ形式の拡張子に置き換えます。「保存時の座標倍率」に正の数値を入れると、GLB・USDZ の全頂点座標を原点基準でその倍率にして保存します。たとえばモデルの単位を mm としている場合、`0.001` で座標値を m に換算できます。倍率 `1` は従来と同じ座標値です。法線、テッセレーション精度、WebGL・USDZ プレビューには影響しません。「JSON を保存」を押すと、現在のテキスト命令またはPythonコードと、曲面精度・角度条件・全体加工・幅/半径・保存時の座標倍率を保存します。「JSON を読み込む」でそのファイルを選ぶと、入力モード・コード・各設定が復元され、自動でプレビューが更新され、保存ファイル名には読み込んだJSONの名前が入ります。JSON が壊れている場合や未対応の形式の場合は、編集中の内容を変更せずにエラーを表示します。
+「保存ファイル名」に名前を入力してから JSON・GLB・USDZ の保存ボタンを押します。拡張子は形式に応じて自動で付きます。入力名の末尾が `.json`、`.glb`、`.usdz` の場合は、選んだ形式の拡張子に置き換えます。「保存時の座標倍率」に正の数値を入れると、GLB・USDZ の全頂点座標を原点基準でその倍率にして保存し、USDZ `<model>` プレビューにも同じ倍率を適用します。たとえばモデルの単位を mm としている場合、`0.001` で座標値を m に換算できます。倍率 `1` は従来と同じ座標値です。法線、テッセレーション精度、WebGL プレビューには影響しません。「JSON を保存」を押すと、現在のテキスト命令またはPythonコードと、曲面精度・角度条件・全体加工・幅/半径・保存時の座標倍率を保存します。「JSON を読み込む」でそのファイルを選ぶと、入力モード・コード・各設定が復元され、自動でプレビューが更新され、保存ファイル名には読み込んだJSONの名前が入ります。JSON が壊れている場合や未対応の形式の場合は、編集中の内容を変更せずにエラーを表示します。
 
 ファイル形式は UTF-8 のJSONです。`format: "smlib-model"`、`version: 1`、`mode`（`"text"` または `"python"`）、`source`、`parameters` を持ちます。`parameters.exportScale` を持たない従来のJSONは倍率 `1` として扱います。PythonモードのJSONを読み込んでプレビューする場合や `make glb` / `make usdz` で変換する場合、保存されたPythonコードが実行されます。
 

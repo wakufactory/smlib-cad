@@ -160,9 +160,11 @@ for (const invalid of [
   assert.equal(elements['file-name'].value, nameBefore);
   assert.match(elements.message.textContent, /JSONを読み込めません/);
   context.preview = actualPreview;
+  elements['export-scale'].value = String(elements['export-scale'].value); // HTML input values are strings.
   elements['preview-mode'].value = 'model';
   await actualPreview();
-  assert.equal(exportPath, '/preview/usdz');
+  assert.equal(exportPath, '/preview/usdz', elements.message.textContent);
+  assert.equal(requestBody.exportScale, 2.5);
   assert.equal(elements['usd-model'].src, '/preview/assets/test.usdz');
   assert.equal(elements.canvas.hidden, true);
   assert.equal(elements['usd-model'].hidden, false);

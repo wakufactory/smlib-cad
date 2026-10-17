@@ -111,8 +111,9 @@ class ModelProcessTests(unittest.TestCase):
         request["exportScale"] = 0.5
         scaled_glb = run_model_request(request, "/export")
         self.assertNotEqual(scaled_glb, original_glb)
-        self.assertNotEqual(run_model_request(request, "/export/usdz"), original_preview)
-        self.assertEqual(run_model_request(request, "/preview/usdz"), original_preview)
+        scaled_usdz = run_model_request(request, "/export/usdz")
+        self.assertNotEqual(scaled_usdz, original_preview)
+        self.assertEqual(run_model_request(request, "/preview/usdz"), scaled_usdz)
         self.assertEqual(run_model_request(request, "/preview"), run_model_request({**request, "exportScale": 1}, "/preview"))
 
 

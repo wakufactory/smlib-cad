@@ -176,7 +176,7 @@ function show(meshes){
 }
 async function request(path){
   const data={mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
-  if(path==='/export' || path==='/export/usdz'){
+  if(path==='/export' || path==='/export/usdz' || path==='/preview/usdz'){
     if(!$('export-scale').checkValidity() || $('export-scale').value.trim()==='')throw Error('保存時の座標倍率は正の数値にしてください');
     data.exportScale=ModelFile.exportScale(Number($('export-scale').value));
   }
