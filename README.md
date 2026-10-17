@@ -4,16 +4,18 @@
 
 ## ビルドと起動（Apple Silicon）
 
-このフォルダーで実行します。Python 3.12 と pybind11 2.11.1 が必要です。先の公式ビルド試行で Packman Python 3.12 は `.packman-cache/python/` に取得済みです。`Makefile` はそれを自動検出します。
+このフォルダーで実行します。Xcode Command Line Tools、Python 3.12（開発用ヘッダーを含む）、`uv` と pybind11 2.11.1 が必要です。`Makefile` は `usd-brep` 内の `SMLib`・`SM_API`・`SmPyCore` のソースを直接コンパイルして、Python 拡張 `_smlib_core` を作ります。
 
 ```bash
 uv pip install --target .deps/pybind11 pybind11==2.11.1
 make start
 ```
 
+`Makefile` は `.packman-cache/python/` に Python 3.12 があればそれを再利用し、なければ PATH 上の `python3.12` を使います。別の Python 3.12 を使う場合は `make start PYTHON=/path/to/python3.12` を指定します。Packman・Premake・OpenUSD のインストールは、このツールのビルドには必要ありません。
+
 `make start` は必要なネイティブ拡張とローカルHTTPS証明書を用意し、全IPv4インターフェース（`0.0.0.0`）でサーバーを起動します。`make start-https` も同じ起動方法です。このMacでは `https://localhost:8765`、同じLAN内の端末では `https://<MacのLAN内IPv4アドレス>:8765` を開きます。MacのIPv4アドレスは「システム設定 → ネットワーク」で確認できます。停止は起動した端末で Ctrl+C を押します。
 
-ポートを変えるには `make start PORT=8766`、別の Python 3.12 を使うには `make start PYTHON=/path/to/python3.12` を指定します。HTTPが必要な場合は `make start-http` を使いますが、USDZ の `<model>` プレビューには信頼済みHTTPS接続が必要です。`Makefile` は `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。公式の macOS 用 premake パッケージや OpenUSD は不要です。
+ポートを変えるには `make start PORT=8766` を指定します。HTTPが必要な場合は `make start-http` を使いますが、USDZ の `<model>` プレビューには信頼済みHTTPS接続が必要です。`Makefile` は `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。以下のテスト・サンプル中の `python3.12` も、ビルドに使った Python の実行ファイルに合わせてください。
 
 このMacからのみアクセスできるようにする場合は、待ち受け先を明示します。
 
@@ -31,11 +33,11 @@ make start HOST=127.0.0.1
 
 画面右側の「プレビュー方式」で「USDZ `<model>`」を選ぶと、現在のモデルを「保存時の座標倍率」を適用したUSDZとして再計算し、同じサーバーから配信して表示します。「プレビュー」でも再計算できます。対応していないブラウザや信頼済みHTTPSでない接続ではWebGL表示を使ってください。`<model>` は対応版のSafariで動作し、表示・操作はブラウザ側に委ねられます。
 
-ネイティブバインディングの確認:
+ネイティブバインディングの確認（ビルドに使った Python 3.12 を指定）:
 
 ```bash
 PYTHONPATH="$PWD/.build/smlib-core" \
-  "$PWD/.packman-cache/python/3.12.14-macos-aarch64/bin/python3.12" \
+  python3.12 \
   -m unittest discover -s usd-brep/source/SmPyCore/tests -v
 ```
 
@@ -290,7 +292,7 @@ materials = {"result": {"baseColor": [0.85, 0.24, 0.12], "metallic": 0.65, "roug
 
 ```bash
 PYTHONPATH="$PWD/.build/smlib-core:$PWD" \
-  "$PWD/.packman-cache/python/3.12.14-macos-aarch64/bin/python3.12" \
+  python3.12 \
   examples/export_primitive_gallery.py
 ```
 
@@ -300,10 +302,10 @@ PYTHONPATH="$PWD/.build/smlib-core:$PWD" \
 
 ```bash
 PYTHONPATH="$PWD/.build/smlib-core:$PWD" \
-  "$PWD/.packman-cache/python/3.12.14-macos-aarch64/bin/python3.12" \
+  python3.12 \
   -m unittest discover -s tests -v
 PYTHONPYCACHEPREFIX=/tmp/cad-pycache \
-  "$PWD/.packman-cache/python/3.12.14-macos-aarch64/bin/python3.12" \
+  python3.12 \
   -m py_compile modeler.py server.py json_to_glb.py json_to_usdz.py
 node --check app.js
 node tests/test_model_file_ui.js
