@@ -1,14 +1,36 @@
 import importlib.util
 import io
 import json
+import ssl
 import unittest
+from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from server import Handler, ModelError, allowed_host, allowed_origin, run_model_request
+from server import Handler, ModelError, ModelHTTPServer, PreviewStore, allowed_host, allowed_origin, run_model_request
 
 
 class LanAccessTests(unittest.TestCase):
+    def test_only_certificate_rejection_logs_are_suppressed(self):
+        server = object.__new__(ModelHTTPServer)
+        with patch.object(ThreadingHTTPServer, "handle_error") as parent:
+            for reason in ("SSLV3_ALERT_CERTIFICATE_UNKNOWN", "TLSV1_ALERT_UNKNOWN_CA"):
+                error = ssl.SSLError(1, reason)
+                error.reason = reason
+                try:
+                    raise error
+                except ssl.SSLError:
+                    server.handle_error(None, ("127.0.0.1", 1234))
+            parent.assert_not_called()
+
+            error = ssl.SSLError(1, "WRONG_VERSION_NUMBER")
+            error.reason = "WRONG_VERSION_NUMBER"
+            try:
+                raise error
+            except ssl.SSLError:
+                server.handle_error(None, ("127.0.0.1", 1234))
+            parent.assert_called_once()
+
     def test_lan_and_explicit_localhost_hosts(self):
         port = 8765
         self.assertTrue(allowed_host("127.0.0.1:8765", "127.0.0.1", port))
@@ -32,6 +54,17 @@ class LanAccessTests(unittest.TestCase):
         self.assertTrue(allowed_origin("", host))
         self.assertFalse(allowed_origin("http://192.168.1.21:8765", host))
         self.assertFalse(allowed_origin("https://192.168.1.20:8765", host))
+        self.assertTrue(allowed_origin("https://192.168.1.20:8765", host, "https"))
+        self.assertFalse(allowed_origin("http://192.168.1.20:8765", host, "https"))
+
+    def test_preview_store_uses_bounded_opaque_urls(self):
+        store = PreviewStore(limit=2)
+        first = store.put(b"first")
+        second = store.put(b"second")
+        self.assertNotEqual(first, second)
+        self.assertEqual(store.get(first.split("/")[-1][:-5]), b"first")
+        store.put(b"third")
+        self.assertIsNone(store.get(first.split("/")[-1][:-5]))
 
 
 class ModelProcessTests(unittest.TestCase):
@@ -72,6 +105,7 @@ class ModelProcessTests(unittest.TestCase):
         self.assertGreater(len(result["meshes"][0]["positions"]), 0)
         self.assertEqual(run_model_request(request, "/export")[:4], b"glTF")
         self.assertEqual(run_model_request(request, "/export/usdz")[:2], b"PK")
+        self.assertEqual(run_model_request(request, "/preview/usdz")[:2], b"PK")
 
 
 if __name__ == "__main__":

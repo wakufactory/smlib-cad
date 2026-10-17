@@ -34,13 +34,30 @@ const ModelFile = (() => {
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
 const message = $('message');
+const usdModel = $('usd-model');
+const modelStatus = $('model-status');
 let examples = {}, currentMeshes = [], rendered = [], center = [0, 0, 0], radius = 20;
 let yaw = 0.72, pitch = 0.44, zoom = 2.8, dragging = false, last = [0, 0];
 let THREE, renderer, scene, camera;
 let viewportWidth = 0, viewportHeight = 0;
+let previewRequestId = 0;
 const cameraLightDirection = [-0.6, 0.8, 0.8]; // left, up, toward viewer
 
 function note(text, error = false) { message.textContent = text; message.style.color = error ? '#ff9b93' : '#9dd9c5'; }
+function modelModeError(){
+  if(location.protocol !== 'https:' || !window.isSecureContext)return 'USDZ <model> プレビューには信頼済みの HTTPS 接続が必要です';
+  if(!window.HTMLModelElement)return 'このブラウザは <model> 要素に対応していません';
+  return '';
+}
+function showPreviewMode(){
+  const native=$('preview-mode').value==='model';
+  canvas.hidden=native;
+  usdModel.hidden=!native;
+  modelStatus.hidden=!native;
+  $('shading-mode').hidden=native;
+  $('hint').hidden=native;
+  if(!native)draw();
+}
 function setupRenderer(){
   renderer = new THREE.WebGLRenderer({canvas, antialias: true});
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -118,12 +135,28 @@ async function request(path){
   return response;
 }
 async function preview(){
+  const requestId=++previewRequestId;
   $('preview').disabled=true;$('export').disabled=true;$('export-usdz').disabled=true;note('計算中…');
-  try{const data=await(await request('/preview')).json();currentMeshes=data.meshes;show(data.meshes);
-    const triangles=data.meshes.reduce((n,m)=>n+m.positions.length/9,0);
-    note(`${data.meshes.length} solid / ${triangles.toLocaleString()} triangles${data.log?'\n'+data.log:''}`);
+  try{
+    if($('preview-mode').value==='model'){
+      const error=modelModeError();if(error)throw Error(error);
+      showPreviewMode();usdModel.hidden=true;modelStatus.textContent='USDZ を生成中…';
+      const data=await(await request('/preview/usdz')).json();
+      if(requestId!==previewRequestId)return;
+      usdModel.src=data.url;usdModel.hidden=false;modelStatus.textContent='USDZ を読み込み中…';
+      if(usdModel.ready)await usdModel.ready;
+      if(requestId!==previewRequestId)return;
+      modelStatus.hidden=true;note('USDZ <model> プレビューを更新しました');
+    }else{
+      showPreviewMode();
+      const data=await(await request('/preview')).json();
+      if(requestId!==previewRequestId)return;
+      currentMeshes=data.meshes;show(data.meshes);
+      const triangles=data.meshes.reduce((n,m)=>n+m.positions.length/9,0);
+      note(`${data.meshes.length} solid / ${triangles.toLocaleString()} triangles${data.log?'\n'+data.log:''}`);
+    }
     $('export').disabled=false;$('export-usdz').disabled=false;
-  }catch(e){note(e.message,true);}finally{$('preview').disabled=false;}
+  }catch(e){if(requestId!==previewRequestId)return;if($('preview-mode').value==='model'){usdModel.hidden=true;modelStatus.textContent=e.message;modelStatus.hidden=false;}note(e.message,true);}finally{if(requestId===previewRequestId)$('preview').disabled=false;}
 }
 function saveFileName(format){
   const base=$('file-name').value.trim().replace(/\.(glb|usdz|json)$/i,'');
@@ -179,6 +212,13 @@ $('save-model').onclick=saveModel;
 $('load-model').onclick=()=>$('model-file').click();
 $('model-file').onchange=e=>loadModel(e.target.files[0]);
 $('shading-mode').onchange=draw;
+$('preview-mode').onchange=()=>{
+  if($('preview-mode').value==='model'){
+    const error=modelModeError();
+    if(error){$('preview-mode').value='webgl';showPreviewMode();note(error,true);return;}
+  }
+  showPreviewMode();preview();
+};
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
 $('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;$('export-usdz').disabled=true;};
 $('example').onclick=()=>{
@@ -203,5 +243,6 @@ new ResizeObserver(draw).observe(canvas);
   THREE=await import('https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js');
   setupRenderer();
   $('preview').disabled=false;
+  $('preview-mode').disabled=false;
   draw();
 })().catch(e=>note(e.message,true));

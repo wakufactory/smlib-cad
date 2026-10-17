@@ -11,7 +11,7 @@ uv pip install --target .deps/pybind11 pybind11==2.11.1
 make start
 ```
 
-`make start` は必要なネイティブ拡張をビルドしてから、全IPv4インターフェース（`0.0.0.0`）でサーバーを起動します。このMacでは `http://127.0.0.1:8765`、同じLAN内の端末では `http://<MacのLAN内IPv4アドレス>:8765` を開きます。MacのIPv4アドレスは「システム設定 → ネットワーク」で確認できます。別のポートは `make start PORT=8766`、別の Python 3.12 は `make start PYTHON=/path/to/python3.12` で指定できます。停止は起動した端末で Ctrl+C を押します。`Makefile` はこのツールに必要な `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。公式の macOS 用 premake パッケージや OpenUSD は不要です。
+`make start` は必要なネイティブ拡張とローカルHTTPS証明書を用意してから、全IPv4インターフェース（`0.0.0.0`）でサーバーを起動します。このMacでは `https://127.0.0.1:8765`、同じLAN内の端末では `https://<MacのLAN内IPv4アドレス>:8765` を開きます。MacのIPv4アドレスは「システム設定 → ネットワーク」で確認できます。別のポートは `make start PORT=8766`、別の Python 3.12 は `make start PYTHON=/path/to/python3.12` で指定できます。停止は起動した端末で Ctrl+C を押します。`Makefile` はこのツールに必要な `SMLib`、`SM_API`、`_smlib_core` を arm64 用の単一 Python 拡張に直接リンクします。公式の macOS 用 premake パッケージや OpenUSD は不要です。
 
 このMacからのみアクセスできるようにする場合は、待ち受け先を明示します。
 
@@ -19,7 +19,21 @@ make start
 make start HOST=127.0.0.1
 ```
 
-通常起動では、LANからアクセスした端末もPythonコードを実行できます。認証とHTTPSはないため、信頼できるLANだけで使い、ルーターのポート転送などでインターネットに公開しないでください。macOSのファイアウォールが接続を確認した場合は、利用するネットワークでの着信を許可する必要があります。
+通常起動では、LANからアクセスした端末もPythonコードを実行できます。認証はないため、信頼できるLANだけで使い、ルーターのポート転送などでインターネットに公開しないでください。macOSのファイアウォールが接続を確認した場合は、利用するネットワークでの着信を許可する必要があります。
+
+### HTTPS と USDZ の `<model>` プレビュー
+
+Safari の `<model>` 要素でプレビューするには、ローカルCAの証明書を信頼してHTTPSでアクセスします。`make start` と `make start-https` は同じHTTPS起動です。HTTPが必要な場合だけ `make start-http` を使います。
+
+```bash
+make start
+```
+
+初回起動時に `.certs/` にローカルCAとサーバー証明書を生成します。証明書には `localhost`、`127.0.0.1`、起動時に検出したMacのIPv4アドレスを含めます。別のLANアドレスを追加する場合は `make start-https CERT_IP=192.168.1.20` と指定してください。CAは保持し、必要なアドレスが増えた場合はサーバー証明書のみ更新します。Macでは `https://localhost:8765`、別端末では `https://<MacのLAN内IPv4アドレス>:8765` を開きます。
+
+接続するApple端末には `.certs/local-ca.mobileconfig` をAirDropなどで渡してインストールし、SSL/TLS用に信頼してください。iPhone・iPad・Vision Proではインストール後に「設定 → 一般 → 情報 → 証明書信頼設定」でルート証明書の完全な信頼を有効にします。Macでは `.certs/local-ca.crt` をキーチェーンに追加して信頼します。`.certs/local-ca.key` と `.certs/server.key` は共有しないでください。これらはGitの対象外です。HTTPSでも認証はないため、信頼できるLANでのみ利用してください。
+
+画面右側の「プレビュー方式」で「USDZ `<model>`」を選ぶと、現在のモデルをUSDZとして再計算し、同じサーバーから配信して表示します。「プレビュー」でも再計算できます。対応していないブラウザや信頼済みHTTPSでない接続ではWebGL表示を使ってください。`<model>` は対応版のSafariで動作し、表示・操作はブラウザ側に委ねられます。
 
 ネイティブバインディングの確認:
 

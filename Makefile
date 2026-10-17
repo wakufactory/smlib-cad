@@ -19,14 +19,23 @@ CXXFLAGS := -std=c++17 -O1 -fPIC -arch arm64 -MMD -MP -Wno-inconsistent-missing-
 MODEL ?= model.json
 PORT ?= 8765
 HOST ?= 0.0.0.0
+CERT_DIR ?= .certs
 
 -include $(SMLIB_OBJ:.o=.d) $(SMAPI_OBJ:.o=.d) $(CORE_OBJ:.o=.d)
 
-.PHONY: all clean glb usdz start
+.PHONY: all clean glb usdz start start-http start-https cert
 all: $(OUTPUT)
 
-start: $(OUTPUT)
+start: start-https
+
+start-http: $(OUTPUT)
 	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT)
+
+cert:
+	@$(PYTHON) local_cert.py --dir "$(CERT_DIR)" $(if $(CERT_IP),--ip "$(CERT_IP)")
+
+start-https: $(OUTPUT) cert
+	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT) --cert "$(CERT_DIR)/server.crt" --key "$(CERT_DIR)/server.key"
 
 glb: $(OUTPUT)
 	@$(PYTHON) json_to_glb.py "$(MODEL)" $(if $(GLB),-o "$(GLB)")

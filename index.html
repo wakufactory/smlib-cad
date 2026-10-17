@@ -12,6 +12,10 @@ aside{overflow-y:auto;overscroll-behavior:none}
 textarea,#message{overscroll-behavior:none}
 canvas{touch-action:none}
 @media(max-width:800px){main{height:calc(100dvh - 48px);grid-template-rows:minmax(0,48%) minmax(0,1fr)}}
+#preview-mode{position:absolute;top:14px;left:16px;z-index:1;background:#152538dd}
+#usd-model{display:block;width:100%;height:100%}
+canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#hint[hidden]{display:none}
+#model-status{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:#adc2d0;pointer-events:none}
 </style>
 </head>
 <body><header><h1>SMLib Modeler</h1><span id="status">ライブラリを確認中…</span></header>
@@ -26,5 +30,5 @@ canvas{touch-action:none}
 <div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
 <div class="row"><button class="primary" id="preview" disabled>プレビュー</button><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
 <div id="message" role="status"></div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option></select><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section></main>
+</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option></select><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section></main>
 <script src="/app.js"></script></body></html>

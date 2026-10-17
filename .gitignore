@@ -4,4 +4,5 @@ __pycache__/
 .build/
 .deps/
 .packman-cache/
+.certs/
 .DS_Store

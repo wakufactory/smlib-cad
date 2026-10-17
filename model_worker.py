@@ -19,7 +19,7 @@ def main(request_path: str, output_path: str, error_path: str) -> None:
         objects = apply_finish(objects, sm, request.get("finish", "none"), request.get("finishSize", 1))
         meshes = tessellate(objects, sm, float(request.get("chord", 0.08)),
                             angle=float(request.get("angle", 20)), materials=materials)
-        if request["path"] == "/export/usdz":
+        if request["path"] in ("/export/usdz", "/preview/usdz"):
             data = to_usdz(meshes)
         elif request["path"] == "/export":
             data = to_glb(meshes)

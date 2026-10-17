@@ -8,9 +8,11 @@ const values = {
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
   [id, {value, disabled: false, labels: [{textContent: id}], checkValidity: () => true}]));
-for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'example']) {
+for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'usd-model', 'model-status', 'hint', 'example']) {
   elements[id] = elements[id] || {value: '', disabled: false};
 }
+elements['preview-mode'].value = 'webgl';
+elements['usd-model'].ready = Promise.resolve();
 elements.message.style = {};
 elements.source.addEventListener = () => {};
 elements.canvas = {getContext: () => null, addEventListener() {}};
@@ -24,7 +26,13 @@ const context = vm.createContext({
     createElement: () => ({click() {downloadName = this.download;}})
   },
   ResizeObserver: class {observe() {}},
+  location: {protocol: 'https:'},
+  window: {isSecureContext: true, HTMLModelElement: class {}},
   fetch: async path => {
+    if (allowExport && path === '/preview/usdz') {
+      exportPath = path;
+      return {ok: true, json: async () => ({url: '/preview/assets/test.usdz'})};
+    }
     if (allowExport && (path === '/export' || path === '/export/usdz')) {
       exportPath = path;
       return {ok: true, blob: async () => new Blob(['test'])};
@@ -48,6 +56,7 @@ for (const [sample, source] of [
 elements.source.value = values.source;
 elements.sample.value = 'default';
 let previewCalls = 0;
+const actualPreview = context.preview;
 context.preview = async () => {previewCalls++;};
 
 const document = {
@@ -129,5 +138,17 @@ for (const invalid of [
   assert.equal(elements.source.value, before);
   assert.equal(elements['file-name'].value, nameBefore);
   assert.match(elements.message.textContent, /JSONを読み込めません/);
+  context.preview = actualPreview;
+  elements['preview-mode'].value = 'model';
+  await actualPreview();
+  assert.equal(exportPath, '/preview/usdz');
+  assert.equal(elements['usd-model'].src, '/preview/assets/test.usdz');
+  assert.equal(elements.canvas.hidden, true);
+  assert.equal(elements['usd-model'].hidden, false);
+  context.location.protocol = 'http:';
+  elements['preview-mode'].onchange();
+  assert.equal(elements['preview-mode'].value, 'webgl');
+  assert.equal(elements.canvas.hidden, false);
+  assert.match(elements.message.textContent, /HTTPS/);
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});
