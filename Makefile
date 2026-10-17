@@ -23,8 +23,14 @@ CERT_DIR ?= .certs
 
 -include $(SMLIB_OBJ:.o=.d) $(SMAPI_OBJ:.o=.d) $(CORE_OBJ:.o=.d)
 
-.PHONY: all clean glb usdz start start-http start-https cert
+.PHONY: all clean glb usdz start start-http start-https cert test-pole-normals
 all: $(OUTPUT)
+
+$(BUILD_DIR)/test-pole-normals: usd-brep/tests/SM_API_test/src/TestSmTessellationPoleNormals.cpp usd-brep/tests/SM_API_test/inc/SM_API_test.h $(SMLIB_OBJ) $(SMAPI_OBJ)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -Iusd-brep/tests/SM_API_test/inc -DSM_TESS_POLE_TEST_STANDALONE $< $(SMLIB_OBJ) $(SMAPI_OBJ) -o $@
+
+test-pole-normals: $(BUILD_DIR)/test-pole-normals
+	@$(BUILD_DIR)/test-pole-normals
 
 start: start-https
 

@@ -14,11 +14,12 @@ aside{overflow-y:auto;overscroll-behavior:none}
 textarea,#message{overscroll-behavior:none}
 canvas{touch-action:none}
 @media(max-width:800px){main{height:calc(100dvh - 48px);grid-template-rows:minmax(0,48%) minmax(0,1fr)}}
+#viewport{background-color:#0e1a26}
 #preview-mode{position:absolute;top:14px;left:16px;z-index:1;background:#152538dd}
 #view-controls{position:absolute;top:56px;right:16px;z-index:1;display:flex;gap:12px;align-items:center;padding:7px 10px;border:1px solid #36516a;border-radius:6px;background:#152538dd}
 #view-controls label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}
 #view-controls input{margin:0;padding:0;accent-color:#57b7d9}
-#usd-model{display:block;width:100%;height:100%}
+#usd-model{display:block;width:100%;height:100%;background-color:#0e1a26}
 canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#view-controls[hidden],#hint[hidden]{display:none}
 #model-status{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:#adc2d0;pointer-events:none}
 </style>

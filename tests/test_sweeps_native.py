@@ -84,6 +84,43 @@ class SweepIntegrationTests(unittest.TestCase):
             self.assertAlmostEqual(min(mesh["positions"][j::3]), bounds[0], delta=1e-7)
             self.assertAlmostEqual(max(mesh["positions"][j::3]), bounds[1], delta=1e-7)
 
+    def test_revolve_cone_tip_has_directional_corner_normals(self):
+        profile = sm.create_profile([(0, -2), (9, 2), (9, 10), (5, 12)])
+        for axis, xdir in (((0, 0, 1), (1, 0, 0)), ((1, 0, 0), (0, 1, 0))):
+            for start, end in ((0, 360), (30, 270)):
+                origin = (0, 0, -5)
+                solid = sm.create_revolve(profile, origin, start, end, axis=axis, xdir=xdir)
+                mesh = tessellate({"shape": solid}, sm)[0]
+                xyz, normals = mesh["positions"], mesh["normals"]
+                counts = {"inner": 0, "bottom": 0}
+                for i in range(0, len(xyz), 9):
+                    points = [xyz[j:j + 3] for j in (i, i + 3, i + 6)]
+                    relative = [[p[j] - origin[j] for j in range(3)] for p in points]
+                    heights = [sum(p[j]*axis[j] for j in range(3)) for p in relative]
+                    radial = [[p[j] - h*axis[j] for j in range(3)] for p, h in zip(relative, heights)]
+                    radii = [math.sqrt(sum(x*x for x in p)) for p in radial]
+                    if min(radii) > 1e-8:
+                        continue
+                    # Both conical sheets meet at the same apex but have
+                    # different slopes and opposite material-facing normals.
+                    for name, slope, sign in (("inner", 5/14, -1), ("bottom", 9/4, 1)):
+                        if not all(abs(r - (h + 2)*slope) < 1e-6 for r, h in zip(radii, heights)):
+                            continue
+                        direction = [sum(v[j] for v, r in zip(radial, radii) if r > 1e-8) for j in range(3)]
+                        length = math.sqrt(sum(v*v for v in direction))
+                        for corner, r in enumerate(radii):
+                            expected = [sign * ((direction[j]/length if r < 1e-8 else radial[corner][j]/r)
+                                                - slope*axis[j]) / math.sqrt(1 + slope*slope) for j in range(3)]
+                            actual = normals[i + corner*3:i + corner*3 + 3]
+                            with self.subTest(axis=axis, start=start, face=name, apex=r < 1e-8):
+                                self.assertGreater(sum(a*b for a, b in zip(expected, actual)), 0.99999)
+                            if r < 1e-8:
+                                counts[name] += 1
+                self.assertTrue(all(count > 0 for count in counts.values()))
+                self.assertAlmostEqual(mesh_volume(mesh), 740*math.pi*(end-start)/360,
+                                       delta=740*math.pi*0.015)
+                self.assertEqual(to_glb([mesh])[:4], b"glTF")
+
     def test_boolean_and_finishing(self):
         profile = sm.create_profile([(0, 0), (4, 0), (4, 3), (0, 3)])
         body = sm.create_extrude(profile, (0, 0, 0), 0, 2)
