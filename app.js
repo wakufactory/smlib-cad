@@ -125,10 +125,17 @@ async function preview(){
     $('export').disabled=false;$('export-usdz').disabled=false;
   }catch(e){note(e.message,true);}finally{$('preview').disabled=false;}
 }
+function saveFileName(format){
+  const base=$('file-name').value.trim().replace(/\.(glb|usdz|json)$/i,'');
+  if(!base || base==='.' || base==='..' || /[\\/:*?"<>|\x00-\x1f]/.test(base) || base.endsWith('.')){
+    throw Error('保存ファイル名を入力してください（パスや使用できない文字は含められません）');
+  }
+  return `${base}.${format}`;
+}
 async function exportFile(format){
-  const id=format==='usdz'?'export-usdz':'export',name=`model.${format}`;
+  const id=format==='usdz'?'export-usdz':'export';
   $(id).disabled=true;note(`${format.toUpperCase()} を生成中…`);
-  try{const blob=await(await request(format==='usdz'?'/export/usdz':'/export')).blob(),url=URL.createObjectURL(blob);
+  try{const name=saveFileName(format),blob=await(await request(format==='usdz'?'/export/usdz':'/export')).blob(),url=URL.createObjectURL(blob);
     const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);note(`${name} (${(blob.size/1024).toFixed(1)} KiB) を保存しました`);
   }catch(e){note(e.message,true);}finally{$(id).disabled=false;}
 }
@@ -144,11 +151,12 @@ function modelDocument(){
 }
 function saveModel(){
   try{
+    const name=saveFileName('json');
     const data=modelDocument();
     const blob=new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');
-    a.href=url;a.download='model.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-    note('model.json を保存しました');
+    a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    note(`${name} を保存しました`);
   }catch(e){note(e.message,true);}
 }
 async function loadModel(file){
@@ -159,6 +167,7 @@ async function loadModel(file){
     $('mode').value=data.mode;$('sample').value='default';$('source').value=data.source;
     $('chord').value=p.chord;$('angle').value=p.angle;
     $('finish').value=p.finish;$('finish-size').value=p.finishSize;
+    if(file.name && /\.json$/i.test(file.name))$('file-name').value=file.name.replace(/\.json$/i,'');
     $('finish-size').disabled=p.finish==='none';$('save-model').disabled=false;
     $('export').disabled=true;$('export-usdz').disabled=true;
   }catch(e){note(`JSONを読み込めません: ${e.message}`,true);return;}

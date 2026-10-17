@@ -5,6 +5,13 @@
 <title>SMLib Modeler</title>
 <style>
 :root{font-family:system-ui,sans-serif;color:#dbe8f0;background:#0d1521}*{box-sizing:border-box}body{margin:0}header{height:56px;display:flex;align-items:center;gap:16px;padding:0 20px;border-bottom:1px solid #2c4154}h1{font-size:17px;margin:0}#status{font-size:12px;color:#96aabb}main{height:calc(100vh - 56px);display:grid;grid-template-columns:minmax(330px,420px) 1fr}aside{padding:18px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #2c4154;min-height:0}label{font-size:12px;color:#adc2d0}select,button,input{font:inherit}select,input{background:#152538;color:#dbe8f0;border:1px solid #36516a;border-radius:6px;padding:8px}textarea{flex:1;min-height:180px;resize:none;background:#101f2e;color:#e0eff7;border:1px solid #36516a;border-radius:8px;padding:14px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4}button{border:1px solid #416783;color:#dcecf6;background:#1b344a;border-radius:6px;padding:9px 12px;cursor:pointer}button.primary{background:#1784ab;border-color:#32a5ca;color:white}button:disabled{opacity:.45;cursor:default}.row{display:flex;gap:8px;align-items:center}.row button{flex:1}.row select{min-width:0;flex:1}#example{flex:0 0 auto}#message{font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;max-height:100px;color:#e7ad90}#viewport{position:relative;min-width:0;overflow:hidden}canvas{width:100%;height:100%;display:block}#shading-mode{position:absolute;top:14px;right:16px;background:#152538dd;z-index:1}#hint{position:absolute;bottom:14px;left:16px;font-size:12px;color:#a5bdc9;pointer-events:none}.controls{display:flex;gap:8px;align-items:center}.controls input{width:90px}@media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:48vh 1fr}aside{border-right:0;border-bottom:1px solid #2c4154;padding:10px}header{height:48px}main{height:calc(100vh - 48px)}}
+html,body{width:100%;height:100%;overflow:hidden;overscroll-behavior:none}
+body{position:fixed;inset:0;height:100dvh}
+main{height:calc(100dvh - 56px);min-height:0;overflow:hidden}
+aside{overflow-y:auto;overscroll-behavior:none}
+textarea,#message{overscroll-behavior:none}
+canvas{touch-action:none}
+@media(max-width:800px){main{height:calc(100dvh - 48px);grid-template-rows:minmax(0,48%) minmax(0,1fr)}}
 </style>
 </head>
 <body><header><h1>SMLib Modeler</h1><span id="status">ライブラリを確認中…</span></header>
@@ -15,6 +22,7 @@
 <div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span style="font-size:11px;color:#8faabb">小さいほど滑らか</span></div>
 <div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span style="font-size:11px;color:#8faabb">度 · 大きいほど粗い</span></div>
 <div class="controls"><label for="finish">全体加工</label><select id="finish"><option value="none">なし</option><option value="chamfer">面取り</option><option value="fillet">丸め</option></select><label for="finish-size">幅/半径</label><input id="finish-size" type="number" min="0.001" step="any" value="1" disabled></div>
+<div class="row"><label for="file-name">保存ファイル名</label><input id="file-name" type="text" value="model" placeholder="model" style="flex:1;min-width:0"><span style="font-size:11px;color:#8faabb">拡張子は自動</span></div>
 <div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
 <div class="row"><button class="primary" id="preview" disabled>プレビュー</button><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
 <div id="message" role="status"></div>

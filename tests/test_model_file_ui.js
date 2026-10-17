@@ -4,7 +4,7 @@ const vm = require('node:vm');
 
 const values = {
   mode: 'text', source: 'box first 0 0 0 1 1 1', chord: '0.08', angle: '20',
-  finish: 'none', 'finish-size': '1', sample: 'default'
+  finish: 'none', 'finish-size': '1', sample: 'default', 'file-name': 'model'
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
   [id, {value, disabled: false, labels: [{textContent: id}], checkValidity: () => true}]));
@@ -15,6 +15,7 @@ elements.message.style = {};
 elements.source.addEventListener = () => {};
 elements.canvas = {getContext: () => null, addEventListener() {}};
 let savedBlob, downloadName;
+let exportPath, allowExport = false;
 const context = vm.createContext({
   Blob, console, setTimeout: () => {},
   URL: {createObjectURL(blob) {savedBlob = blob; return 'blob:test';}, revokeObjectURL() {}},
@@ -23,7 +24,13 @@ const context = vm.createContext({
     createElement: () => ({click() {downloadName = this.download;}})
   },
   ResizeObserver: class {observe() {}},
-  fetch: async () => {throw Error('No server request expected');}
+  fetch: async path => {
+    if (allowExport && (path === '/export' || path === '/export/usdz')) {
+      exportPath = path;
+      return {ok: true, blob: async () => new Blob(['test'])};
+    }
+    throw Error('No server request expected');
+  }
 });
 vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
 const ModelFile = vm.runInContext('ModelFile', context);
@@ -66,6 +73,25 @@ for (const invalid of [
   elements['finish-size'].value = '0.5';
   elements['save-model'].onclick();
   assert.equal(downloadName, 'model.json');
+  elements['file-name'].value = 'engine block.glb';
+  elements['save-model'].onclick();
+  assert.equal(downloadName, 'engine block.json');
+  allowExport = true;
+  await elements.export.onclick();
+  assert.equal(exportPath, '/export');
+  assert.equal(downloadName, 'engine block.glb');
+  await elements['export-usdz'].onclick();
+  assert.equal(exportPath, '/export/usdz');
+  assert.equal(downloadName, 'engine block.usdz');
+  elements['file-name'].value = '  ';
+  exportPath = undefined;
+  await elements['export-usdz'].onclick();
+  assert.equal(exportPath, undefined);
+  assert.match(elements.message.textContent, /保存ファイル名/);
+  elements['file-name'].value = 'folder/model';
+  assert.throws(() => context.saveFileName('glb'), /保存ファイル名/);
+  elements['file-name'].value = 'model';
+  elements['save-model'].onclick();
   const json = await savedBlob.text();
   elements.source.value = 'box changed 0 0 0 2 2 2';
   elements.chord.value = '0.8';
@@ -77,6 +103,7 @@ for (const invalid of [
   assert.equal(elements.finish.value, 'fillet');
   assert.equal(elements['finish-size'].value, 0.5);
   assert.equal(elements['finish-size'].disabled, false);
+  assert.equal(elements['file-name'].value, 'model');
 
   const pythonSource = 'result = sm.create_box((0, 0, 0), 2, 3, 4)\n';
   for (const id of ['chord', 'angle', 'finish-size']) elements[id].value = String(elements[id].value);
@@ -93,11 +120,14 @@ for (const invalid of [
   assert.equal(elements.mode.value, 'python');
   assert.equal(elements.source.value, pythonSource);
   assert.equal(previewCalls, 2);
+  assert.equal(elements['file-name'].value, 'python');
 
   const before = elements.source.value;
+  const nameBefore = elements['file-name'].value;
   await context.loadModel({name: 'bad.json', size: 4, text: async () => '{bad'});
   assert.equal(previewCalls, 2);
   assert.equal(elements.source.value, before);
+  assert.equal(elements['file-name'].value, nameBefore);
   assert.match(elements.message.textContent, /JSONを読み込めません/);
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

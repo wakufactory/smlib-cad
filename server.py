@@ -5,13 +5,44 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import subprocess
+import sys
+import tempfile
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from modeler import EXAMPLE_SCRIPT, EXAMPLE_TEXT, apply_finish, evaluate, tessellate, to_glb, to_usdz
+from modeler import EXAMPLE_SCRIPT, EXAMPLE_TEXT
 
 ROOT = Path(__file__).resolve().parent
+
+
+class ModelError(Exception):
+    def __init__(self, error: str, details: str = ""):
+        super().__init__(error)
+        self.details = details
+
+
+def run_model_request(request: dict, path: str) -> bytes:
+    """Keep native kernel faults in a disposable process for each request."""
+    with tempfile.TemporaryDirectory(prefix="cad-model-") as directory:
+        work = Path(directory)
+        request_path, output_path, error_path = (work / name for name in ("request.json", "output", "error.json"))
+        request_path.write_text(json.dumps({**request, "path": path}), encoding="utf-8")
+        try:
+            completed = subprocess.run(
+                [sys.executable, str(ROOT / "model_worker.py"), str(request_path), str(output_path), str(error_path)],
+                capture_output=True, timeout=120, check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ModelError("形状計算が時間内に完了しませんでした") from exc
+        if error_path.exists():
+            failure = json.loads(error_path.read_text(encoding="utf-8"))
+            raise ModelError(failure["error"], failure["traceback"])
+        if completed.returncode or not output_path.exists():
+            hint = "全体加工の幅/半径を小さくして再試行してください。" if request.get("finish") != "none" else "入力形状を確認してください。"
+            raise ModelError(f"形状計算が異常終了しました。{hint}")
+        return output_path.read_bytes()
 
 
 def allowed_host(host_header: str, bind_host: str, port: int) -> bool:
@@ -87,14 +118,9 @@ class Handler(BaseHTTPRequestHandler):
             source = request["source"]
             if not isinstance(source, str):
                 raise ValueError("source must be text")
-            import _smlib_core as sm
-            objects, materials, log = evaluate(source, request.get("mode", "python"), sm)
-            objects = apply_finish(objects, sm, request.get("finish", "none"), request.get("finishSize", 1))
-            meshes = tessellate(objects, sm, float(request.get("chord", 0.08)),
-                                angle=float(request.get("angle", 20)), materials=materials)
+            data = run_model_request(request, self.path)
             if self.path in ("/export", "/export/usdz"):
                 usdz = self.path == "/export/usdz"
-                data = to_usdz(meshes) if usdz else to_glb(meshes)
                 self.send_response(200)
                 self.send_header("Content-Type", "model/vnd.usdz+zip" if usdz else "model/gltf-binary")
                 self.send_header("Content-Disposition", 'attachment; filename="model.usdz"' if usdz else 'attachment; filename="model.glb"')
@@ -102,7 +128,9 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
             else:
-                self._json(200, {"meshes": meshes, "log": log})
+                self._reply(200, data, "application/json; charset=utf-8")
+        except ModelError as exc:
+            self._json(400, {"error": str(exc), "traceback": exc.details})
         except Exception as exc:
             self._json(400, {"error": str(exc), "traceback": traceback.format_exc(limit=5)})
 
