@@ -1,0 +1,15 @@
+# Flanged bearing housing. Arbitrary millimetre-like units.
+# Revolved stepped seat with four mounting holes.
+profile section
+  polygon 8 0  26 0  26 6  17 6  17 18  12 18  12 14  8 14
+end
+revolve body section 0 0 0 0 360
+cylinder hole_1 14.8492 14.8492 -1 2.4 8
+subtract body body hole_1
+cylinder hole_2 -14.8492 14.8492 -1 2.4 8
+subtract body body hole_2
+cylinder hole_3 -14.8492 -14.8492 -1 2.4 8
+subtract body body hole_3
+cylinder hole_4 14.8492 -14.8492 -1 2.4 8
+subtract body body hole_4
+material body 0.42 0.48 0.53 0.82 0.34

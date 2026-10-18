@@ -1,0 +1,13 @@
+# Eccentric cam. Arbitrary millimetre-like units.
+# Revolved hub joined to an offset cam lobe, bored for shaft and timing pin.
+profile section
+  polygon 5 0  15 0  15 5  11 5  11 13  5 13
+end
+revolve body section 0 0 0 0 360
+cylinder eccentric_lobe 9 0 0 15 5
+union body body eccentric_lobe
+cylinder shaft_bore 0 0 -1 5 15
+subtract body body shaft_bore
+cylinder timing_hole 20 0 -1 2.5 7
+subtract body body timing_hole
+material body 0.63 0.43 0.28 0.82 0.34

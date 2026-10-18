@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import ast
 import json
 import math
 import re
@@ -102,20 +103,171 @@ def normalize_materials(materials, objects):
     return {name: normalize_material(value) for name, value in materials.items()}
 
 
-def _extract_parts(lines, parts, line_offset, in_part):
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
+_INTERPOLATION = re.compile(r"\$\{([^{}]+)\}")
+
+
+def _number_expression(source, variables):
+    """Evaluate the small numeric expression language without Python eval."""
+    try:
+        tree = ast.parse(source, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"invalid expression: {source}") from exc
+
+    def visit(node, depth=0):
+        if depth > 32:
+            raise ValueError("expression is too deeply nested")
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            value = node.value
+        elif isinstance(node, ast.Name):
+            if node.id not in variables:
+                raise ValueError(f"unknown variable: {node.id}")
+            value = variables[node.id]
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = visit(node.operand, depth + 1)
+            if isinstance(node.op, ast.USub):
+                value = -value
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            left, right = visit(node.left, depth + 1), visit(node.right, depth + 1)
+            try:
+                value = {ast.Add: lambda: left + right, ast.Sub: lambda: left - right,
+                         ast.Mult: lambda: left * right, ast.Div: lambda: left / right}[type(node.op)]()
+            except (ZeroDivisionError, OverflowError) as exc:
+                raise ValueError(f"invalid arithmetic: {exc}") from exc
+        else:
+            raise ValueError("only numbers, variables, +, -, *, /, and parentheses are allowed")
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise ValueError("expression result must be finite")
+        return value
+
+    return visit(tree.body)
+
+
+def _expand_text(line, variables):
+    def replace(match):
+        value = _number_expression(match.group(1), variables)
+        return str(int(value)) if isinstance(value, int) or value.is_integer() else format(value, ".15g")
+    code, separator, comment = line.partition("#")
+    result = _INTERPOLATION.sub(replace, code)
+    if "${" in result:
+        raise ValueError("unclosed or nested ${expression}")
+    return result + separator + comment
+
+
+def _expand_commands(records, inherited, counter, depth=0):
+    """Expand variables and loops, preserving source lines and use-site environments."""
+    if depth > 32:
+        raise ValueError("loop nesting limit exceeded (32)")
+    output = []
+    scopes = [dict(inherited)]
+    definitions = [set()]
+    blocks = []
+    index = 0
+    while index < len(records):
+        line_number, raw = records[index]
+        line = raw.partition("#")[0].strip()
+        words = line.split(None, 1)
+        op = words[0].lower() if words else ""
+        try:
+            if op == "let":
+                match = re.fullmatch(r"let\s+([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.+)", line, re.I)
+                if not match:
+                    raise ValueError("let: expected name = expression")
+                name = match.group(1)
+                if name in definitions[-1]:
+                    raise ValueError(f"duplicate variable: {name}")
+                scopes[-1][name] = _number_expression(match.group(2), scopes[-1])
+                definitions[-1].add(name)
+            elif op == "for":
+                match = re.fullmatch(r"for\s+([A-Za-z_][A-Za-z_0-9]*)\s+in\s+range\((.*)\)", line, re.I)
+                if not match:
+                    raise ValueError("for: expected name in range(count) or range(start, stop[, step])")
+                name = match.group(1)
+                if name in scopes[-1]:
+                    raise ValueError(f"loop variable already defined: {name}")
+                values = [_number_expression(part.strip(), scopes[-1]) for part in match.group(2).split(",")]
+                if not 1 <= len(values) <= 3 or any(not float(value).is_integer() for value in values):
+                    raise ValueError("range arguments must be one to three integers")
+                if len(values) == 1:
+                    start, stop, step = 0, int(values[0]), 1
+                elif len(values) == 2:
+                    start, stop, step = int(values[0]), int(values[1]), 1
+                else:
+                    start, stop, step = map(int, values)
+                if step == 0:
+                    raise ValueError("range step must not be zero")
+                iteration = range(start, stop, step)
+                try:
+                    iteration_count = len(iteration)
+                except OverflowError:
+                    iteration_count = 513
+                if iteration_count > 512:
+                    raise ValueError("loop iteration limit exceeded (512)")
+                depth = 0
+                end = index + 1
+                while end < len(records):
+                    inner = records[end][1].partition("#")[0].split()
+                    inner_op = inner[0].lower() if inner else ""
+                    if inner_op in ("for", "group", "profile"):
+                        depth += 1
+                    elif inner_op == "end":
+                        if depth == 0:
+                            break
+                        depth -= 1
+                    end += 1
+                if end == len(records):
+                    raise ValueError("for has no end")
+                if records[end][1].partition("#")[0].strip().lower() != "end":
+                    raise ValueError("end takes no arguments")
+                body = records[index + 1:end]
+                for value in iteration:
+                    nested = dict(scopes[-1])
+                    nested[name] = value
+                    try:
+                        output.extend(_expand_commands(body, nested, counter, depth + 1))
+                    except ValueError as exc:
+                        raise ValueError(f"for {name}={value}: {exc}") from exc
+                index = end
+            else:
+                expanded = _expand_text(raw, scopes[-1])
+                output.append((line_number, expanded, dict(scopes[-1])))
+                counter["commands"] += 1
+                if counter["commands"] > 20000:
+                    raise ValueError("expanded line limit exceeded (20000)")
+                if op in ("group", "profile"):
+                    blocks.append(op)
+                    scopes.append(dict(scopes[-1]))
+                    definitions.append(set())
+                elif op == "end" and blocks:
+                    blocks.pop()
+                    scopes.pop()
+                    definitions.pop()
+        except ValueError as exc:
+            if str(exc).startswith("Line "):
+                raise
+            raise ValueError(f"Line {line_number}: {exc}") from exc
+        index += 1
+    return output
+
+
+def _extract_parts(lines, parts, in_part):
     """Collect root-level part bodies while keeping original line numbers."""
     commands = list(lines)
     group_depth = 0
     index = 0
     while index < len(lines):
-        words = lines[index].partition("#")[0].split()
+        words = lines[index][1].partition("#")[0].split()
         op = words[0].lower() if words else ""
-        if op in ("group", "profile"):
+        if op in ("group", "profile", "for"):
             group_depth += 1
         elif op == "end":
             group_depth -= 1
         elif op == "part":
-            line_number = line_offset + index + 1
+            line_number = lines[index][0]
             if in_part or group_depth != 0:
                 raise ValueError(f"Line {line_number}: part definitions must be at the root level")
             if len(words) != 2 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", words[1]):
@@ -126,39 +278,42 @@ def _extract_parts(lines, parts, line_offset, in_part):
             end = index + 1
             nested_groups = 0
             while end < len(lines):
-                inner_words = lines[end].partition("#")[0].split()
+                inner_words = lines[end][1].partition("#")[0].split()
                 inner_op = inner_words[0].lower() if inner_words else ""
                 if inner_op == "part":
                     raise ValueError(f"Line {line_offset + end + 1}: part definitions cannot be nested")
-                if inner_op in ("group", "profile"):
+                if inner_op in ("group", "profile", "for"):
                     nested_groups += 1
                 elif inner_op == "end":
                     if nested_groups == 0:
                         if len(inner_words) != 1:
-                            raise ValueError(f"Line {line_offset + end + 1}: end takes no arguments")
+                            raise ValueError(f"Line {lines[end][0]}: end takes no arguments")
                         break
                     nested_groups -= 1
                 end += 1
             if end == len(lines):
                 raise ValueError(f"Line {line_number}: part {name} has no end")
-            parts[name] = ("\n".join(lines[index + 1:end]), line_number)
-            commands[index:end + 1] = [""] * (end - index + 1)
+            parts[name] = lines[index + 1:end]
+            commands[index:end + 1] = [(number, "") for number, _ in lines[index:end + 1]]
             index = end
         index += 1
     return commands
 
 
-def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line_offset=0, _profiles=None):
+def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line_offset=0, _profiles=None,
+                   _variables=None):
     """Evaluate text commands; each use builds fresh BReps from a part body."""
     parts = {} if _parts is None else _parts
-    counter = {"expansions": 0, "names": {}} if _counter is None else _counter
-    commands = _extract_parts(source.splitlines(), parts, _line_offset, bool(_stack))
+    counter = {"expansions": 0, "names": {}, "commands": 0} if _counter is None else _counter
+    records = ([(index, raw) for index, raw in enumerate(source.splitlines(), _line_offset + 1)]
+               if isinstance(source, str) else source)
+    commands = _expand_commands(_extract_parts(records, parts, bool(_stack)), _variables or {}, counter)
     frames = [{"name": None, "line": 0, "objects": {}, "materials": {}, "profiles": {}, "groups": {},
                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
                "position": (0.0, 0.0, 0.0)}]
     profile_block = None
     inherited_profiles = {} if _profiles is None else _profiles
-    for line_number, raw in enumerate(commands, _line_offset + 1):
+    for line_number, raw, variables in commands:
         line = raw.partition("#")[0].strip()
         if not line:
             continue
@@ -226,13 +381,13 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     names_used = counter["names"]
                     names_used[part_name] = names_used.get(part_name, 0) + 1
                     instance_name = f"{part_name}_{names_used[part_name]}"
-                body, part_line = parts[part_name]
+                body = parts[part_name]
                 profiles = dict(inherited_profiles)
                 for scope in frames:
                     profiles.update(scope["profiles"])
                 try:
                     members, member_materials = parse_commands(
-                        body, sm, parts, (*_stack, part_name), counter, part_line, profiles)
+                        body, sm, parts, (*_stack, part_name), counter, 0, profiles, variables)
                 except ValueError as exc:
                     raise ValueError(f"use {part_name}: {exc}") from exc
                 names = {name: f"{instance_name}__{name}" for name in members}

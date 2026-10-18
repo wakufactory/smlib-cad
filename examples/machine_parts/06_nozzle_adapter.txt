@@ -1,0 +1,9 @@
+# Nozzle adapter. Arbitrary millimetre-like units.
+# Revolved reducing passage and opposed radial ports.
+profile section
+  polygon 5 0  15 0  15 5  12 5  12 11  9 11  9 16  6 16  6 24  2.5 24  2.5 17  4 11  5 11
+end
+revolve body section 0 0 0 0 360
+cylinder side_port -13 0 8 2.2 26 1 0 0
+subtract body body side_port
+material body 0.72 0.48 0.26 0.82 0.34

@@ -1,0 +1,15 @@
+# Pipe union nut. Arbitrary millimetre-like units.
+# Revolved hollow sleeve with four wrench flats on the central collar.
+profile section
+  polygon 9 0  16 0  16 5  20 5  20 15  16 15  16 21  9 21
+end
+revolve body section 0 0 0 0 360
+box flat_xp 18 -25 4 8 50 12
+subtract body body flat_xp
+box flat_xm -26 -25 4 8 50 12
+subtract body body flat_xm
+box flat_yp -25 18 4 50 8 12
+subtract body body flat_yp
+box flat_ym -25 -26 4 50 8 12
+subtract body body flat_ym
+material body 0.70 0.61 0.42 0.82 0.34

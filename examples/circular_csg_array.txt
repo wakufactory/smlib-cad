@@ -1,5 +1,7 @@
 # One CSG clamp definition, used six times on a circle of radius 30.
 # Each use evaluates fresh BReps; its output is INSTANCE__body.
+let count = 6
+let radius = 30
 part clamp
   box body -6 -5 0 12 10 5
   cylinder boss 0 0 4 4 4
@@ -11,59 +13,23 @@ part clamp
 end
 
 group array
-  group station_0
-    euler 0 0 0
-    group offset_0
-      position 30 0 0
-      use clamp clamp_0
-      material clamp_0__body 0.82 0.26 0.18 0.55 0.38
+  for i in range(count)
+    group station_${i}
+      euler 0 0 ${i * 360 / count}
+      group offset_${i}
+        position ${radius} 0 0
+        use clamp clamp_${i}
+      end
     end
   end
 
-  group station_1
-    euler 0 0 60
-    group offset_1
-      position 30 0 0
-      use clamp clamp_1
-      material clamp_1__body 0.94 0.55 0.16 0.55 0.38
-    end
-  end
-
-  group station_2
-    euler 0 0 120
-    group offset_2
-      position 30 0 0
-      use clamp clamp_2
-      material clamp_2__body 0.66 0.76 0.24 0.55 0.38
-    end
-  end
-
-  group station_3
-    euler 0 0 180
-    group offset_3
-      position 30 0 0
-      use clamp clamp_3
-      material clamp_3__body 0.18 0.66 0.64 0.55 0.38
-    end
-  end
-
-  group station_4
-    euler 0 0 240
-    group offset_4
-      position 30 0 0
-      use clamp clamp_4
-      material clamp_4__body 0.22 0.42 0.86 0.55 0.38
-    end
-  end
-
-  group station_5
-    euler 0 0 300
-    group offset_5
-      position 30 0 0
-      use clamp clamp_5
-      material clamp_5__body 0.62 0.32 0.82 0.55 0.38
-    end
-  end
+  # Assign a distinct color to each generated clamp.
+  material clamp_0__body 0.82 0.26 0.18 0.55 0.38
+  material clamp_1__body 0.94 0.55 0.16 0.55 0.38
+  material clamp_2__body 0.66 0.76 0.24 0.55 0.38
+  material clamp_3__body 0.18 0.66 0.64 0.55 0.38
+  material clamp_4__body 0.22 0.42 0.86 0.55 0.38
+  material clamp_5__body 0.62 0.32 0.82 0.55 0.38
 
   cylinder collar 0 0 0 9 5
   cylinder collar_bore 0 0 -1 6 7

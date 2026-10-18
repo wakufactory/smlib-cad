@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Valve handwheel. Arbitrary millimetre-like units.\n# Revolved rim and boss, Boolean joined spokes and center bore.\nprofile section\n  polygon 26 0  32 0  32 7  26 7\nend\nrevolve body section 0 0 0 0 360\nbox spoke_x -29 -2 1 58 4 5\nunion body body spoke_x\nbox spoke_y -2 -29 1 4 58 5\nunion body body spoke_y\nprofile hub_section\n  polygon 5 -2  12 -2  12 9  5 9\nend\nrevolve hub hub_section 0 0 0 0 360\nunion body body hub\ncylinder center_bore 0 0 -3 5 14\nsubtract body body center_bore\nmaterial body 0.24 0.38 0.52 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

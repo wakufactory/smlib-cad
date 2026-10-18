@@ -1,0 +1,229 @@
+# Ten mechanical parts, arranged in two rows of five.
+# Spacing: 90 in X, 110 in Y. Each part retains its own material.
+
+# 01_bearing_housing at (-180, 55)
+group station_01
+  position -180 55 0
+  # Flanged bearing housing. Arbitrary millimetre-like units.
+  # Revolved stepped seat with four mounting holes.
+  profile section
+    polygon 8 0  26 0  26 6  17 6  17 18  12 18  12 14  8 14
+  end
+  revolve part_01 section 0 0 0 0 360
+  cylinder hole_1 14.8492 14.8492 -1 2.4 8
+  subtract part_01 part_01 hole_1
+  cylinder hole_2 -14.8492 14.8492 -1 2.4 8
+  subtract part_01 part_01 hole_2
+  cylinder hole_3 -14.8492 -14.8492 -1 2.4 8
+  subtract part_01 part_01 hole_3
+  cylinder hole_4 14.8492 -14.8492 -1 2.4 8
+  subtract part_01 part_01 hole_4
+  material part_01 0.42 0.48 0.53 0.82 0.34
+end
+
+# 02_v_belt_pulley at (-90, 55)
+group station_02
+  position -90 55 0
+  # V-belt pulley. Arbitrary millimetre-like units.
+  # Revolved V groove and hub; broached keyway.
+  profile section
+    polygon 7 0  24 0  24 3  19 7  24 11  24 14  13 14  13 18  7 18
+  end
+  revolve part_02 section 0 0 0 0 360
+  box keyway 6 -2 -1 3 4 20
+  subtract part_02 part_02 keyway
+  material part_02 0.68 0.70 0.72 0.82 0.34
+end
+
+# 03_split_coupling at (0, 55)
+group station_03
+  position 0 55 0
+  # Shaft coupling half. Arbitrary millimetre-like units.
+  # Stepped bored hub with keyway and radial set-screw hole.
+  profile section
+    polygon 6 0  18 0  18 5  13 5  13 25  6 25
+  end
+  revolve part_03 section 0 0 0 0 360
+  box keyway 5 -2 -1 3.5 4 27
+  subtract part_03 part_03 keyway
+  cylinder set_screw 4 0 17 2 11 1 0 0
+  subtract part_03 part_03 set_screw
+  material part_03 0.54 0.59 0.64 0.82 0.34
+end
+
+# 04_valve_handwheel at (90, 55)
+group station_04
+  position 90 55 0
+  # Valve handwheel. Arbitrary millimetre-like units.
+  # Revolved rim and boss, Boolean joined spokes and center bore.
+  profile section
+    polygon 26 0  32 0  32 7  26 7
+  end
+  revolve part_04 section 0 0 0 0 360
+  box spoke_x -29 -2 1 58 4 5
+  union part_04 part_04 spoke_x
+  box spoke_y -2 -29 1 4 58 5
+  union part_04 part_04 spoke_y
+  profile hub_section
+    polygon 5 -2  12 -2  12 9  5 9
+  end
+  revolve hub hub_section 0 0 0 0 360
+  union part_04 part_04 hub
+  cylinder center_bore 0 0 -3 5 14
+  subtract part_04 part_04 center_bore
+  material part_04 0.24 0.38 0.52 0.82 0.34
+end
+
+# 05_pipe_union_nut at (180, 55)
+group station_05
+  position 180 55 0
+  # Pipe union nut. Arbitrary millimetre-like units.
+  # Revolved hollow sleeve with four wrench flats on the central collar.
+  profile section
+    polygon 9 0  16 0  16 5  20 5  20 15  16 15  16 21  9 21
+  end
+  revolve part_05 section 0 0 0 0 360
+  box flat_xp 18 -25 4 8 50 12
+  subtract part_05 part_05 flat_xp
+  box flat_xm -26 -25 4 8 50 12
+  subtract part_05 part_05 flat_xm
+  box flat_yp -25 18 4 50 8 12
+  subtract part_05 part_05 flat_yp
+  box flat_ym -25 -26 4 50 8 12
+  subtract part_05 part_05 flat_ym
+  material part_05 0.70 0.61 0.42 0.82 0.34
+end
+
+# 06_nozzle_adapter at (-180, -55)
+group station_06
+  position -180 -55 0
+  # Nozzle adapter. Arbitrary millimetre-like units.
+  # Revolved reducing passage and opposed radial ports.
+  profile section
+    polygon 5 0  15 0  15 5  12 5  12 11  9 11  9 16  6 16  6 24  2.5 24  2.5 17  4 11  5 11
+  end
+  revolve part_06 section 0 0 0 0 360
+  cylinder side_port -13 0 8 2.2 26 1 0 0
+  subtract part_06 part_06 side_port
+  material part_06 0.72 0.48 0.26 0.82 0.34
+end
+
+# 07_brake_rotor at (-90, -55)
+group station_07
+  position -90 -55 0
+  # Brake rotor. Arbitrary millimetre-like units.
+  # Revolved rotor and raised center, with eight lightening holes.
+  profile section
+    polygon 12 0  38 0  38 6  18 6  18 12  12 12
+  end
+  revolve part_07 section 0 0 0 0 360
+  cylinder hole_1 26.7925 11.0978 -1 3.5 8
+  subtract part_07 part_07 hole_1
+  cylinder hole_2 11.0978 26.7925 -1 3.5 8
+  subtract part_07 part_07 hole_2
+  cylinder hole_3 -11.0978 26.7925 -1 3.5 8
+  subtract part_07 part_07 hole_3
+  cylinder hole_4 -26.7925 11.0978 -1 3.5 8
+  subtract part_07 part_07 hole_4
+  cylinder hole_5 -26.7925 -11.0978 -1 3.5 8
+  subtract part_07 part_07 hole_5
+  cylinder hole_6 -11.0978 -26.7925 -1 3.5 8
+  subtract part_07 part_07 hole_6
+  cylinder hole_7 11.0978 -26.7925 -1 3.5 8
+  subtract part_07 part_07 hole_7
+  cylinder hole_8 26.7925 -11.0978 -1 3.5 8
+  subtract part_07 part_07 hole_8
+  material part_07 0.45 0.48 0.50 0.82 0.34
+end
+
+# 08_pedestal_foot at (0, -55)
+group station_08
+  position 0 -55 0
+  # Pedestal foot. Arbitrary millimetre-like units.
+  # Revolved socket with Boolean mounting ears and bolt holes.
+  profile section
+    polygon 8 0  23 0  23 5  14 5  14 15  8 15
+  end
+  revolve part_08 section 0 0 0 0 360
+  box ear_right 19 -7 0 18 14 5
+  union part_08 part_08 ear_right
+  box ear_left -37 -7 0 18 14 5
+  union part_08 part_08 ear_left
+  cylinder ear_hole_1 -30 0 -1 2.8 7
+  subtract part_08 part_08 ear_hole_1
+  cylinder ear_hole_2 30 0 -1 2.8 7
+  subtract part_08 part_08 ear_hole_2
+  material part_08 0.38 0.51 0.59 0.82 0.34
+end
+
+# 09_paddle_impeller at (90, -55)
+group station_09
+  position 90 -55 0
+  # Paddle impeller. Arbitrary millimetre-like units.
+  # Revolved boss with eight Boolean joined radial paddles.
+  profile section
+    polygon 5 0  13 0  13 4  10 4  10 18  5 18
+  end
+  revolve part_09 section 0 0 0 0 360
+  group blade_1
+    euler 0 0 0
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_1
+  group blade_2
+    euler 0 0 45
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_2
+  group blade_3
+    euler 0 0 90
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_3
+  group blade_4
+    euler 0 0 135
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_4
+  group blade_5
+    euler 0 0 180
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_5
+  group blade_6
+    euler 0 0 225
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_6
+  group blade_7
+    euler 0 0 270
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_7
+  group blade_8
+    euler 0 0 315
+    box paddle 9 -2 2 23 4 10
+  end
+  union part_09 part_09 blade_8
+  cylinder shaft_bore 0 0 -1 5 20
+  subtract part_09 part_09 shaft_bore
+  material part_09 0.25 0.56 0.59 0.82 0.34
+end
+
+# 10_eccentric_cam at (180, -55)
+group station_10
+  position 180 -55 0
+  # Eccentric cam. Arbitrary millimetre-like units.
+  # Revolved hub joined to an offset cam lobe, bored for shaft and timing pin.
+  profile section
+    polygon 5 0  15 0  15 5  11 5  11 13  5 13
+  end
+  revolve part_10 section 0 0 0 0 360
+  cylinder eccentric_lobe 9 0 0 15 5
+  union part_10 part_10 eccentric_lobe
+  cylinder shaft_bore 0 0 -1 5 15
+  subtract part_10 part_10 shaft_bore
+  cylinder timing_hole 20 0 -1 2.5 7
+  subtract part_10 part_10 timing_hole
+  material part_10 0.63 0.43 0.28 0.82 0.34
+end

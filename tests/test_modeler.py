@@ -161,6 +161,57 @@ class ModelerTests(unittest.TestCase):
         self.assertIsNot(*objects.values())
         self.assertEqual([call[3] for call in sm.transforms], [(2.0, 0.0, 0.0)] * 2)
 
+    def test_text_variables_loops_and_part_use_scope(self):
+        source = ("let count = 3\nlet radius = 12\n"
+                  "part piece\nbox body 0 0 0 ${size} 2 2\nend\n"
+                  "for i in range(count)\n"
+                  "  let size = i + 1\n"
+                  "  group station_${i}\n"
+                  "    euler 0 0 ${i * 360 / count}\n"
+                  "    group offset_${i}\n"
+                  "      position ${radius} 0 0\n"
+                  "      use piece item_${i}\n"
+                  "    end\n"
+                  "  end\n"
+                  "end\n")
+        sm = FakeBrep()
+        objects, _, _ = evaluate(source, "text", sm)
+        self.assertEqual(list(objects), ["item_0__body", "item_1__body", "item_2__body"])
+        self.assertEqual([call[2][2] for call in sm.transforms[1::2]], [0, 120, 240])
+        self.assertEqual([call[3][0] for call in sm.transforms[::2]], [12, 12, 12])
+
+    def test_nested_range_and_local_variables(self):
+        source = ("let width = 4\n"
+                  "for row in range(1, 3)\n"
+                  "  for col in range(2, -1, -1)\n"
+                  "    box cell_${row}_${col} ${row * width} ${col} 0 1 1 1\n"
+                  "  end\n"
+                  "end\n"
+                  "box computed_${width / 2} 0 0 0 1 1 1\n"
+                  "box last ${width} 0 0 1 1 1 # ${ignored} is a comment\n")
+        objects, _, _ = evaluate(source, "text", FakeBrep())
+        self.assertEqual(list(objects), ["cell_1_2", "cell_1_1", "cell_1_0",
+                                         "cell_2_2", "cell_2_1", "cell_2_0", "computed_2", "last"])
+
+    def test_text_expression_and_loop_errors(self):
+        cases = (
+            ("box a 0 0 0 ${missing} 1 1", "Line 1: unknown variable"),
+            ("let n = 1\nlet n = 2\nbox a 0 0 0 1 1 1", "Line 2: duplicate variable"),
+            ("let n = 1 / 0\nbox a 0 0 0 1 1 1", "Line 1: invalid arithmetic"),
+            ("box a 0 0 0 ${__import__('os')} 1 1", "only numbers"),
+            ("for i in range(513)\nbox a_${i} 0 0 0 1 1 1\nend", "iteration limit"),
+            ("for i in range(2)\nbox a 0 0 0 1 1 1", "for has no end"),
+            ("for i in range(2)\nbox a_${i} 0 0 0 1 1 1\nend\nbox b 0 0 0 ${i} 1 1",
+             "unknown variable: i"),
+            ("group g\nlet local = 2\nbox a 0 0 0 1 1 1\nend\nbox b ${local} 0 0 1 1 1",
+             "unknown variable: local"),
+            ("for i in range(0, 3, 0)\nbox a 0 0 0 1 1 1\nend", "step must not be zero"),
+            ("part p\nbox a 0 0 0 ${size} 1 1\nend\nuse p", "Line 2: unknown variable: size"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, message):
+                evaluate(source, "text", FakeBrep())
+
     def test_nested_groups_transform_boolean_results(self):
         sm = FakeBrep()
         source = ("group parent\n"

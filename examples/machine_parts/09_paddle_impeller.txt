@@ -1,0 +1,49 @@
+# Paddle impeller. Arbitrary millimetre-like units.
+# Revolved boss with eight Boolean joined radial paddles.
+profile section
+  polygon 5 0  13 0  13 4  10 4  10 18  5 18
+end
+revolve body section 0 0 0 0 360
+group blade_1
+  euler 0 0 0
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_1
+group blade_2
+  euler 0 0 45
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_2
+group blade_3
+  euler 0 0 90
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_3
+group blade_4
+  euler 0 0 135
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_4
+group blade_5
+  euler 0 0 180
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_5
+group blade_6
+  euler 0 0 225
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_6
+group blade_7
+  euler 0 0 270
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_7
+group blade_8
+  euler 0 0 315
+  box paddle 9 -2 2 23 4 10
+end
+union body body blade_8
+cylinder shaft_bore 0 0 -1 5 20
+subtract body body shaft_bore
+material body 0.25 0.56 0.59 0.82 0.34

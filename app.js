@@ -96,8 +96,12 @@ function draw(){
   camera.updateProjectionMatrix();
   camera.position.set(...cameraEye());
   camera.lookAt(...center);
-  const wireframe=$('shading-mode').value==='wireframe';
-  for(const mesh of rendered){mesh.solid.visible=!wireframe;mesh.wire.visible=wireframe;}
+  const mode=$('shading-mode').value;
+  for(const mesh of rendered){
+    mesh.solid.visible=mode==='shading';
+    mesh.normal.visible=mode==='normal';
+    mesh.wire.visible=mode==='wireframe';
+  }
   for(const guide of guides)guide.object.visible=$(guide.toggle).checked;
   renderer.render(scene,camera);
 }
@@ -146,10 +150,27 @@ function triangleEdges(positions){
   }
   return edges;
 }
+function faceNormalColors(positions){
+  const colors=new Float32Array(positions.length);
+  const linearChannel=value=>{
+    const srgb=Math.max(0,Math.min(1,(value+1)/2));
+    return srgb<=0.04045?srgb/12.92:((srgb+0.055)/1.055)**2.4;
+  };
+  for(let i=0;i<positions.length;i+=9){
+    const ax=positions[i+3]-positions[i],ay=positions[i+4]-positions[i+1],az=positions[i+5]-positions[i+2];
+    const bx=positions[i+6]-positions[i],by=positions[i+7]-positions[i+1],bz=positions[i+8]-positions[i+2];
+    const nx=ay*bz-az*by,ny=az*bx-ax*bz,nz=ax*by-ay*bx;
+    const length=Math.hypot(nx,ny,nz);
+    const rgb=[linearChannel(length?nx/length:0),linearChannel(length?ny/length:0),linearChannel(length?nz/length:0)];
+    for(let j=i;j<i+9;j+=3)colors.set(rgb,j);
+  }
+  return colors;
+}
 function show(meshes){
   for(const mesh of rendered){
-    scene.remove(mesh.solid,mesh.wire);
+    scene.remove(mesh.solid,mesh.normal,mesh.wire);
     mesh.solid.geometry.dispose();mesh.solid.material.dispose();
+    mesh.normal.material.dispose();
     mesh.wire.geometry.dispose();mesh.wire.material.dispose();
   }
   rendered=[];
@@ -158,16 +179,18 @@ function show(meshes){
     const geometry=new THREE.BufferGeometry();
     geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(mesh.positions),3));
     geometry.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(mesh.normals),3));
+    geometry.setAttribute('color',new THREE.BufferAttribute(faceNormalColors(mesh.positions),3));
     const color=new THREE.Color().setRGB(...mesh.material.baseColor,THREE.LinearSRGBColorSpace);
     const solid=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({
       color,metalness:mesh.material.metallic,roughness:mesh.material.roughness
     }));
+    const normal=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide,toneMapped:false}));
     const edgeGeometry=new THREE.BufferGeometry();
     edgeGeometry.setAttribute('position',new THREE.BufferAttribute(triangleEdges(mesh.positions),3));
     const lineColor=new THREE.Color().setRGB(...mesh.material.baseColor.map(c=>0.45+0.55*c),THREE.LinearSRGBColorSpace);
     const wire=new THREE.LineSegments(edgeGeometry,new THREE.LineBasicMaterial({color:lineColor}));
-    scene.add(solid,wire);
-    rendered.push({solid,wire});
+    scene.add(solid,normal,wire);
+    rendered.push({solid,normal,wire});
     for(let i=0;i<mesh.positions.length;i+=3)for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],mesh.positions[i+j]);hi[j]=Math.max(hi[j],mesh.positions[i+j]);}
   }
   if(meshes.length){center=lo.map((x,i)=>(x+hi[i])/2);radius=Math.max(1,Math.hypot(...sub(hi,lo))/2);}

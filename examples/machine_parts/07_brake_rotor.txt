@@ -1,0 +1,23 @@
+# Brake rotor. Arbitrary millimetre-like units.
+# Revolved rotor and raised center, with eight lightening holes.
+profile section
+  polygon 12 0  38 0  38 6  18 6  18 12  12 12
+end
+revolve body section 0 0 0 0 360
+cylinder hole_1 26.7925 11.0978 -1 3.5 8
+subtract body body hole_1
+cylinder hole_2 11.0978 26.7925 -1 3.5 8
+subtract body body hole_2
+cylinder hole_3 -11.0978 26.7925 -1 3.5 8
+subtract body body hole_3
+cylinder hole_4 -26.7925 11.0978 -1 3.5 8
+subtract body body hole_4
+cylinder hole_5 -26.7925 -11.0978 -1 3.5 8
+subtract body body hole_5
+cylinder hole_6 -11.0978 -26.7925 -1 3.5 8
+subtract body body hole_6
+cylinder hole_7 11.0978 -26.7925 -1 3.5 8
+subtract body body hole_7
+cylinder hole_8 26.7925 -11.0978 -1 3.5 8
+subtract body body hole_8
+material body 0.45 0.48 0.50 0.82 0.34

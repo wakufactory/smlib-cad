@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Nozzle adapter. Arbitrary millimetre-like units.\n# Revolved reducing passage and opposed radial ports.\nprofile section\n  polygon 5 0  15 0  15 5  12 5  12 11  9 11  9 16  6 16  6 24  2.5 24  2.5 17  4 11  5 11\nend\nrevolve body section 0 0 0 0 360\ncylinder side_port -13 0 8 2.2 26 1 0 0\nsubtract body body side_port\nmaterial body 0.72 0.48 0.26 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

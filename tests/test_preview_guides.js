@@ -26,10 +26,16 @@ const THREE = {
   BufferGeometry: Geometry,
   BufferAttribute: class { constructor(array) { this.array = array; } },
   LineBasicMaterial: Material, PointsMaterial: Material,
-  LineSegments: Object3D, Points: Object3D
+  MeshStandardMaterial: Material, MeshBasicMaterial: Material,
+  LineSegments: Object3D, Points: Object3D, Mesh: Object3D,
+  Color: class { setRGB() { return this; } },
+  LinearSRGBColorSpace: 'linear', DoubleSide: 'double'
 };
 const objects = new Set();
-const scene = {add(object) { objects.add(object); }, remove(object) { objects.delete(object); }};
+const scene = {
+  add(...items) { for (const item of items) objects.add(item); },
+  remove(...items) { for (const item of items) objects.delete(item); }
+};
 const camera = {
   updateProjectionMatrix() {},
   position: {set() {}}, lookAt() {}
@@ -73,4 +79,42 @@ assert(first.every(object => object.geometry.disposed && object.material.dispose
 assert.equal(objects.size, 4);
 context.draw();
 assert(Array.from(objects).every(object => !object.visible));
+
+const mesh = {name: 'face', positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
+  normals: [0, 0, -1, 0, 0, -1, 0, 0, -1],
+  material: {baseColor: [0.2, 0.4, 0.6], metallic: 0, roughness: 1}};
+context.show([mesh]);
+const preview = vm.runInContext('rendered[0]', context);
+const colors = Array.from(preview.normal.geometry.attributes.color.array);
+const middle = ((0.5 + 0.055) / 1.055) ** 2.4;
+for (let i = 0; i < colors.length; i += 3) {
+  assert(Math.abs(colors[i] - middle) < 1e-6);
+  assert(Math.abs(colors[i + 1] - middle) < 1e-6);
+  assert.equal(colors[i + 2], 1); // Geometry faces +Z; supplied smooth normals point -Z.
+}
+assert.equal(preview.normal.material.options.vertexColors, true);
+assert.equal(preview.normal.material.options.toneMapped, false);
+assert.equal(preview.normal.geometry, preview.solid.geometry);
+const negativeZ = context.faceNormalColors([0, 0, 0, 0, 1, 0, 1, 0, 0]);
+assert(Math.abs(negativeZ[0] - middle) < 1e-6);
+assert(Math.abs(negativeZ[1] - middle) < 1e-6);
+assert.equal(negativeZ[2], 0);
+const positiveX = context.faceNormalColors([0, 0, 0, 0, 1, 0, 0, 0, 1]);
+assert.equal(positiveX[0], 1);
+assert(Math.abs(positiveX[1] - middle) < 1e-6);
+assert(Math.abs(positiveX[2] - middle) < 1e-6);
+
+for (const [mode, expected] of [
+  ['shading', [true, false, false]],
+  ['wireframe', [false, false, true]],
+  ['normal', [false, true, false]]
+]) {
+  elements['shading-mode'].value = mode;
+  elements['shading-mode'].onchange();
+  assert.deepEqual([preview.solid.visible, preview.normal.visible, preview.wire.visible], expected);
+}
+context.show([mesh]);
+assert(preview.solid.geometry.disposed);
+assert(preview.normal.material.disposed);
+assert.equal(vm.runInContext('rendered[0].normal.visible', context), true);
 console.log('preview guides: axes, unit grid, toggles, and recalculation passed');

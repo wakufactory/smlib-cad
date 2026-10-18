@@ -1,0 +1,9 @@
+# V-belt pulley. Arbitrary millimetre-like units.
+# Revolved V groove and hub; broached keyway.
+profile section
+  polygon 7 0  24 0  24 3  19 7  24 11  24 14  13 14  13 18  7 18
+end
+revolve body section 0 0 0 0 360
+box keyway 6 -2 -1 3 4 20
+subtract body body keyway
+material body 0.68 0.70 0.72 0.82 0.34

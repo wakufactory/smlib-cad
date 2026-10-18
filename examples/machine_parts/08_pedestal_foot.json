@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Pedestal foot. Arbitrary millimetre-like units.\n# Revolved socket with Boolean mounting ears and bolt holes.\nprofile section\n  polygon 8 0  23 0  23 5  14 5  14 15  8 15\nend\nrevolve body section 0 0 0 0 360\nbox ear_right 19 -7 0 18 14 5\nunion body body ear_right\nbox ear_left -37 -7 0 18 14 5\nunion body body ear_left\ncylinder ear_hole_1 -30 0 -1 2.8 7\nsubtract body body ear_hole_1\ncylinder ear_hole_2 30 0 -1 2.8 7\nsubtract body body ear_hole_2\nmaterial body 0.38 0.51 0.59 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

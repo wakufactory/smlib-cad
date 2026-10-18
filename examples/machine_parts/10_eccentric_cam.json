@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Eccentric cam. Arbitrary millimetre-like units.\n# Revolved hub joined to an offset cam lobe, bored for shaft and timing pin.\nprofile section\n  polygon 5 0  15 0  15 5  11 5  11 13  5 13\nend\nrevolve body section 0 0 0 0 360\ncylinder eccentric_lobe 9 0 0 15 5\nunion body body eccentric_lobe\ncylinder shaft_bore 0 0 -1 5 15\nsubtract body body shaft_bore\ncylinder timing_hole 20 0 -1 2.5 7\nsubtract body body timing_hole\nmaterial body 0.63 0.43 0.28 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

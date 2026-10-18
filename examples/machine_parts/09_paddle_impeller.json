@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Paddle impeller. Arbitrary millimetre-like units.\n# Revolved boss with eight Boolean joined radial paddles.\nprofile section\n  polygon 5 0  13 0  13 4  10 4  10 18  5 18\nend\nrevolve body section 0 0 0 0 360\ngroup blade_1\n  euler 0 0 0\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_1\ngroup blade_2\n  euler 0 0 45\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_2\ngroup blade_3\n  euler 0 0 90\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_3\ngroup blade_4\n  euler 0 0 135\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_4\ngroup blade_5\n  euler 0 0 180\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_5\ngroup blade_6\n  euler 0 0 225\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_6\ngroup blade_7\n  euler 0 0 270\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_7\ngroup blade_8\n  euler 0 0 315\n  box paddle 9 -2 2 23 4 10\nend\nunion body body blade_8\ncylinder shaft_bore 0 0 -1 5 20\nsubtract body body shaft_bore\nmaterial body 0.25 0.56 0.59 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

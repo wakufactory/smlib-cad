@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Pipe union nut. Arbitrary millimetre-like units.\n# Revolved hollow sleeve with four wrench flats on the central collar.\nprofile section\n  polygon 9 0  16 0  16 5  20 5  20 15  16 15  16 21  9 21\nend\nrevolve body section 0 0 0 0 360\nbox flat_xp 18 -25 4 8 50 12\nsubtract body body flat_xp\nbox flat_xm -26 -25 4 8 50 12\nsubtract body body flat_xm\nbox flat_yp -25 18 4 50 8 12\nsubtract body body flat_yp\nbox flat_ym -25 -26 4 50 8 12\nsubtract body body flat_ym\nmaterial body 0.70 0.61 0.42 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

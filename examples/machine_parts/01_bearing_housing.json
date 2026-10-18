@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Flanged bearing housing. Arbitrary millimetre-like units.\n# Revolved stepped seat with four mounting holes.\nprofile section\n  polygon 8 0  26 0  26 6  17 6  17 18  12 18  12 14  8 14\nend\nrevolve body section 0 0 0 0 360\ncylinder hole_1 14.8492 14.8492 -1 2.4 8\nsubtract body body hole_1\ncylinder hole_2 -14.8492 14.8492 -1 2.4 8\nsubtract body body hole_2\ncylinder hole_3 -14.8492 -14.8492 -1 2.4 8\nsubtract body body hole_3\ncylinder hole_4 14.8492 -14.8492 -1 2.4 8\nsubtract body body hole_4\nmaterial body 0.42 0.48 0.53 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

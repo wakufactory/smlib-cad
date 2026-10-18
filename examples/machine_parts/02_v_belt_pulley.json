@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# V-belt pulley. Arbitrary millimetre-like units.\n# Revolved V groove and hub; broached keyway.\nprofile section\n  polygon 7 0  24 0  24 3  19 7  24 11  24 14  13 14  13 18  7 18\nend\nrevolve body section 0 0 0 0 360\nbox keyway 6 -2 -1 3 4 20\nsubtract body body keyway\nmaterial body 0.68 0.70 0.72 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

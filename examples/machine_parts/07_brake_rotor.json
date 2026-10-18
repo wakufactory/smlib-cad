@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Brake rotor. Arbitrary millimetre-like units.\n# Revolved rotor and raised center, with eight lightening holes.\nprofile section\n  polygon 12 0  38 0  38 6  18 6  18 12  12 12\nend\nrevolve body section 0 0 0 0 360\ncylinder hole_1 26.7925 11.0978 -1 3.5 8\nsubtract body body hole_1\ncylinder hole_2 11.0978 26.7925 -1 3.5 8\nsubtract body body hole_2\ncylinder hole_3 -11.0978 26.7925 -1 3.5 8\nsubtract body body hole_3\ncylinder hole_4 -26.7925 11.0978 -1 3.5 8\nsubtract body body hole_4\ncylinder hole_5 -26.7925 -11.0978 -1 3.5 8\nsubtract body body hole_5\ncylinder hole_6 -11.0978 -26.7925 -1 3.5 8\nsubtract body body hole_6\ncylinder hole_7 11.0978 -26.7925 -1 3.5 8\nsubtract body body hole_7\ncylinder hole_8 26.7925 -11.0978 -1 3.5 8\nsubtract body body hole_8\nmaterial body 0.45 0.48 0.50 0.82 0.34\n",
+  "parameters": {
+    "chord": 0.18,
+    "angle": 18,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}
