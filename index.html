@@ -4,38 +4,65 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>SMLib Modeler</title>
 <style>
-:root{font-family:system-ui,sans-serif;color:#dbe8f0;background:#0d1521}*{box-sizing:border-box}body{margin:0}header{height:56px;display:flex;align-items:center;gap:16px;padding:0 20px;border-bottom:1px solid #2c4154}h1{font-size:17px;margin:0}#status{font-size:12px;color:#96aabb}main{height:calc(100vh - 56px);display:grid;grid-template-columns:minmax(330px,420px) 1fr}aside{padding:18px;display:flex;flex-direction:column;gap:12px;border-right:1px solid #2c4154;min-height:0}label{font-size:12px;color:#adc2d0}select,button,input{font:inherit}select,input{background:#152538;color:#dbe8f0;border:1px solid #36516a;border-radius:6px;padding:8px}textarea{flex:1;min-height:180px;resize:none;background:#101f2e;color:#e0eff7;border:1px solid #36516a;border-radius:8px;padding:14px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4}button{border:1px solid #416783;color:#dcecf6;background:#1b344a;border-radius:6px;padding:9px 12px;cursor:pointer}button.primary{background:#1784ab;border-color:#32a5ca;color:white}button:disabled{opacity:.45;cursor:default}.row{display:flex;gap:8px;align-items:center}.row button{flex:1}.row select{min-width:0;flex:1}#example{flex:0 0 auto}#message{font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;max-height:100px;color:#e7ad90}#viewport{position:relative;min-width:0;overflow:hidden}canvas{width:100%;height:100%;display:block}#shading-mode{position:absolute;top:14px;right:16px;background:#152538dd;z-index:1}#hint{position:absolute;bottom:14px;left:16px;font-size:12px;color:#a5bdc9;pointer-events:none}.controls{display:flex;gap:8px;align-items:center}.controls input{width:90px}@media(max-width:800px){main{grid-template-columns:1fr;grid-template-rows:48vh 1fr}aside{border-right:0;border-bottom:1px solid #2c4154;padding:10px}header{height:48px}main{height:calc(100vh - 48px)}}
-html,body{width:100%;height:100%;overflow:hidden;overscroll-behavior:none}
-body{-webkit-user-select:none;user-select:none}
+:root{font-family:system-ui,sans-serif;color:#dbe8f0;background:#0d1521}
+*{box-sizing:border-box}
+html,body{width:100%;height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
+body{position:fixed;inset:0;height:100dvh;-webkit-user-select:none;user-select:none}
+header{height:48px;display:flex;align-items:center;gap:16px;padding:0 16px;border-bottom:1px solid #2c4154}
+h1{font-size:16px;margin:0}h2{font-size:13px;margin:0;color:#dbe8f0}
+#status{font-size:12px;color:#96aabb}
+main{height:calc(100dvh - 48px);display:grid;grid-template-columns:264px minmax(0,1fr) minmax(320px,36%);min-height:0;overflow:hidden}
+aside,.source-pane{min-width:0;min-height:0;padding:12px;display:flex;flex-direction:column;gap:12px}
+aside{border-right:1px solid #2c4154;overflow-y:auto;overscroll-behavior:none}
+.source-pane{border-left:1px solid #2c4154;background:#101b29}
+.settings-group{display:flex;flex-direction:column;gap:8px;padding-bottom:12px;border-bottom:1px solid #263b4d}
+label{font-size:12px;color:#adc2d0}
+select,button,input{font:inherit;font-size:12px}
+select,input{background:#152538;color:#dbe8f0;border:1px solid #36516a;border-radius:6px;padding:6px;min-width:0}
 textarea,input[type="text"],input[type="number"],#message{-webkit-user-select:text;user-select:text}
-body{position:fixed;inset:0;height:100dvh}
-main{height:calc(100dvh - 56px);min-height:0;overflow:hidden}
-aside{overflow-y:auto;overscroll-behavior:none}
-textarea,#message{overscroll-behavior:none}
-canvas{touch-action:none}
-@media(max-width:800px){main{height:calc(100dvh - 48px);grid-template-rows:minmax(0,48%) minmax(0,1fr)}}
-#viewport{background-color:#0e1a26}
-#preview-mode{position:absolute;top:14px;left:16px;z-index:1;background:#152538dd}
-#view-controls{position:absolute;top:56px;right:16px;z-index:1;display:flex;gap:12px;align-items:center;padding:7px 10px;border:1px solid #36516a;border-radius:6px;background:#152538dd}
-#view-controls label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}
-#view-controls input{margin:0;padding:0;accent-color:#57b7d9}
+textarea{flex:1;width:100%;min-height:0;resize:none;background:#101f2e;color:#e0eff7;border:1px solid #36516a;border-radius:8px;padding:12px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;tab-size:4}
+button{border:1px solid #416783;color:#dcecf6;background:#1b344a;border-radius:6px;padding:7px 8px;cursor:pointer}
+button.primary{background:#1784ab;border-color:#32a5ca;color:white}button:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:6px;align-items:center}.row button{flex:1}.row select{min-width:0;flex:1}#example{flex:0 0 auto}
+.controls{display:grid;grid-template-columns:1fr 86px;gap:4px 8px;align-items:center}.controls input,.controls select{width:100%}
+.help{font-size:11px;color:#8faabb;line-height:1.4}.controls .help{grid-column:1/-1}
+#preview{width:100%;padding:9px}
+#message{font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;max-height:140px;color:#e7ad90;overscroll-behavior:none}
+.source-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-heading span{font-size:11px;color:#8faabb}
+#viewport{position:relative;min-width:0;min-height:0;overflow:hidden;background-color:#0e1a26}
+canvas{width:100%;height:100%;display:block;touch-action:none}
+#shading-mode{position:absolute;top:12px;right:12px;background:#152538dd;z-index:1}
+#preview-mode{position:absolute;top:12px;left:12px;z-index:1;background:#152538dd}
+#view-controls{position:absolute;top:52px;right:12px;z-index:1;display:flex;gap:10px;align-items:center;padding:6px 8px;border:1px solid #36516a;border-radius:6px;background:#152538dd}
+#view-controls label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}#view-controls input{margin:0;padding:0;accent-color:#57b7d9}
+#hint{position:absolute;bottom:12px;left:12px;right:12px;font-size:11px;color:#a5bdc9;pointer-events:none}
 #usd-model{display:block;width:100%;height:100%;background-color:#0e1a26}
 canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#view-controls[hidden],#hint[hidden]{display:none}
 #model-status{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:#adc2d0;pointer-events:none}
+@media(max-width:1100px) and (min-width:801px){main{grid-template-columns:228px minmax(0,1fr) minmax(280px,34%)}aside,.source-pane{padding:10px}.source-heading{flex-wrap:wrap}}
+@media(max-width:800px){main{grid-template-columns:210px minmax(0,1fr);grid-template-rows:minmax(0,55%) minmax(0,45%)}aside{grid-column:1;grid-row:1/-1;padding:10px}#viewport{grid-column:2;grid-row:1}.source-pane{grid-column:2;grid-row:2;border-left:0;border-top:1px solid #2c4154;padding:10px}.source-heading{flex-wrap:wrap;gap:4px}}
+@media(max-width:520px){main{grid-template-columns:1fr;grid-template-rows:minmax(0,28%) minmax(0,34%) minmax(0,38%)}aside{grid-column:1;grid-row:1;border-right:0;border-bottom:1px solid #2c4154}#viewport{grid-column:1;grid-row:2}.source-pane{grid-column:1;grid-row:3}header{padding:0 10px;gap:10px}#status{font-size:11px}}
 </style>
 </head>
 <body><header><h1>SMLib Modeler</h1><span id="status">ライブラリを確認中…</span></header>
 <main><aside>
-<div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
-<label for="source">モデル定義 · Ctrl/⌘ + Enter でプレビュー</label>
-<textarea id="source" spellcheck="false"></textarea>
-<div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span style="font-size:11px;color:#8faabb">小さいほど滑らか</span></div>
-<div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span style="font-size:11px;color:#8faabb">度 · 大きいほど粗い</span></div>
-<div class="controls"><label for="finish">全体加工</label><select id="finish"><option value="none">なし</option><option value="chamfer">面取り</option><option value="fillet">丸め</option></select><label for="finish-size">幅/半径</label><input id="finish-size" type="number" min="0.001" step="any" value="1" disabled></div>
-<div class="controls"><label for="export-scale">保存時の座標倍率</label><input id="export-scale" type="number" min="0" step="any" value="1"><span style="font-size:11px;color:#8faabb">GLB / USDZ · 原点基準 · 1 = そのまま</span></div>
-<div class="row"><label for="file-name">保存ファイル名</label><input id="file-name" type="text" value="model" placeholder="model" style="flex:1;min-width:0"><span style="font-size:11px;color:#8faabb">拡張子は自動</span></div>
+<h2>設定</h2>
+<div class="settings-group">
+<div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span class="help">小さいほど滑らか</span></div>
+<div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span class="help">度 · 大きいほど粗い</span></div>
+<div class="controls"><label for="finish">全体加工</label><select id="finish"><option value="none">なし</option><option value="chamfer">面取り</option><option value="fillet">丸め</option></select></div>
+<div class="controls"><label for="finish-size">幅 / 半径</label><input id="finish-size" type="number" min="0.001" step="any" value="1" disabled></div>
+<div class="controls"><label for="export-scale">保存時の座標倍率</label><input id="export-scale" type="number" min="0" step="any" value="1"><span class="help">GLB / USDZ · 原点基準 · 1 = そのまま</span></div>
+</div>
+<div class="settings-group">
+<div class="controls"><label for="file-name">保存ファイル名</label><input id="file-name" type="text" value="model" placeholder="model"><span class="help">拡張子は自動</span></div>
 <div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
-<div class="row"><button class="primary" id="preview" disabled>プレビュー</button><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
+</div>
+<button class="primary" id="preview" disabled>プレビュー</button>
+<div class="row"><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
 <div id="message" role="status"></div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section></main>
+</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
+<div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
+<textarea id="source" spellcheck="false"></textarea>
+</section></main>
 <script src="/app.js"></script></body></html>
