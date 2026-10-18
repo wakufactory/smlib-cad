@@ -177,5 +177,27 @@ for (const invalid of [
   assert.equal(elements['show-axes'].checked, true);
   assert.equal(elements['show-grid'].checked, true);
   assert.match(elements.message.textContent, /HTTPS/);
+  context.preview = async () => {previewCalls++;};
+  const chat = {version:1,messages:[{role:'user',text:'幅を2にして'}, {role:'assistant',text:'幅を変更しました。'}, {role:'system',text:'計算エラー',error:true}]};
+  let restored, blocked = false;
+  context.ModelChat = {snapshot:()=>chat, restore:value=>{restored=value;}, assertIdle:()=>{if(blocked)throw Error('応答待ち');}};
+  for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
+  elements['save-model'].onclick();
+  const savedChatJson = await savedBlob.text();
+  assert.deepEqual(JSON.parse(savedChatJson).chat, chat);
+  await context.loadModel({size:savedChatJson.length,text:async()=>savedChatJson});
+  assert.equal(JSON.stringify(restored),JSON.stringify(chat));
+  const stateBefore = elements.source.value;
+  const invalidChat = JSON.stringify({...JSON.parse(savedChatJson),source:'should not apply',chat:{version:1,messages:[{role:'invalid',text:'x'}]}});
+  await context.loadModel({size:invalidChat.length,text:async()=>invalidChat});
+  assert.equal(elements.source.value,stateBefore);
+  assert.equal(JSON.stringify(restored),JSON.stringify(chat));
+  blocked=true;
+  await context.loadModel({size:json.length,text:async()=>json});
+  assert.equal(JSON.stringify(restored),JSON.stringify(chat));
+  blocked=false;
+  await context.loadModel({size:json.length,text:async()=>json});
+  assert.equal(restored,undefined); // Legacy model files clear the previous model's chat.
+  assert.throws(()=>ModelFile.chat({version:1,messages:[{role:'user',text:'x'.repeat(200001)}]}));
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

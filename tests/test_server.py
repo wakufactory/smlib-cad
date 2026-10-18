@@ -5,7 +5,7 @@ import ssl
 import unittest
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from server import Handler, ModelError, ModelHTTPServer, PreviewStore, allowed_host, allowed_origin, run_model_request
 
@@ -65,6 +65,53 @@ class LanAccessTests(unittest.TestCase):
         self.assertEqual(store.get(first.split("/")[-1][:-5]), b"first")
         store.put(b"third")
         self.assertIsNone(store.get(first.split("/")[-1][:-5]))
+
+
+class ChatRouteTests(unittest.TestCase):
+    def handler(self, path, request=None, headers=None):
+        handler = object.__new__(Handler)
+        body = json.dumps(request or {}).encode()
+        handler.path = path
+        handler.headers = {"Host": "127.0.0.1:8765", "Content-Type": "application/json",
+                           "Content-Length": str(len(body)), **(headers or {})}
+        handler.server = SimpleNamespace(server_address=("127.0.0.1", 8765), server_port=8765, chat=Mock())
+        handler.rfile, handler.wfile = io.BytesIO(body), io.BytesIO()
+        handler.responses = []
+        handler.send_response = handler.responses.append
+        handler.send_header = lambda *args: None
+        handler.end_headers = lambda: None
+        return handler
+
+    def test_chat_routes_do_not_require_model_source_except_send(self):
+        for action, method in (("login", "login_start"), ("send", "send"), ("poll", "poll"),
+                               ("cancel", "cancel"), ("reset", "reset")):
+            with self.subTest(action=action):
+                handler = self.handler("/chat/" + action, {"sessionId": "browser"})
+                target = getattr(handler.server.chat, method)
+                target.return_value = {"ok": True}
+                handler.do_POST()
+                self.assertEqual(handler.responses, [200])
+                self.assertEqual(json.loads(handler.wfile.getvalue()), {"ok": True})
+                target.assert_called_once()
+
+    def test_chat_status_and_mutations_keep_host_origin_guards(self):
+        for path in ("/chat/status", "/chat/login", "/chat/send"):
+            for headers in ({"Host": "evil.example:8765"}, {"Origin": "https://evil.example"}):
+                handler = self.handler(path, headers=headers)
+                (handler.do_GET if path == "/chat/status" else handler.do_POST)()
+                self.assertEqual(handler.responses, [400])
+                self.assertFalse(handler.server.chat.mock_calls)
+        handler = self.handler("/chat/status")
+        handler.server.chat.status.return_value = {"ready": False}
+        handler.do_GET()
+        self.assertEqual(handler.responses, [200])
+
+    def test_chat_requires_json_and_session_id(self):
+        for path, headers in (("/chat/poll", {}), ("/chat/login", {"Content-Type": "text/plain"})):
+            handler = self.handler(path, headers=headers)
+            handler.do_POST()
+            self.assertEqual(handler.responses, [400])
+            self.assertFalse(handler.server.chat.mock_calls)
 
 
 class ModelProcessTests(unittest.TestCase):

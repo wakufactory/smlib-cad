@@ -43,6 +43,32 @@ PYTHONPATH="$PWD/.build/smlib-core" \
 
 `_smlib_core` は下記のプリミティブに加え、Boolean、全エッジ加工、`face_info`、`offset_brep`、`shell_brep`、`transform_brep`、`tessellate` を公開します。楕円球は球を中心から X/Y/Z 方向へ拡大縮小した BRep です。USD は使いません。引数・戻り値・所有権の契約は [ツール境界 API 仕様](usd-brep/docs/smlib-core-tool-api.md) を参照してください。
 
+## チャットでモデルを編集
+
+右ペイン下部の「モデル編集チャット」に指示すると、現在のソース・入力モード・モデルの設定を Codex 経由で GPT に送り、返ってきたソースをエディタに反映してプレビューします。テキスト命令と Python の両方に対応します。質問への回答だけの場合はソースを変更しません。
+
+サーバーのMacに Codex CLI、または CLI を同梱する ChatGPT / Codex アプリが必要です。PATH 上の `codex`、次にアプリ内のCLIを検出します。別の場所にある場合は起動時に `CAD_CODEX_BIN=/absolute/path/to/codex make start` を指定します。モデルは Codex の既定値を使い、必要なら `CAD_CODEX_MODEL=<利用可能なモデルID> make start` で指定できます。
+
+1. `make start` で起動し、ブラウザで開きます。
+2. チャット欄の「ChatGPT にログイン」を押し、表示されたリンクを**サーバーのMacのブラウザ**で開いて認証します。OAuth のコールバック先はそのMacの localhost です。LANの別端末からCADを開く場合も、初回認証はMac側で行ってください。
+3. 「ChatGPT 接続済み」になったら指示を送ります。ログイン後の認証状態は自動確認し、必要なら「接続確認」で再確認できます。
+
+ChatGPT OAuth でログインした Codex の利用枠を使います。APIキーによる呼び出しへの自動切り替えは行いません。LAN用の追加認証はなく、利用枠はサーバーでログインしたアカウントのものです。
+
+「停止」は進行中の応答を中断します。「変更を戻す」は直前にチャットの変更を反映する前のソース・入力モードへ戻し、再プレビューします。応答待ちの間にソースを手動編集・読込した場合は自動上書きせず、変更案を保留します。「変更案を反映」を押すと現在のソースを置き換え、その直前の内容を取り消し用に保持します。生成に失敗したソースも編集欄に残り、エラーを次の送信に添付するため、「このエラーを直して」と依頼できます。
+
+会話はタブごとに分かれます。「JSON を保存」で、会話があればモデルJSON内の任意項目 `chat`（`version: 1` と `messages`）へ保存します。各メッセージには `role`（`user` / `assistant` / `system`）、`text`、必要に応じて `error: true` を記録します。表示中の直近100件を対象とし、履歴の合計は20万文字、モデルJSON全体は1 MB以下です。ログイン情報やCodexの内部スレッドIDは含めません。
+
+「JSON を読み込む」で会話表示も復元し、次の送信でその履歴を新しいCodex会話の文脈に添えます。現在のモデルソースを正として送るため、元のCodex内部スレッドや過去のソース全文を復元する方式ではありません。`chat` を含まない従来のJSONは会話なしとして読み込み、その前に開いていたモデルの会話をクリアします。不正な履歴はソース・会話とも変更せずに拒否します。チャット応答中は、完了または停止してからJSONを読み込んでください。
+
+「新しい会話」、ページの再読込、サーバー再起動で現在の会話を切り替えます。保存したJSONを読み込めば履歴を復元できます。1サーバーで最大8会話を保持し、1時間使われていない会話は後続の新規会話作成時に終了します。
+
+Codex は専用の `CODEX_HOME`（既定 `.build/codex-chat/`、`CAD_CODEX_HOME` で変更可能）と一時作業フォルダーで起動します。普段の Codex の設定・会話・メモリを読み込まず、メモリ機能・シェル・プラグインなども無効にします。既存のCLIでログイン済みでも、この専用環境では初回ログインが必要です。認証情報は専用フォルダーにCodex自身が保存するため、共有しないでください。Codexの会話は ephemeral とし、CAD側の会話履歴はJSON保存時以外はメモリ内だけに保持します。
+
+Codex との通信はローカルの app-server の標準入出力を使用します。Codex にファイル編集を任せず、構造化された返信（説明とソース全文）を受け取り、CADがエディタへ反映します。Pythonモードのプレビューは従来どおりローカルPythonコードを実行します。
+
+Codexの実行権限は専用の `cad-chat` プロファイルで指定し、読み取り先を一時作業フォルダーと最小限の実行環境に限定します。書き込みとツールからのネットワーク接続は許可しません。旧形式の `readOnly.access` は送信しません。
+
 ## 入力
 
 「テキスト命令」は 1 行に 1 命令を書きます。`#` 以降はコメントです。単位は任意ですが、モデル内では統一してください。
@@ -333,9 +359,12 @@ PYTHONPATH="$PWD/.build/smlib-core:$PWD" \
   -m unittest discover -s tests -v
 PYTHONPYCACHEPREFIX=/tmp/cad-pycache \
   python3.12 \
-  -m py_compile modeler.py server.py json_to_glb.py json_to_usdz.py
+  -m py_compile modeler.py server.py codex_bridge.py json_to_glb.py json_to_usdz.py
 node --check app.js
+node --check chat.js
 node tests/test_model_file_ui.js
+node tests/test_preview_guides.js
+node tests/test_chat_ui.js
 ```
 
-このテストはJSONモデルの往復と不正値の拒否、テキスト命令・三角形化・GLB 構造、追加プリミティブのネイティブ生成と楕円球の寸法・Boolean を確認します。ネイティブバインディング単体のテストは上記の Python 3.12 コマンドで実行します。
+このテストはJSONモデルの往復と不正値の拒否、テキスト命令・三角形化・GLB 構造、追加プリミティブのネイティブ生成と楕円球の寸法・Boolean を確認します。チャットのテストは代替app-serverを使い、実モデルの利用枠を消費せずに会話の分離、停止、エラー、ソース反映・取り消し・手動編集との競合を検証します。実際のモデルによる編集にはChatGPTログインが必要です。ネイティブバインディング単体のテストは上記の Python 3.12 コマンドで実行します。

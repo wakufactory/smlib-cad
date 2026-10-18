@@ -12,6 +12,19 @@ const ModelFile = (() => {
     return value;
   }
 
+  function chat(value) {
+    if (!value || value.version !== 1 || !Array.isArray(value.messages) || value.messages.length > 100) throw Error('チャット履歴の形式が不正です');
+    let length = 0;
+    const messages = value.messages.map(item => {
+      if (!item || !['user', 'assistant', 'system'].includes(item.role) || typeof item.text !== 'string' ||
+          (item.error !== undefined && typeof item.error !== 'boolean')) throw Error('チャット履歴のメッセージが不正です');
+      length += item.text.length;
+      if (length > 200000) throw Error('チャット履歴は合計20万文字以下にしてください');
+      return {role:item.role, text:item.text, ...(item.error ? {error:true} : {})};
+    });
+    return {version:1, messages};
+  }
+
   function validate(document) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('モデルのJSONオブジェクトが必要です');
     if (document.format !== 'smlib-model' || document.version !== 1 || !['text', 'python'].includes(document.mode)) {
@@ -24,6 +37,7 @@ const ModelFile = (() => {
     if (!['none', 'chamfer', 'fillet'].includes(finish)) throw Error('全体加工の種類が不正です');
     return {
       format: 'smlib-model', version: 1, mode: document.mode, source: document.source,
+      ...(document.chat === undefined ? {} : {chat:chat(document.chat)}),
       parameters: {
         chord: number(p.chord, '曲面精度', 0.001, 2),
         angle: number(p.angle, '角度条件', 1, 90),
@@ -34,7 +48,7 @@ const ModelFile = (() => {
     };
   }
 
-  return { validate, exportScale, parse: json => validate(JSON.parse(json)) };
+  return { validate, chat, exportScale, parse: json => validate(JSON.parse(json)) };
 })();
 
 const $ = id => document.getElementById(id);
@@ -48,6 +62,7 @@ let yaw = 0.72, pitch = 0.44, zoom = 2.8, dragging = false, last = [0, 0];
 let THREE, renderer, scene, camera;
 let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
+let previewFailure = null;
 const cameraLightDirection = [-0.6, 0.8, 0.8]; // left, up, toward viewer
 
 function note(text, error = false) { message.textContent = text; message.style.color = error ? '#ff9b93' : '#9dd9c5'; }
@@ -209,6 +224,7 @@ async function request(path){
 }
 async function preview(){
   const requestId=++previewRequestId;
+  const previewSource=$('source').value,previewMode=$('mode').value;
   $('preview').disabled=true;$('export').disabled=true;$('export-usdz').disabled=true;note('計算中…');
   try{
     if($('preview-mode').value==='model'){
@@ -229,7 +245,8 @@ async function preview(){
       note(`${data.meshes.length} solid / ${triangles.toLocaleString()} triangles${data.log?'\n'+data.log:''}`);
     }
     $('export').disabled=false;$('export-usdz').disabled=false;
-  }catch(e){if(requestId!==previewRequestId)return;if($('preview-mode').value==='model'){usdModel.hidden=true;modelStatus.textContent=e.message;modelStatus.hidden=false;}note(e.message,true);}finally{if(requestId===previewRequestId)$('preview').disabled=false;}
+    previewFailure=null;return true;
+  }catch(e){if(requestId!==previewRequestId)return;previewFailure={source:previewSource,mode:previewMode,error:e.message};if($('preview-mode').value==='model'){usdModel.hidden=true;modelStatus.textContent=e.message;modelStatus.hidden=false;}note(e.message,true);return false;}finally{if(requestId===previewRequestId)$('preview').disabled=false;}
 }
 function saveFileName(format){
   const base=$('file-name').value.trim().replace(/\.(glb|usdz|json)$/i,'');
@@ -259,7 +276,10 @@ function saveModel(){
   try{
     const name=saveFileName('json');
     const data=modelDocument();
+    const chat=globalThis.ModelChat?.snapshot();
+    if(chat)data.chat=ModelFile.chat(chat);
     const blob=new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'});
+    if(blob.size>1_000_000)throw Error('JSONファイルは1 MB以下にしてください');
     const url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     note(`${name} を保存しました`);
@@ -270,12 +290,15 @@ async function loadModel(file){
   try{
     if(file.size>1_000_000)throw Error('JSONファイルは1 MB以下にしてください');
     const data=ModelFile.parse(await file.text()),p=data.parameters;
+    globalThis.ModelChat?.assertIdle();
     $('mode').value=data.mode;$('sample').value='default';$('source').value=data.source;
     $('chord').value=p.chord;$('angle').value=p.angle;
     $('finish').value=p.finish;$('finish-size').value=p.finishSize;$('export-scale').value=p.exportScale;
     if(file.name && /\.json$/i.test(file.name))$('file-name').value=file.name.replace(/\.json$/i,'');
     $('finish-size').disabled=p.finish==='none';$('save-model').disabled=false;
     $('export').disabled=true;$('export-usdz').disabled=true;
+    globalThis.ModelChat?.restore(data.chat);
+    previewFailure=null;
   }catch(e){note(`JSONを読み込めません: ${e.message}`,true);return;}
   finally{$('model-file').value='';}
   await preview();

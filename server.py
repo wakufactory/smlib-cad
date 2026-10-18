@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from modeler import EXAMPLE_SCRIPT, EXAMPLE_TEXT
+from codex_bridge import ChatBridge, CodexError
 
 ROOT = Path(__file__).resolve().parent
 
@@ -91,6 +92,13 @@ def allowed_origin(origin: str, host_header: str, scheme: str = "http") -> bool:
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _check_origin(self):
+        host = self.headers.get("Host", "")
+        if not allowed_host(host, self.server.server_address[0], self.server.server_port):
+            raise ValueError("Invalid Host header")
+        if not allowed_origin(self.headers.get("Origin", ""), host, getattr(self.server, "scheme", "http")):
+            raise ValueError("Cross-origin requests are not allowed")
+
     def _reply(self, code, body, content_type):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -107,6 +115,14 @@ class Handler(BaseHTTPRequestHandler):
             self._reply(200, (ROOT / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/app.js":
             self._reply(200, (ROOT / "app.js").read_bytes(), "text/javascript; charset=utf-8")
+        elif self.path == "/chat.js":
+            self._reply(200, (ROOT / "chat.js").read_bytes(), "text/javascript; charset=utf-8")
+        elif self.path == "/chat/status":
+            try:
+                self._check_origin()
+                self._json(200, self.server.chat.status())
+            except Exception as exc:
+                self._json(400, {"error": str(exc)})
         elif self.path == "/status":
             try:
                 import _smlib_core  # noqa: F401
@@ -120,7 +136,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404)
             else:
                 self._reply(200, data, "model/vnd.usdz+zip")
-        elif self.path == "/examples":
+        elif self.path in ("/examples", "/examples/"):
             self._json(200, {"python": EXAMPLE_SCRIPT, "text": EXAMPLE_TEXT,
                              "gallery": (ROOT / "examples" / "all_primitives_materials.txt").read_text(),
                              "sweeps": (ROOT / "examples" / "extrude_revolve.txt").read_text(),
@@ -130,22 +146,34 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self):
-        if self.path not in ("/preview", "/preview/usdz", "/export", "/export/usdz"):
+        chat_paths = ("/chat/login", "/chat/send", "/chat/poll", "/chat/cancel", "/chat/reset")
+        if self.path not in ("/preview", "/preview/usdz", "/export", "/export/usdz", *chat_paths):
             self.send_error(404)
             return
         try:
-            host = self.headers.get("Host", "")
-            origin = self.headers.get("Origin", "")
-            if not allowed_host(host, self.server.server_address[0], self.server.server_port):
-                raise ValueError("Invalid Host header")
-            if not allowed_origin(origin, host, getattr(self.server, "scheme", "http")):
-                raise ValueError("Cross-origin requests are not allowed")
+            self._check_origin()
             if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
                 raise ValueError("Content-Type must be application/json")
             length = int(self.headers.get("Content-Length", "0"))
-            if length < 1 or length > 100_000:
-                raise ValueError("Source must be between 1 and 100000 bytes")
+            limit = 1_000_000 if self.path == "/chat/send" else (250_000 if self.path in chat_paths else 100_000)
+            if length < 1 or length > limit:
+                raise ValueError(f"Request must be between 1 and {limit} bytes")
             request = json.loads(self.rfile.read(length))
+            if not isinstance(request, dict):
+                raise ValueError("JSON object required")
+            if self.path in chat_paths:
+                chat = self.server.chat
+                if self.path == "/chat/login":
+                    result = chat.login_start()
+                elif self.path == "/chat/send":
+                    result = chat.send(request)
+                else:
+                    session_id = request.get("sessionId")
+                    if not isinstance(session_id, str):
+                        raise ValueError("sessionId is required")
+                    result = {"/chat/poll": chat.poll, "/chat/cancel": chat.cancel, "/chat/reset": chat.reset}[self.path](session_id)
+                self._json(200, result)
+                return
             source = request["source"]
             if not isinstance(source, str):
                 raise ValueError("source must be text")
@@ -162,6 +190,8 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
             else:
                 self._reply(200, data, "application/json; charset=utf-8")
+        except CodexError as exc:
+            self._json(400, {"error": str(exc)})
         except ModelError as exc:
             self._json(400, {"error": str(exc), "traceback": exc.details})
         except Exception as exc:
@@ -169,6 +199,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 class ModelHTTPServer(ThreadingHTTPServer):
+    def __init__(self, *args, **kwargs):
+        self.chat = ChatBridge()
+        super().__init__(*args, **kwargs)
+
+    def server_close(self):
+        self.chat.close()
+        super().server_close()
+
     def handle_error(self, request, client_address):
         error = sys.exc_info()[1]
         if isinstance(error, ssl.SSLError) and getattr(error, "reason", None) in {

@@ -14,7 +14,17 @@ h1{font-size:16px;margin:0}h2{font-size:13px;margin:0;color:#dbe8f0}
 main{height:calc(100dvh - 48px);display:grid;grid-template-columns:264px minmax(0,1fr) minmax(320px,36%);min-height:0;overflow:hidden}
 aside,.source-pane{min-width:0;min-height:0;padding:12px;display:flex;flex-direction:column;gap:12px}
 aside{border-right:1px solid #2c4154;overflow-y:auto;overscroll-behavior:none}
-.source-pane{border-left:1px solid #2c4154;background:#101b29}
+.source-pane{border-left:1px solid #2c4154;background:#101b29;overflow-y:auto}
+.source-editor{display:flex;flex:1 1 55%;min-height:180px;flex-direction:column;gap:10px;overflow:hidden}
+.chat-pane{display:flex;flex:1 1 45%;min-height:300px;flex-direction:column;gap:8px;border-top:1px solid #36516a;padding-top:10px;overflow:hidden}
+.chat-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.chat-heading button{padding:4px 7px}
+#chat-status{font-size:11px;color:#9db6c6;overflow-wrap:anywhere}
+#chat-history{flex:1;min-height:40px;overflow:auto;overscroll-behavior:contain;-webkit-user-select:text;user-select:text}
+.chat-entry{font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 8px;padding:8px;border-radius:6px;background:#17293a}.chat-entry.user{background:#1b3b4d}.chat-entry.error{color:#ffb4ab}
+.chat-entry strong{display:block;font-size:10px;color:#98b8cb;margin-bottom:3px}
+#chat-input{flex:none;height:64px;min-height:44px;padding:8px;font:12px/1.5 system-ui,sans-serif}
+#chat-login-link{color:#7dd2ed;font-size:12px}.chat-controls{display:flex;flex-wrap:wrap;gap:6px}.chat-controls button{flex:1;white-space:nowrap}
+#chat-proposal{font-size:11px;color:#edc99b}#chat-proposal[hidden],#chat-login[hidden],#chat-login-link[hidden]{display:none}
 .settings-group{display:flex;flex-direction:column;gap:8px;padding-bottom:12px;border-bottom:1px solid #263b4d}
 label{font-size:12px;color:#adc2d0}
 select,button,input{font:inherit;font-size:12px}
@@ -61,8 +71,19 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#v
 <button class="primary" id="preview" disabled>プレビュー</button>
 <div class="row"><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
 <div id="message" role="status"></div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
+</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
 <div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
-<textarea id="source" spellcheck="false"></textarea>
+<textarea id="source" spellcheck="false"></textarea></div>
+<section class="chat-pane" aria-label="モデル編集チャット">
+<div class="chat-heading"><h2>モデル編集チャット</h2><button id="chat-reset" type="button">新しい会話</button></div>
+<div id="chat-status" role="status">Codex の接続を確認中…</div>
+<div class="row"><button id="chat-login" type="button" hidden>ChatGPT にログイン</button><button id="chat-connect" type="button">接続確認</button></div>
+<a id="chat-login-link" target="_blank" rel="noopener noreferrer" hidden>ログインを開く（サーバーのMacで操作）</a>
+<div id="chat-history" role="log" aria-label="会話履歴" aria-live="polite"></div>
+<div id="chat-proposal" hidden>手動編集があったため、自動反映を止めました。反映すると現在のソースを置き換えます。<button id="chat-apply" type="button">変更案を反映</button></div>
+<label for="chat-input" class="help">現在のソースと一緒に送信 · Ctrl/⌘ + Enter で送信</label>
+<textarea id="chat-input" maxlength="8000" placeholder="例：中央に直径10の貫通穴を開けて" spellcheck="false"></textarea>
+<div class="chat-controls"><button id="chat-send" class="primary" disabled>送信</button><button id="chat-stop" disabled>停止</button><button id="chat-undo" disabled>変更を戻す</button></div>
+</section>
 </section></main>
-<script src="/app.js"></script></body></html>
+<script src="/app.js"></script><script src="/chat.js"></script></body></html>
