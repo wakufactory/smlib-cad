@@ -1,0 +1,50 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const handlers = {};
+const canvas = {addEventListener(name, fn) { handlers[name] = fn; }, setPointerCapture() {}};
+const elements = {canvas};
+const context = vm.createContext({
+  document: {getElementById: id => elements[id] ||= {addEventListener() {}}},
+  ResizeObserver: class {observe() {}},
+  fetch: () => new Promise(() => {}), window: {}, location: {protocol: 'http:'}, console
+});
+vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
+vm.runInContext('draw = () => {};', context);
+const state = () => vm.runInContext('[yaw, pitch, zoom]', context);
+const event = (name, id, x, y = 0) => handlers[name]({pointerId: id, clientX: x, clientY: y, pointerType: 'touch'});
+const initial = state();
+event('pointerdown', 1, 0);
+event('pointermove', 1, 10);
+assert(state()[0] > initial[0], 'single finger rotates');
+event('pointerdown', 2, 110);
+const rotated = state();
+event('pointermove', 2, 210);
+assert.equal(state()[2], rotated[2] / 2, 'spreading fingers zooms in');
+assert.equal(state()[0], rotated[0], 'pinch does not rotate');
+assert.equal(state()[1], rotated[1]);
+event('pointermove', 2, 110);
+assert.equal(state()[2], rotated[2], 'closing fingers zooms out');
+event('pointermove', 2, 10);
+assert(Number.isFinite(state()[2]), 'coincident fingers stay finite');
+event('pointermove', 2, 11);
+event('pointermove', 2, 10010);
+assert.equal(state()[2], 1.2, 'near zoom limit');
+event('pointermove', 2, 10.001);
+assert.equal(state()[2], 30, 'far zoom limit');
+event('pointerup', 2, 10);
+const remaining = state();
+event('pointermove', 1, 12);
+assert(Math.abs(state()[0] - remaining[0] - 0.014) < 1e-12, 'rotation resumes without jumping');
+event('pointercancel', 1, 12);
+const canceled = state();
+event('pointermove', 1, 99);
+assert.deepEqual(state(), canceled, 'cancel stops gesture');
+event('pointerdown', 3, 0);
+event('lostpointercapture', 3, 0);
+event('pointermove', 3, 99);
+assert.deepEqual(state(), canceled, 'lost capture stops gesture');
+let prevented = false;
+handlers.wheel({deltaY: -100, preventDefault() {prevented = true;}});
+assert(prevented && state()[2] < canceled[2], 'wheel zoom remains available');
+console.log('preview touch: pinch, rotation transitions, limits, cancellation, and wheel passed');

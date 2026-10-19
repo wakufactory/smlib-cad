@@ -118,3 +118,21 @@ assert(preview.solid.geometry.disposed);
 assert(preview.normal.material.disposed);
 assert.equal(vm.runInContext('rendered[0].normal.visible', context), true);
 console.log('preview guides: axes, unit grid, toggles, and recalculation passed');
+
+// Clear removes geometry and guides, resets counts, and invalidates pending work.
+elements['usd-model'].src = '/preview/assets/old.usdz';
+elements['usd-model'].removeAttribute = function(name) { delete this[name]; };
+elements.source.value = 'box old 0 0 0 1 1 1';
+const priorRequest = vm.runInContext('previewRequestId', context);
+context.clearModel();
+assert.equal(objects.size, 0);
+assert.equal(elements.source.value, '');
+assert.equal(elements['usd-model'].src, undefined);
+assert.equal(elements['usd-model'].hidden, true);
+assert.equal(elements['model-status'].hidden, true);
+assert.equal(elements['mesh-stats'].textContent, 'トライアングル数: 0\nソリッド数: 0');
+assert.equal(elements.export.disabled, true);
+assert.equal(elements['export-usdz'].disabled, true);
+assert.equal(vm.runInContext('currentMeshes.length', context), 0);
+assert.equal(vm.runInContext('previewRequestId', context), priorRequest + 1);
+console.log('clear model: geometry, guides, USDZ, counts, and pending preview reset passed');

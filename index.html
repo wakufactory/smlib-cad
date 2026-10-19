@@ -45,6 +45,7 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 #preview-mode{position:absolute;top:12px;left:12px;z-index:1;background:#152538dd}
 #view-controls{position:absolute;top:52px;right:12px;z-index:1;display:flex;gap:10px;align-items:center;padding:6px 8px;border:1px solid #36516a;border-radius:6px;background:#152538dd}
 #view-controls label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}#view-controls input{margin:0;padding:0;accent-color:#57b7d9}
+#mesh-stats{flex-shrink:0;padding:8px 10px;border:1px solid #36516a;border-radius:6px;background:#152538;color:#dbe8f0;font-size:12px;line-height:1.7;font-variant-numeric:tabular-nums;white-space:pre-line}
 #hint{position:absolute;bottom:12px;left:12px;right:12px;font-size:11px;color:#a5bdc9;pointer-events:none}
 #usd-model{display:block;width:100%;height:100%;background-color:#0e1a26}
 canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#view-controls[hidden],#hint[hidden]{display:none}
@@ -57,6 +58,8 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#v
 <body><header><h1>SMLib Modeler</h1><span id="status">ライブラリを確認中…</span></header>
 <main><aside>
 <h2>設定</h2>
+<div id="mesh-stats" aria-live="polite">トライアングル数: —
+ソリッド数: —</div>
 <div class="settings-group">
 <div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span class="help">小さいほど滑らか</span></div>
 <div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span class="help">度 · 大きいほど粗い</span></div>
@@ -71,7 +74,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#v
 <button class="primary" id="preview" disabled>プレビュー</button>
 <div class="row"><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
 <div id="message" role="status"></div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
+</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
 <div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
 <textarea id="source" spellcheck="false"></textarea></div>
 <section class="chat-pane" aria-label="モデル編集チャット">

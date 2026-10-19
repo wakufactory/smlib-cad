@@ -49,6 +49,9 @@ const ModelFile = vm.runInContext('ModelFile', context);
 assert.equal(context.gridPoints([0, 0, 0], [0, 0, 0]).length / 3, 25);
 assert.equal(context.gridPoints([0, 0, 0], [1000, 1000, 0]).length / 3, 101 * 101);
 assert.equal(context.gridPoints([1e9, 0, 0], [1e9 + 1, 1, 0]).length, 0);
+let previewCalls = 0;
+const actualPreview = context.preview;
+context.preview = async () => {previewCalls++;};
 vm.runInContext('examples = {circular: "group ring\\nend", sweeps: "profile p\\npolygon 0 0 1 0 0 1\\nend"}', context);
 for (const [sample, source] of [
   ['circular', 'group ring\nend'],
@@ -60,11 +63,10 @@ for (const [sample, source] of [
   assert.equal(elements.mode.value, 'text');
   assert.equal(elements.source.value, source);
 }
+assert.equal(previewCalls, 2, 'loading each sample automatically previews');
 elements.source.value = values.source;
 elements.sample.value = 'default';
-let previewCalls = 0;
-const actualPreview = context.preview;
-context.preview = async () => {previewCalls++;};
+previewCalls = 0;
 
 const document = {
   format: 'smlib-model', version: 1, mode: 'text',

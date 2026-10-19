@@ -58,7 +58,7 @@ const usdModel = $('usd-model');
 const modelStatus = $('model-status');
 let examples = {}, currentMeshes = [], rendered = [], center = [0, 0, 0], radius = 20;
 let guides = [];
-let yaw = 0.72, pitch = 0.44, zoom = 2.8, dragging = false, last = [0, 0];
+let yaw = 0.72, pitch = 0.44, zoom = 2.8;
 let THREE, renderer, scene, camera;
 let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
@@ -242,7 +242,8 @@ async function preview(){
       if(requestId!==previewRequestId)return;
       currentMeshes=data.meshes;show(data.meshes);
       const triangles=data.meshes.reduce((n,m)=>n+m.positions.length/9,0);
-      note(`${data.meshes.length} solid / ${triangles.toLocaleString()} triangles${data.log?'\n'+data.log:''}`);
+      $('mesh-stats').textContent=`トライアングル数: ${triangles.toLocaleString()}\nソリッド数: ${data.meshes.length.toLocaleString()}`;
+      note(data.log || 'プレビューを更新しました');
     }
     $('export').disabled=false;$('export-usdz').disabled=false;
     previewFailure=null;return true;
@@ -318,18 +319,62 @@ $('preview-mode').onchange=()=>{
 };
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
 $('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;$('export-usdz').disabled=true;};
+function clearModel(){
+  // Invalidate pending previews so an older response cannot restore the model.
+  ++previewRequestId;
+  previewFailure=null;
+  $('source').value='';
+  currentMeshes=[];
+  if(scene)show([]);
+  usdModel.removeAttribute('src');usdModel.hidden=true;
+  modelStatus.textContent='';modelStatus.hidden=true;
+  $('mesh-stats').textContent='トライアングル数: 0\nソリッド数: 0';
+  $('export').disabled=true;$('export-usdz').disabled=true;
+  $('preview').disabled=!renderer;
+  viewPointers.clear();
+  note('');
+}
 $('example').onclick=()=>{
+  if($('sample').value==='clear'){clearModel();return;}
   if(['gallery','circular','sweeps','offsets'].includes($('sample').value)){
     $('mode').value='text';$('source').value=examples[$('sample').value]||'';
   }
   else $('source').value=examples[$('mode').value]||'';
   $('export').disabled=true;$('export-usdz').disabled=true;
+  preview();
 };
 $('source').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();preview();}});
-canvas.addEventListener('pointerdown',e=>{dragging=true;last=[e.clientX,e.clientY];canvas.setPointerCapture(e.pointerId);});
-canvas.addEventListener('pointerup',()=>dragging=false);
-canvas.addEventListener('pointermove',e=>{if(!dragging)return;yaw+=(e.clientX-last[0])*0.007;pitch=Math.max(-1.48,Math.min(1.48,pitch+(e.clientY-last[1])*0.007));last=[e.clientX,e.clientY];draw();});
-canvas.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(1.2,Math.min(30,zoom*Math.exp(e.deltaY*0.001)));draw();},{passive:false});
+// Track captured pointers so a second finger switches rotation to pinch zoom.
+const viewPointers = new Map();
+function pinchDistance(){
+  const [a,b]=Array.from(viewPointers.values());
+  return Math.hypot(a[0]-b[0],a[1]-b[1]);
+}
+function setZoom(value){zoom=Math.max(1.2,Math.min(30,value));}
+canvas.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse' && e.button!==0)return;
+  viewPointers.set(e.pointerId,[e.clientX,e.clientY]);
+  canvas.setPointerCapture(e.pointerId);
+});
+function endViewPointer(e){viewPointers.delete(e.pointerId);}
+canvas.addEventListener('pointerup',endViewPointer);
+canvas.addEventListener('pointercancel',endViewPointer);
+canvas.addEventListener('lostpointercapture',endViewPointer);
+canvas.addEventListener('pointermove',e=>{
+  const previous=viewPointers.get(e.pointerId);
+  if(!previous)return;
+  const before=viewPointers.size>=2?pinchDistance():0;
+  viewPointers.set(e.pointerId,[e.clientX,e.clientY]);
+  if(viewPointers.size>=2){
+    const after=pinchDistance();
+    if(before>0 && after>0)setZoom(zoom*before/after);
+  }else{
+    yaw+=(e.clientX-previous[0])*0.007;
+    pitch=Math.max(-1.48,Math.min(1.48,pitch+(e.clientY-previous[1])*0.007));
+  }
+  draw();
+});
+canvas.addEventListener('wheel',e=>{e.preventDefault();setZoom(zoom*Math.exp(e.deltaY*0.001));draw();},{passive:false});
 canvas.ondblclick=()=>{yaw=0.72;pitch=0.44;zoom=2.8;draw();};
 new ResizeObserver(draw).observe(canvas);
 (async()=>{
