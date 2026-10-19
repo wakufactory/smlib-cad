@@ -37,6 +37,11 @@ button.primary{background:#1784ab;border-color:#32a5ca;color:white}button:disabl
 .controls{display:grid;grid-template-columns:1fr 86px;gap:4px 8px;align-items:center}.controls input,.controls select{width:100%}
 .help{font-size:11px;color:#8faabb;line-height:1.4}.controls .help{grid-column:1/-1}
 #preview{width:100%;padding:9px}
+#command-reference{flex-shrink:0;border:1px solid #36516a;border-radius:6px;background:#101f2e;font-size:12px}
+#command-reference summary{padding:8px 10px;color:#dbe8f0;cursor:pointer;font-weight:600}
+.command-list{max-height:36dvh;overflow-y:auto;overscroll-behavior:contain;padding:0 10px 10px;line-height:1.6;-webkit-user-select:text;user-select:text}
+.command-list:focus-visible{outline:2px solid #57b7d9;outline-offset:-2px}
+.command-list p{margin:6px 0 10px;color:#adc2d0}.command-list dl{margin:0}.command-entry{padding:8px 0;border-top:1px solid #263b4d}.command-list dt{color:#7ed2ef;font-weight:600}.command-list dd{margin:4px 0 0;color:#adc2d0}.command-list code,.command-list pre{font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.command-list pre{white-space:pre-wrap;margin:6px 0}
 #message{font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;max-height:140px;color:#e7ad90;overscroll-behavior:none}
 .source-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-heading span{font-size:11px;color:#8faabb}
 #viewport{position:relative;min-width:0;min-height:0;overflow:hidden;background-color:#0e1a26}
@@ -60,6 +65,52 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#v
 <h2>設定</h2>
 <div id="mesh-stats" aria-live="polite">トライアングル数: —
 ソリッド数: —</div>
+<details id="command-reference" open>
+<summary>テキストコマンド一覧</summary>
+<div class="command-list" tabindex="0" role="region" aria-label="テキストコマンド一覧">
+<p>1行に1命令。<code>#</code> 以降はコメント。<code>[…]</code> は省略可能な引数です。名前は英字・下線で始め、英数字・下線を使います。角度は度数です。</p>
+<p><code>x y z</code> は位置、<code>dx dy dz</code> は軸方向（省略時は +Z）、<code>ux uy uz</code> は断面のX方向です。</p>
+<dl><div class="command-entry"><dt><code>box</code></dt><dd><code>名前 x y z 幅 奥行 高さ</code></dd></div>
+<div class="command-entry"><dt><code>sphere</code></dt><dd><code>名前 x y z 半径</code></dd></div>
+<div class="command-entry"><dt><code>cylinder</code></dt><dd><code>名前 x y z 半径 高さ [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>cone</code></dt><dd><code>名前 x y z 底面半径 上面半径 高さ [dx dy dz]</code>（上面半径 <code>0</code> で円錐）</dd></div>
+<div class="command-entry"><dt><code>torus</code></dt><dd><code>名前 x y z 主半径 管半径 [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>pyramid</code></dt><dd><code>名前 x y z 底面の辺長 高さ [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>cylindrical_box</code></dt><dd><code>名前 x y z 高さ 内半径 外半径 開始角 終了角 [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>partial_sphere</code></dt><dd><code>名前 x y z 半径 開始角 終了角 [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>partial_cone</code></dt><dd><code>名前 x y z 底面半径 上面半径 高さ 開始角 終了角 [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>partial_cylinder</code></dt><dd><code>名前 x y z 半径 高さ 開始角 終了角 [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>partial_torus</code></dt><dd><code>名前 x y z 主半径 管半径 開始角 終了角 [dx dy dz]</code></dd></div>
+<div class="command-entry"><dt><code>ellipsoid</code></dt><dd><code>名前 x y z X半径 Y半径 Z半径</code></dd></div>
+<div class="command-entry"><dt><code>sphere_no_pole</code></dt><dd><code>名前 x y z 半径</code></dd></div>
+<div class="command-entry"><dt><code>plane</code></dt><dd><code>名前 x y z X長さ Y長さ</code>（面）</dd></div>
+<div class="command-entry"><dt><code>planar_circle</code></dt><dd><code>名前 x y z 半径</code>（面）</dd></div>
+<div class="command-entry"><dt><code>profile</code> / <code>polygon</code> / <code>end</code></dt><dd><code>profile 断面名</code> 内に <code>polygon u1 v1 u2 v2 ...</code> を1行記述して <code>end</code> で閉じる</dd></div>
+<div class="command-entry"><dt><code>extrude</code></dt><dd><code>名前 断面名 x y z 開始距離 終了距離 [dx dy dz [ux uy uz]]</code></dd></div>
+<div class="command-entry"><dt><code>revolve</code></dt><dd><code>名前 断面名 x y z 開始角 終了角 [dx dy dz [ux uy uz]]</code>（度数）</dd></div>
+<div class="command-entry"><dt><code>union</code> / <code>subtract</code> / <code>intersect</code></dt><dd><code>出力名 左の形状名またはグループ名 右の形状名またはグループ名</code></dd></div>
+<div class="command-entry"><dt><code>chamfer</code></dt><dd><code>形状名 幅</code>（その形状の全エッジを面取り）</dd></div>
+<div class="command-entry"><dt><code>fillet</code></dt><dd><code>形状名 半径</code>（その形状の全エッジを丸め）</dd></div>
+<div class="command-entry"><dt><code>offset</code></dt><dd><code>形状名 距離</code>（正は外側、負は内側）</dd></div>
+<div class="command-entry"><dt><code>shell</code></dt><dd><code>形状名 厚み [開口面の番号 ...]</code>（正は外側、負は内側。面指定なしは閉じた中空体）</dd></div>
+<div class="command-entry"><dt><code>faces</code></dt><dd><code>形状名</code>（現在の面番号と各面の座標範囲をログへ表示）</dd></div>
+<div class="command-entry"><dt><code>material</code></dt><dd><code>形状名 baseColorのR G B metallic roughness</code></dd></div>
+<div class="command-entry"><dt><code>part</code> / <code>end</code></dt><dd>ルート階層で <code>part 部品名</code> から <code>end</code> までを再利用可能な定義にする</dd></div>
+<div class="command-entry"><dt><code>use</code></dt><dd><code>use 部品名 [配置名]</code> で部品を新しく生成する</dd></div>
+<div class="command-entry"><dt><code>group</code> / <code>end</code></dt><dd><code>group 名前</code> から <code>end</code> までをローカル座標のグループにする。入れ子可</dd></div>
+<div class="command-entry"><dt><code>scale</code></dt><dd>グループ内で <code>scale sx sy sz</code>（各軸の正の倍率）</dd></div>
+<div class="command-entry"><dt><code>euler</code></dt><dd>グループ内で <code>euler rx ry rz</code>（度数）</dd></div>
+<div class="command-entry"><dt><code>position</code></dt><dd>グループ内で <code>position x y z</code>（親座標での移動）</dd></div>
+<div class="command-entry"><dt><code>let</code></dt><dd><code>let 名前 = 式</code>（数値変数。<code>${式}</code> を数値引数や形状名に埋め込める）</dd></div>
+<div class="command-entry"><dt><code>for</code> / <code>end</code></dt><dd><code>for i in range(回数)</code> または <code>range(開始, 終了[, 刻み])</code>。<code>end</code> で閉じる。終了値を含まない</dd></div>
+<div class="command-entry"><dt><code>tessellation</code></dt><dd><code>形状名 曲面精度 角度条件</code>（形状ごとの指定。曲面精度は 0.001〜2、角度は 1〜90。<code>default</code> でUI設定を使用）</dd></div></dl>
+<p>例：穴のある箱</p>
+<pre>box body 0 0 0 20 20 8
+cylinder hole 10 10 -1 3 10
+subtract result body hole</pre>
+<p>Boolean は左右の入力を消費し、出力名に結果を作ります。材質の RGB・metallic・roughness は 0〜1。グループの変換は scale → euler → position の順です。</p>
+</div>
+</details>
 <div class="settings-group">
 <div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span class="help">小さいほど滑らか</span></div>
 <div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span class="help">度 · 大きいほど粗い</span></div>
