@@ -3,31 +3,63 @@
   let sessionId = null, busy = false, ready = false, undo = null, proposal = null;
   let editorRevision = 0, loginTimer = null;
   let transcript = [], restoredContext = null;
+  let attachments = [], readingImages = false;
   const history = $('chat-history');
-  function entry(role, text, error = false, record = true) {
+  function entry(role, text, error = false, record = true, images = []) {
     if(record){
-      transcript.push({role,text,...(error ? {error:true} : {})});
+      transcript.push({role,text,...(error ? {error:true} : {}),...(images.length?{images:images.map(item=>({...item}))}:{})});
       if(transcript.length>100)transcript.shift();
     }
     const box = document.createElement('div'), label = document.createElement('strong');
     box.className = `chat-entry ${role}${error ? ' error' : ''}`;
     label.textContent = {user: 'あなた', assistant: 'GPT', system: 'CAD'}[role];
     box.append(label, document.createTextNode(text));
+    for(const image of images){const img=document.createElement('img');img.src=image.dataUrl;img.alt=image.name;box.append(img);}
     history.append(box);
     while (history.children.length > 100) history.firstChild.remove();
     history.scrollTop = history.scrollHeight;
   }
   function controls() {
-    $('chat-send').disabled = busy || !ready;
+    $('chat-send').disabled = busy || readingImages || !ready;
     $('chat-stop').disabled = !busy || !sessionId;
-    $('chat-reset').disabled = busy;
+    $('chat-reset').disabled = busy || readingImages;
     $('chat-undo').disabled = busy || !undo;
     $('chat-apply').disabled = busy || !proposal;
     $('chat-input').disabled = busy;
     $('chat-login').disabled = busy;
     $('chat-connect').disabled = busy;
     $('chat-proposal').hidden = !proposal;
+    $('chat-attach').disabled=busy || readingImages;
+    $('chat-files').disabled=busy || readingImages;
+    for(const button of $('chat-images').children)if(button.removeButton)button.removeButton.disabled=busy || readingImages;
   }
+  function showAttachments(){
+    const area=$('chat-images');area.replaceChildren();area.hidden=!attachments.length;
+    attachments.forEach((image,index)=>{
+      const item=document.createElement('div'),img=document.createElement('img'),remove=document.createElement('button');
+      item.className='chat-image';img.src=image.dataUrl;img.alt=image.name;
+      remove.type='button';remove.textContent='削除';remove.setAttribute('aria-label',`${image.name} を削除`);
+      remove.onclick=()=>{if(busy || readingImages)return;attachments.splice(index,1);showAttachments();controls();};
+      item.removeButton=remove;item.append(img,document.createTextNode(image.name),remove);area.append(item);
+    });
+  }
+  $('chat-attach').onclick=()=>$('chat-files').click();
+  $('chat-files').onchange=async event=>{
+    if(busy || readingImages)return;
+    const files=Array.from(event.target.files || []);
+    readingImages=true;controls();
+    try{
+      if(attachments.length+files.length>3)throw Error('画像は3枚まで添付できます');
+      const added=[];
+      for(const file of files){
+        if(!['image/png','image/jpeg','image/webp'].includes(file.type) || !file.size || file.size>2*1024*1024)throw Error('画像はPNG・JPEG・WebP、1枚2 MiB以下にしてください');
+        const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(Error('画像を読み込めませんでした'));reader.readAsDataURL(file);});
+        added.push({name:file.name.slice(0,200),dataUrl});
+      }
+      attachments=ModelFile.images([...attachments,...added]);showAttachments();
+    }catch(error){entry('system',error.message,true);}
+    finally{event.target.value='';readingImages=false;controls();}
+  };
   async function api(path, body) {
     const response = await fetch(path, body === undefined ? {} : {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
@@ -68,20 +100,22 @@
     if (ok === false) entry('system', `プレビューでエラーが出ました。次の送信時にこの内容も添えます。\n${previewFailure?.error || message.textContent}`, true);
   }
   async function send() {
-    if (busy || !ready || !$('chat-input').value.trim()) return;
+    if (busy || readingImages || !ready || (!$('chat-input').value.trim() && !attachments.length)) return;
     let document;
     try { document = modelDocument(); }
     catch (error) { entry('system', error.message, true); return; }
-    const text = $('chat-input').value.trim(), revision = editorRevision;
+    const text = $('chat-input').value.trim() || '添付画像を参考にモデルを編集してください。', revision = editorRevision;
+    const images=attachments.map(item=>({...item}));
     const {source, mode, parameters} = document;
     const previewError = previewFailure?.source === source && previewFailure?.mode === mode ? previewFailure.error : null;
     busy = true; proposal = null; controls();
-    entry('user', text); $('chat-input').value = '';
+    entry('user', text, false, true, images); $('chat-input').value = '';
     $('chat-status').textContent = '送信中…';
     try {
       const sent = await api('/chat/send', {sessionId, message: text, source, mode, parameters, previewError,
+        ...(images.length ? {images} : {}),
         ...(restoredContext ? {restoredHistory:restoredContext} : {})});
-      sessionId = sent.sessionId; restoredContext=null; controls();
+      sessionId = sent.sessionId; restoredContext=null; attachments=[];showAttachments();controls();
       const deadline = Date.now() + 330000;
       let state;
       do {
@@ -140,11 +174,11 @@
     catch (error) { entry('system', error.message, true); controls(); }
   };
   $('chat-reset').onclick = async () => {
-    if (busy) return;
+    if (busy || readingImages) return;
     try {
       if (sessionId) await api('/chat/reset', {sessionId});
     } catch (error) { entry('system', error.message, true); return; }
-    sessionId = null; proposal = null; undo = null; restoredContext=null; transcript=[]; history.replaceChildren();
+    sessionId = null; proposal = null; undo = null; restoredContext=null; transcript=[]; attachments=[];showAttachments();history.replaceChildren();
     controls(); await connect();
   };
   $('chat-undo').onclick = async () => {
@@ -162,15 +196,15 @@
     finally { busy = false; controls(); }
   };
   globalThis.ModelChat = {
-    snapshot: () => transcript.length ? {version:1,messages:transcript.map(item=>({...item}))} : undefined,
-    assertIdle: () => {if(busy)throw Error('チャットの応答を待つか、停止してからJSONを読み込んでください');},
+    snapshot: () => transcript.length ? {version:1,messages:transcript.map(item=>({...item,...(item.images?{images:item.images.map(image=>({...image}))}:{})}))} : undefined,
+    assertIdle: () => {if(busy || readingImages)throw Error('チャットの応答・画像読み込みを待つか、停止してからJSONを読み込んでください');},
     restore: chat => {
       globalThis.ModelChat.assertIdle();
       const previous=sessionId;
-      sessionId=null; proposal=null; undo=null; transcript=[]; history.replaceChildren();
+      sessionId=null; proposal=null; undo=null; transcript=[]; attachments=[];showAttachments();history.replaceChildren();
       $('chat-input').value=''; changed();
       const messages=chat?.messages || [];
-      for(const item of messages)entry(item.role,item.text,!!item.error);
+      for(const item of messages)entry(item.role,item.text,!!item.error,true,item.images || []);
       restoredContext=messages.length ? messages.map(item=>({...item})) : null;
       controls();
       if(previous)api('/chat/reset',{sessionId:previous}).catch(()=>{});

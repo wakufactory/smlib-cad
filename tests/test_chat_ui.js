@@ -7,17 +7,20 @@ class Element {
   append(...items) { this.children.push(...items); }
   replaceChildren() { this.children = []; }
   addEventListener(name, handler) { this.events[name] = handler; }
+  setAttribute(name,value) { this[name]=value; }
+  click() {this.clicked=true;}
   get firstChild() { return {remove: () => this.children.shift()}; }
 }
 const ids = ['chat-history', 'chat-status', 'chat-input', 'chat-send', 'chat-stop', 'chat-reset',
   'chat-undo', 'chat-apply', 'chat-proposal', 'chat-login', 'chat-login-link', 'chat-connect',
-  'source', 'mode', 'example', 'model-file', 'sample', 'export', 'export-usdz'];
+  'source', 'mode', 'example', 'model-file', 'sample', 'export', 'export-usdz', 'chat-attach', 'chat-files', 'chat-images'];
 const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
 elements.source.value = 'box body 0 0 0 1 1 1'; elements.mode.value = 'text';
 let responseSource = 'box body 0 0 0 2 2 2', responseState = 'completed', polling;
 let previewCalls = 0, lastSend, cancelled = 0, failPreview = false;
 const context = vm.createContext({
   $, URL, console, Date, setTimeout, clearTimeout,
+  FileReader: class {readAsDataURL(file){this.result=file.dataUrl;this.onload();}},
   document: {createElement: () => new Element(), createTextNode: text => ({textContent: text})},
   message: {textContent: 'preview error'}, previewFailure: null,
   modelDocument: () => ({source: elements.source.value, mode: elements.mode.value, parameters: {angle: 20}}),
@@ -43,6 +46,7 @@ function $(id) { return elements[id]; }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function send(text) { elements['chat-input'].value = text; await elements['chat-send'].onclick(); }
 
+vm.runInContext(fs.readFileSync(require.resolve('../app.js'),'utf8').split('const $ =')[0],context);
 vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context);
 (async () => {
   await tick();
@@ -115,5 +119,27 @@ vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context)
   context.ModelChat.restore(undefined);
   assert.equal(context.ModelChat.snapshot(),undefined);
   assert.equal(elements['chat-history'].children.length,0);
+  const image={name:'参考.png',dataUrl:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDm8AAAAASUVORK5CYII='};
+  elements['chat-files'].files=[{name:image.name,type:'image/png',size:68,dataUrl:image.dataUrl}];
+  await elements['chat-files'].onchange({target:elements['chat-files']});
+  assert.equal(elements['chat-images'].hidden,false);
+  assert.equal(elements['chat-images'].children[0].children[0].src,image.dataUrl);
+  await send('この画像を参考にして');
+  assert.deepEqual(lastSend.images,[image]);
+  assert.equal(elements['chat-images'].hidden,true);
+  const imageHistory=JSON.parse(JSON.stringify(context.ModelChat.snapshot()));
+  assert.deepEqual(imageHistory.messages[0].images,[image]);
+  context.ModelChat.restore(imageHistory);
+  assert.equal(elements['chat-history'].children[0].children[2].src,image.dataUrl);
+  await send('同じ画像を参考に続けて');
+  assert.deepEqual(lastSend.restoredHistory[0].images,[image]);
+  assert.equal(lastSend.images,undefined);
+  elements['chat-files'].files=[{name:'bad.svg',type:'image/svg+xml',size:20,dataUrl:'data:image/svg+xml;base64,AAAA'}];
+  await elements['chat-files'].onchange({target:elements['chat-files']});
+  assert.equal(elements['chat-images'].hidden,true);
+  elements['chat-files'].files=[{name:image.name,type:'image/png',size:68,dataUrl:image.dataUrl}];
+  await elements['chat-files'].onchange({target:elements['chat-files']});
+  elements['chat-images'].children[0].removeButton.onclick();
+  assert.equal(elements['chat-images'].hidden,true);
   console.log('chat UI tests passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

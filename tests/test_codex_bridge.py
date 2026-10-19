@@ -7,11 +7,12 @@ import time
 import unittest
 from unittest.mock import patch
 
-from codex_bridge import ChatBridge, CodexError, RpcClient, instructions
+from codex_bridge import ChatBridge, CodexError, RpcClient, instructions, validate_images
 
 
 FAKE_SERVER = r'''
 import json, sys, threading, os
+from pathlib import Path
 assert "OPENAI_API_KEY" not in os.environ
 assert "CODEX_ACCESS_TOKEN" not in os.environ
 settings = dict(value.split("=", 1) for value in sys.argv[1:] if "=" in value)
@@ -58,6 +59,11 @@ for line in sys.stdin:
         output = {"message": tid + ":" + str(threads[tid]),
                   "source": None if payload["message"] == "question" else payload["source"] + "\n# edited"}
         if payload["message"] == "restored": output["message"] = payload["restoredHistory"][0]["text"]
+        if payload["message"] == "images":
+            paths=[item['path'] for item in p['input'] if item['type']=='localImage']
+            assert all(Path(path).read_bytes().startswith(b'\x89PNG\r\n\x1a\n') for path in paths)
+            assert 'data:image' not in p['input'][0]['text']
+            output['message']='images:'+str(len(paths))
         text = "not JSON" if payload["message"] == "malformed" else json.dumps(output)
         notice("item/completed", {"threadId": tid, "turnId": turn,
               "item": {"type": "agentMessage", "phase": "final_answer", "text": text}})
@@ -165,6 +171,23 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.bridge.send({**request,'sessionId':session})
         for history in ({},[{'role':'developer','text':'x'}],[{'role':'user','text':'x'*200001}]):
             with self.assertRaises(ValueError): self.bridge.send({**request,'restoredHistory':history})
+
+    def test_current_and_restored_images_use_temporary_local_inputs(self):
+        image={'name':'reference.png','dataUrl':'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDm8AAAAASUVORK5CYII='}
+        request={'message':'images','mode':'text','source':'box body 0 0 0 1 1 1','images':[image],
+                 'restoredHistory':[{'role':'user','text':'前の画像','images':[image]}]}
+        session=self.bridge.send(request)['sessionId']
+        result=self.finish(session)
+        self.assertEqual(result['state'],'completed')
+        self.assertEqual(result['result']['message'],'images:2')
+        deadline=time.monotonic()+1
+        workspace=Path(self.bridge.client.workspace.name)
+        while list(workspace.glob('images-*')) and time.monotonic()<deadline: time.sleep(.01)
+        self.assertFalse(list(workspace.glob('images-*')))
+        for images in ([{**image,'dataUrl':'https://example.com/private.png'}], [image]*4,
+                       [{**image,'dataUrl':'data:image/png;base64,SGVsbG8='}],
+                       [{**image,'dataUrl':'data:image/png;base64,%%%%'}]):
+            with self.assertRaises(ValueError): validate_images(images)
 
     def test_expired_idle_sessions_are_removed(self):
         session = self.send()

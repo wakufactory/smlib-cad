@@ -16,7 +16,8 @@ aside,.source-pane{min-width:0;min-height:0;padding:12px;display:flex;flex-direc
 aside{border-right:1px solid #2c4154;overflow-y:auto;overscroll-behavior:none}
 .source-pane{border-left:1px solid #2c4154;background:#101b29;overflow-y:auto}
 .source-editor{display:flex;flex:1 1 55%;min-height:180px;flex-direction:column;gap:10px;overflow:hidden}
-.chat-pane{display:flex;flex:1 1 45%;min-height:300px;flex-direction:column;gap:8px;border-top:1px solid #36516a;padding-top:10px;overflow:hidden}
+.chat-pane{display:flex;flex:1 1 45%;min-height:350px;flex-direction:column;gap:8px;border-top:1px solid #36516a;padding-top:10px;overflow-y:auto}
+.chat-images{display:flex;gap:6px;flex:none;overflow-x:auto;max-height:90px}.chat-image{display:flex;align-items:center;gap:4px;max-width:180px;font-size:10px;overflow-wrap:anywhere}.chat-image img,.chat-entry img{max-width:100%;width:auto;height:60px;object-fit:contain;border-radius:4px}.chat-entry img{height:auto;max-height:140px;display:block;margin-top:6px}.chat-image button{padding:3px 6px}.chat-images[hidden]{display:none}
 .chat-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.chat-heading button{padding:4px 7px}
 #chat-status{font-size:11px;color:#9db6c6;overflow-wrap:anywhere}
 #chat-history{flex:1;min-height:40px;overflow:auto;overscroll-behavior:contain;-webkit-user-select:text;user-select:text}
@@ -137,6 +138,8 @@ subtract result body hole</pre>
 <div id="chat-proposal" hidden>手動編集があったため、自動反映を止めました。反映すると現在のソースを置き換えます。<button id="chat-apply" type="button">変更案を反映</button></div>
 <label for="chat-input" class="help">現在のソースと一緒に送信 · Ctrl/⌘ + Enter で送信</label>
 <textarea id="chat-input" maxlength="8000" placeholder="例：中央に直径10の貫通穴を開けて" spellcheck="false"></textarea>
+<div class="row"><button id="chat-attach" type="button">画像を添付</button><span class="help">PNG / JPEG / WebP · 3枚まで · 各2 MiB</span><input id="chat-files" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden></div>
+<div id="chat-images" class="chat-images" aria-label="送信する画像" hidden></div>
 <div class="chat-controls"><button id="chat-send" class="primary" disabled>送信</button><button id="chat-stop" disabled>停止</button><button id="chat-undo" disabled>変更を戻す</button></div>
 </section>
 </section></main>

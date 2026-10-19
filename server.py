@@ -155,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
                 raise ValueError("Content-Type must be application/json")
             length = int(self.headers.get("Content-Length", "0"))
-            limit = 1_000_000 if self.path == "/chat/send" else (250_000 if self.path in chat_paths else 100_000)
+            limit = 24_000_000 if self.path == "/chat/send" else (250_000 if self.path in chat_paths else 100_000)
             if length < 1 or length > limit:
                 raise ValueError(f"Request must be between 1 and {limit} bytes")
             request = json.loads(self.rfile.read(length))

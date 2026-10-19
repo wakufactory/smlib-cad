@@ -12,15 +12,30 @@ const ModelFile = (() => {
     return value;
   }
 
+  function images(value) {
+    if(!Array.isArray(value) || value.length>3)throw Error('画像は1メッセージにつき3枚までです');
+    return value.map(item=>{
+      if(!item || typeof item.name!=='string' || item.name.length>200 || typeof item.dataUrl!=='string' || item.dataUrl.length>2796250)throw Error('添付画像の形式が不正です');
+      const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]*={0,2})$/.exec(item.dataUrl);
+      const bytes=match ? match[2].length*3/4-(match[2].endsWith('==')?2:match[2].endsWith('=')?1:0) : 0;
+      if(!match || match[2].length%4 || bytes<1 || bytes>2*1024*1024)throw Error('画像はPNG・JPEG・WebP、1枚2 MiB以下にしてください');
+      return {name:item.name,dataUrl:item.dataUrl};
+    });
+  }
+
   function chat(value) {
     if (!value || value.version !== 1 || !Array.isArray(value.messages) || value.messages.length > 100) throw Error('チャット履歴の形式が不正です');
-    let length = 0;
+    let length = 0, imageLength = 0;
     const messages = value.messages.map(item => {
       if (!item || !['user', 'assistant', 'system'].includes(item.role) || typeof item.text !== 'string' ||
           (item.error !== undefined && typeof item.error !== 'boolean')) throw Error('チャット履歴のメッセージが不正です');
       length += item.text.length;
       if (length > 200000) throw Error('チャット履歴は合計20万文字以下にしてください');
-      return {role:item.role, text:item.text, ...(item.error ? {error:true} : {})};
+      const attachments=item.images===undefined ? [] : images(item.images);
+      if(attachments.length && item.role!=='user')throw Error('画像はユーザーの発言にのみ添付できます');
+      imageLength+=attachments.reduce((n,image)=>n+image.dataUrl.length,0);
+      if(imageLength>12000000)throw Error('保存する会話の画像が多すぎます（画像データ合計12 MBまで）');
+      return {role:item.role, text:item.text, ...(item.error ? {error:true} : {}), ...(attachments.length?{images:attachments}:{})};
     });
     return {version:1, messages};
   }
@@ -48,7 +63,7 @@ const ModelFile = (() => {
     };
   }
 
-  return { validate, chat, exportScale, parse: json => validate(JSON.parse(json)) };
+  return { validate, chat, images, exportScale, parse: json => validate(JSON.parse(json)) };
 })();
 
 const $ = id => document.getElementById(id);
@@ -280,7 +295,7 @@ function saveModel(){
     const chat=globalThis.ModelChat?.snapshot();
     if(chat)data.chat=ModelFile.chat(chat);
     const blob=new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'});
-    if(blob.size>1_000_000)throw Error('JSONファイルは1 MB以下にしてください');
+    if(blob.size>16_000_000)throw Error('JSONファイルは16 MB以下にしてください');
     const url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     note(`${name} を保存しました`);
@@ -289,7 +304,7 @@ function saveModel(){
 async function loadModel(file){
   if(!file)return;
   try{
-    if(file.size>1_000_000)throw Error('JSONファイルは1 MB以下にしてください');
+    if(file.size>16_000_000)throw Error('JSONファイルは16 MB以下にしてください');
     const data=ModelFile.parse(await file.text()),p=data.parameters;
     globalThis.ModelChat?.assertIdle();
     $('mode').value=data.mode;$('sample').value='default';$('source').value=data.source;

@@ -180,7 +180,8 @@ for (const invalid of [
   assert.equal(elements['show-grid'].checked, true);
   assert.match(elements.message.textContent, /HTTPS/);
   context.preview = async () => {previewCalls++;};
-  const chat = {version:1,messages:[{role:'user',text:'幅を2にして'}, {role:'assistant',text:'幅を変更しました。'}, {role:'system',text:'計算エラー',error:true}]};
+  const image={name:'reference.png',dataUrl:'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDm8AAAAASUVORK5CYII='};
+  const chat = {version:1,messages:[{role:'user',text:'幅を2にして',images:[image]}, {role:'assistant',text:'幅を変更しました。'}, {role:'system',text:'計算エラー',error:true}]};
   let restored, blocked = false;
   context.ModelChat = {snapshot:()=>chat, restore:value=>{restored=value;}, assertIdle:()=>{if(blocked)throw Error('応答待ち');}};
   for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
@@ -201,5 +202,8 @@ for (const invalid of [
   await context.loadModel({size:json.length,text:async()=>json});
   assert.equal(restored,undefined); // Legacy model files clear the previous model's chat.
   assert.throws(()=>ModelFile.chat({version:1,messages:[{role:'user',text:'x'.repeat(200001)}]}));
+  assert.throws(()=>ModelFile.images([{...image,dataUrl:'https://example.com/image.png'}]));
+  assert.throws(()=>ModelFile.images(Array(4).fill(image)));
+  assert.throws(()=>ModelFile.chat({version:1,messages:[{role:'assistant',text:'x',images:[image]}]}));
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});
