@@ -300,6 +300,14 @@ def _extract_parts(lines, parts, in_part):
     return commands
 
 
+class SolidObjects(dict):
+    """Named BReps with per-solid meshing settings, independent of materials."""
+
+    def __init__(self):
+        super().__init__()
+        self.tessellation = {}
+
+
 def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line_offset=0, _profiles=None,
                    _variables=None):
     """Evaluate text commands; each use builds fresh BReps from a part body."""
@@ -308,7 +316,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
     records = ([(index, raw) for index, raw in enumerate(source.splitlines(), _line_offset + 1)]
                if isinstance(source, str) else source)
     commands = _expand_commands(_extract_parts(records, parts, bool(_stack)), _variables or {}, counter)
-    frames = [{"name": None, "line": 0, "objects": {}, "materials": {}, "profiles": {}, "groups": {},
+    frames = [{"name": None, "line": 0, "objects": SolidObjects(), "materials": {}, "profiles": {}, "groups": {},
                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
                "position": (0.0, 0.0, 0.0)}]
     profile_block = None
@@ -395,13 +403,15 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 if collisions:
                     raise ValueError(f"use {part_name}: duplicate solid name: {', '.join(sorted(collisions))}")
                 objects.update((names[name], solid) for name, solid in members.items())
+                objects.tessellation.update((names[name], settings)
+                                            for name, settings in members.tessellation.items())
                 materials.update((names[name], material) for name, material in member_materials.items())
             elif op == "group":
                 if len(args) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
                     raise ValueError("group: one valid group name required")
                 if args[0] in objects or args[0] in groups:
                     raise ValueError(f"duplicate group name: {args[0]}")
-                frames.append({"name": args[0], "line": line_number, "objects": {}, "materials": {}, "profiles": {}, "groups": {},
+                frames.append({"name": args[0], "line": line_number, "objects": SolidObjects(), "materials": {}, "profiles": {}, "groups": {},
                                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
                                "position": (0.0, 0.0, 0.0)})
             elif op == "end":
@@ -422,6 +432,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                         raise ValueError(f"group {frame['name']}, solid {name}: {exc}") from exc
                 frames.pop()
                 parent["objects"].update(objects)
+                parent["objects"].tessellation.update(objects.tessellation)
                 parent["materials"].update(materials)
                 parent["groups"].update(groups)
                 parent["groups"][frame["name"]] = set(objects)
@@ -450,6 +461,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     raise ValueError("axis must be nonzero")
                 extra = (axis,) if axis else ()
                 objects[args[0]] = getattr(sm, f"create_{op}")(dimensions[:3], *dimensions[3:], *extra)
+                objects.tessellation.pop(args[0], None)
             elif op in ("union", "subtract", "intersect"):
                 if len(args) != 3 or any(name not in objects and name not in groups for name in args[1:]):
                     raise ValueError(f"{op}: output and two existing object or group names required")
@@ -476,6 +488,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 left, right = (take_operand(members) for members in operands)
                 for name in consumed:
                     materials.pop(name, None)
+                    objects.tessellation.pop(name, None)
                 for name, members in list(groups.items()):
                     if name in args[1:]:
                         del groups[name]
@@ -506,6 +519,16 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     raise ValueError(f"{op}: width/radius must be finite and positive")
                 fn = sm.chamfer_fillet if op == "chamfer" else sm.circular_fillet
                 objects[args[0]] = fn(objects[args[0]], size)
+            elif op == "tessellation":
+                if len(args) != 3 or args[0] not in objects:
+                    raise ValueError("tessellation: existing solid name, chord and angle required")
+                chord, angle = (None if value.lower() == "default" else float(value)
+                                for value in args[1:])
+                if chord is not None and not 0.001 <= chord <= 2:
+                    raise ValueError("chord must be between 0.001 and 2")
+                if angle is not None and not 1 <= angle <= 90:
+                    raise ValueError("angle must be between 1 and 90 degrees")
+                objects.tessellation[args[0]] = (chord, angle)
             elif op == "material":
                 if len(args) != 6 or args[0] not in objects:
                     raise ValueError("material: existing solid name and five numbers required")
@@ -739,9 +762,12 @@ def tessellate(objects, sm, chord: float = 0.08, angle: float = 20, materials=No
     materials = normalize_materials({} if materials is None else materials, objects)
     output = []
     for name, solid in objects.items():
-        poly = sm.tessellate(solid, chord_height_tolerance=chord,
-                             curve_angle_tolerance_deg=angle,
-                             surface_angle_tolerance_deg=angle)
+        local_chord, local_angle = getattr(objects, "tessellation", {}).get(name, (None, None))
+        effective_chord = chord if local_chord is None else local_chord
+        effective_angle = angle if local_angle is None else local_angle
+        poly = sm.tessellate(solid, chord_height_tolerance=effective_chord,
+                             curve_angle_tolerance_deg=effective_angle,
+                             surface_angle_tolerance_deg=effective_angle)
         if poly is None:
             raise ValueError(f"{name}: tessellation returned no mesh")
         raw = poly.to_numpy_arrays()

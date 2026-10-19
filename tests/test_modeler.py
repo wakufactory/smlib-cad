@@ -63,6 +63,43 @@ class FakeBrep:
 
 
 class ModelerTests(unittest.TestCase):
+    def test_per_solid_tessellation(self):
+        sm = FakeBrep()
+        calls = []
+        sm.tessellate = lambda solid, **kw: (calls.append(kw) or Poly())
+        objects, materials, _ = evaluate(
+            "sphere fine 0 0 0 4\ntessellation fine 0.01 5\n"
+            "sphere normal 10 0 0 4\nsphere partial 20 0 0 4\n"
+            "tessellation partial default 10", "text", sm)
+        objects = apply_finish(objects, sm, "fillet", 0.1)
+        tessellate(objects, sm, 0.08, 20, materials)
+        self.assertEqual([(c["chord_height_tolerance"], c["curve_angle_tolerance_deg"],
+                           c["surface_angle_tolerance_deg"]) for c in calls],
+                         [(0.01, 5, 5), (0.08, 20, 20), (0.08, 10, 10)])
+
+    def test_tessellation_scope_and_boolean(self):
+        sm = FakeBrep()
+        objects, _, _ = evaluate(
+            "part ball\nsphere a 0 0 0 4\ntessellation a 0.01 5\nend\n"
+            "group assembly\nuse ball left\nend\nuse ball right", "text", sm)
+        self.assertEqual(objects.tessellation,
+                         {"left__a": (0.01, 5), "right__a": (0.01, 5)})
+        objects, _, _ = evaluate(
+            "sphere a 0 0 0 4\ntessellation a 0.01 5\nsphere b 2 0 0 4\n"
+            "union a a b", "text", sm)
+        self.assertEqual(objects.tessellation, {})
+        objects, _, _ = evaluate(
+            "sphere a 0 0 0 4\ntessellation a 0.01 5\n"
+            "tessellation a default default", "text", sm)
+        self.assertEqual(objects.tessellation["a"], (None, None))
+
+    def test_invalid_tessellation(self):
+        for command in ("tessellation missing 0.01 5", "tessellation a 0.01",
+                        "tessellation a 0 5", "tessellation a 0.01 91",
+                        "tessellation a nan 5", "tessellation a 0.01 inf"):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Line 2"):
+                evaluate("sphere a 0 0 0 4\n" + command, "text", FakeBrep())
+
     def test_offset_shell_and_face_log(self):
         sm = FakeBrep()
         objects, materials, log = evaluate(

@@ -30,6 +30,16 @@ class PrimitiveIntegrationTests(unittest.TestCase):
         "planar_circle shape 0 0 0 3",
     )
 
+    def test_per_solid_tessellation_changes_mesh_density(self):
+        objects, materials, _ = evaluate(
+            "sphere_no_pole fine 0 0 0 4\ntessellation fine 0.01 5\n"
+            "sphere_no_pole normal 12 0 0 4", "text", sm)
+        meshes = tessellate(objects, sm, 0.2, 30, materials)
+        self.assertGreater(len(meshes[0]["positions"]), len(meshes[1]["positions"]))
+        objects.tessellation.clear()
+        defaults = tessellate(objects, sm, 0.2, 30, materials)
+        self.assertEqual(len(defaults[0]["positions"]), len(defaults[1]["positions"]))
+
     def test_group_transform_after_boolean_matches_preview_and_glb(self):
         source = ("group assembly\n"
                   "box body 0 0 0 4 4 4\n"
