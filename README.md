@@ -47,6 +47,8 @@ PYTHONPATH="$PWD/.build/smlib-core" \
 
 右ペイン下部の「モデル編集チャット」に指示すると、現在のソース・入力モード・モデルの設定を Codex 経由で GPT に送り、返ってきたソースをエディタに反映してプレビューします。テキスト命令と Python の両方に対応します。質問への回答だけの場合はソースを変更しません。
 
+GPTへの指示では、実寸を想定するモデルの座標・寸法は **1 = 1 m** とし、mm・cmで指定された寸法はmへ換算してソースに記述させます（例：10 mm → 0.01）。
+
 サーバーのMacに Codex CLI、または CLI を同梱する ChatGPT / Codex アプリが必要です。PATH 上の `codex`、次にアプリ内のCLIを検出します。別の場所にある場合は起動時に `CAD_CODEX_BIN=/absolute/path/to/codex make start` を指定します。モデルは Codex の既定値を使い、必要なら `CAD_CODEX_MODEL=<利用可能なモデルID> make start` で指定できます。
 
 1. `make start` で起動し、ブラウザで開きます。
