@@ -81,6 +81,49 @@ let previewFailure = null;
 const cameraLightDirection = [-0.6, 0.8, 0.8]; // left, up, toward viewer
 
 function note(text, error = false) { message.textContent = text; message.style.color = error ? '#ff9b93' : '#9dd9c5'; }
+const draftKey='smlib-modeler.draft.v1';
+let draftEdited=false;
+const draftFields=['source','mode','sample','chord','angle','finish','finish-size','export-scale','file-name','shading-mode','preview-mode'];
+const draftChecks=['show-axes','show-grid'];
+function saveDraft(){
+  draftEdited=true;
+  try{
+    if(!window.localStorage)return;
+    const fields=Object.fromEntries(draftFields.map(id=>[id,String($(id).value)]));
+    const checks=Object.fromEntries(draftChecks.map(id=>[id,$(id).checked]));
+    window.localStorage.setItem(draftKey,JSON.stringify({version:1,fields,checks}));
+    if($('draft-status'))$('draft-status').textContent='ブラウザに自動保存済み';
+  }catch(error){
+    if($('draft-status'))$('draft-status').textContent='自動保存できません。JSONで保存してください';
+  }
+}
+function restoreDraft(){
+  try{
+    const raw=window.localStorage?.getItem(draftKey);
+    if(!raw)return false;
+    const draft=JSON.parse(raw);
+    if(draft.version!==1 || !draft.fields || !draft.checks ||
+       !draftFields.every(id=>typeof draft.fields[id]==='string') ||
+       !draftChecks.every(id=>typeof draft.checks[id]==='boolean'))throw Error('Invalid draft');
+    const options={mode:['text','python'],sample:['clear','default','gallery','circular','sweeps','offsets'],
+      finish:['none','chamfer','fillet'],'shading-mode':['shading','wireframe','normal'],'preview-mode':['webgl','model']};
+    if(Object.entries(options).some(([id,values])=>!values.includes(draft.fields[id])))throw Error('Invalid draft option');
+    for(const id of draftFields)$(id).value=draft.fields[id];
+    for(const id of draftChecks)$(id).checked=draft.checks[id];
+    $('finish-size').disabled=$('finish').value==='none';
+    if($('preview-mode').value==='model' && modelModeError())$('preview-mode').value='webgl';
+    if($('draft-status'))$('draft-status').textContent='前回の編集内容を復元しました';
+    return true;
+  }catch(error){
+    if($('draft-status'))$('draft-status').textContent='前回の編集内容を復元できませんでした';
+    return false;
+  }
+}
+// Store raw input values, including unfinished numbers and invalid model code.
+for(const event of ['input','change'])document.addEventListener?.(event,e=>{
+  if(draftFields.includes(e.target.id) || draftChecks.includes(e.target.id))saveDraft();
+});
+window.addEventListener?.('pagehide',saveDraft);
 function modelModeError(){
   if(location.protocol !== 'https:' || !window.isSecureContext)return 'USDZ <model> プレビューには信頼済みの HTTPS 接続が必要です';
   if(!window.HTMLModelElement)return 'このブラウザは <model> 要素に対応していません';
@@ -238,6 +281,7 @@ async function request(path){
   return response;
 }
 async function preview(){
+  saveDraft();
   const requestId=++previewRequestId;
   const previewSource=$('source').value,previewMode=$('mode').value;
   $('preview').disabled=true;$('export').disabled=true;$('export-usdz').disabled=true;note('計算中…');
@@ -333,7 +377,7 @@ $('preview-mode').onchange=()=>{
   showPreviewMode();preview();
 };
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
-$('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;$('export-usdz').disabled=true;};
+$('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
 function clearModel(){
   // Invalidate pending previews so an older response cannot restore the model.
   ++previewRequestId;
@@ -348,6 +392,7 @@ function clearModel(){
   $('preview').disabled=!renderer;
   viewPointers.clear();
   note('');
+  saveDraft();
 }
 $('example').onclick=()=>{
   if($('sample').value==='clear'){clearModel();return;}
@@ -392,8 +437,10 @@ canvas.addEventListener('pointermove',e=>{
 canvas.addEventListener('wheel',e=>{e.preventDefault();setZoom(zoom*Math.exp(e.deltaY*0.001));draw();},{passive:false});
 canvas.ondblclick=()=>{yaw=0.72;pitch=0.44;zoom=2.8;draw();};
 new ResizeObserver(draw).observe(canvas);
+const restoredDraft=restoreDraft();
 (async()=>{
-  examples=await(await fetch('/examples')).json();$('source').value=examples.text;
+  examples=await(await fetch('/examples')).json();
+  if(!restoredDraft && !draftEdited && !$('source').value)$('source').value=examples.text;
   const state=await(await fetch('/status')).json();
   $('status').textContent=state.ready?'SMLib 接続済み':`_smlib_core 未導入: ${state.error}`;
   if(!state.ready)note('SMLib の Python バインディングをビルドしてください。セットアップは README を参照。',true);
@@ -401,5 +448,9 @@ new ResizeObserver(draw).observe(canvas);
   setupRenderer();
   $('preview').disabled=false;
   $('preview-mode').disabled=false;
-  draw();
+  showPreviewMode();
+  if(restoredDraft){
+    if(!$('source').value.trim())clearModel();
+    else if(state.ready)await preview();
+  }
 })().catch(e=>note(e.message,true));

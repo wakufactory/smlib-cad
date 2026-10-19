@@ -18,7 +18,7 @@ aside{border-right:1px solid #2c4154;overflow-y:auto;overscroll-behavior:none}
 .source-editor{display:flex;flex:1 1 55%;min-height:180px;flex-direction:column;gap:10px;overflow:hidden}
 .chat-pane{display:flex;flex:1 1 45%;min-height:350px;flex-direction:column;gap:8px;border-top:1px solid #36516a;padding-top:10px;overflow-y:auto}
 .chat-images{display:flex;gap:6px;flex:none;overflow-x:auto;max-height:90px}.chat-image{display:flex;align-items:center;gap:4px;max-width:180px;font-size:10px;overflow-wrap:anywhere}.chat-image img,.chat-entry img{max-width:100%;width:auto;height:60px;object-fit:contain;border-radius:4px}.chat-entry img{height:auto;max-height:140px;display:block;margin-top:6px}.chat-image button{padding:3px 6px}.chat-images[hidden]{display:none}
-.chat-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.chat-heading button{padding:4px 7px}
+.chat-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.chat-heading{flex-wrap:wrap;gap:4px 8px}.chat-tools{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}.chat-tools button{flex:none;font-size:11px;line-height:1.3;padding:4px 6px;white-space:nowrap}.chat-connection{display:flex;align-items:center;gap:6px}.chat-connection #chat-status{flex:1;min-width:0}.chat-connection button{flex:none;font-size:11px;padding:4px 6px}
 #chat-status{font-size:11px;color:#9db6c6;overflow-wrap:anywhere}
 #chat-history{flex:1;min-height:40px;overflow:auto;overscroll-behavior:contain;-webkit-user-select:text;user-select:text}
 .chat-entry{font-size:12px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 8px;padding:8px;border-radius:6px;background:#17293a}.chat-entry.user{background:#1b3b4d}.chat-entry.error{color:#ffb4ab}
@@ -66,6 +66,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#v
 <h2>設定</h2>
 <div id="mesh-stats" aria-live="polite">トライアングル数: —
 ソリッド数: —</div>
+<div id="draft-status" class="help" role="status"></div>
 <details id="command-reference" open>
 <summary>テキストコマンド一覧</summary>
 <div class="command-list" tabindex="0" role="region" aria-label="テキストコマンド一覧">
@@ -130,15 +131,14 @@ subtract result body hole</pre>
 <div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
 <textarea id="source" spellcheck="false"></textarea></div>
 <section class="chat-pane" aria-label="モデル編集チャット">
-<div class="chat-heading"><h2>モデル編集チャット</h2><button id="chat-reset" type="button">新しい会話</button></div>
-<div id="chat-status" role="status">Codex の接続を確認中…</div>
-<div class="row"><button id="chat-login" type="button" hidden>ChatGPT にログイン</button><button id="chat-connect" type="button">接続確認</button></div>
+<div class="chat-heading"><h2>モデル編集チャット</h2><div class="chat-tools"><button id="chat-connect" type="button">接続確認</button><button id="chat-attach" type="button" title="PNG / JPEG / WebP · 3枚まで · 各2 MiB">画像を添付</button><button id="chat-reset" type="button">新しい会話</button></div></div>
+<div class="chat-connection"><div id="chat-status" role="status">Codex の接続を確認中…</div><button id="chat-login" type="button" hidden>ChatGPT にログイン</button></div>
 <a id="chat-login-link" target="_blank" rel="noopener noreferrer" hidden>ログインを開く（サーバーのMacで操作）</a>
 <div id="chat-history" role="log" aria-label="会話履歴" aria-live="polite"></div>
 <div id="chat-proposal" hidden>手動編集があったため、自動反映を止めました。反映すると現在のソースを置き換えます。<button id="chat-apply" type="button">変更案を反映</button></div>
 <label for="chat-input" class="help">現在のソースと一緒に送信 · Ctrl/⌘ + Enter で送信</label>
 <textarea id="chat-input" maxlength="8000" placeholder="例：中央に直径10の貫通穴を開けて" spellcheck="false"></textarea>
-<div class="row"><button id="chat-attach" type="button">画像を添付</button><span class="help">PNG / JPEG / WebP · 3枚まで · 各2 MiB</span><input id="chat-files" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden></div>
+<input id="chat-files" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
 <div id="chat-images" class="chat-images" aria-label="送信する画像" hidden></div>
 <div class="chat-controls"><button id="chat-send" class="primary" disabled>送信</button><button id="chat-stop" disabled>停止</button><button id="chat-undo" disabled>変更を戻す</button></div>
 </section>
