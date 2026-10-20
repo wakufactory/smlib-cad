@@ -72,9 +72,9 @@ const message = $('message');
 const usdModel = $('usd-model');
 const modelStatus = $('model-status');
 let examples = {}, currentMeshes = [], rendered = [], center = [0, 0, 0], radius = 20;
-let guides = [];
+let guides = [], guideBounds = null;
 let yaw = 0.72, pitch = 0.44, zoom = 2.8;
-let THREE, renderer, scene, camera;
+let THREE, renderer, scene, camera, perspectiveCamera, orthographicCamera, cameraLight;
 let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
 let previewFailure = null;
@@ -83,7 +83,7 @@ const cameraLightDirection = [-0.6, 0.8, 0.8]; // left, up, toward viewer
 function note(text, error = false) { message.textContent = text; message.style.color = error ? '#ff9b93' : '#9dd9c5'; }
 const draftKey='smlib-modeler.draft.v1';
 let draftEdited=false;
-const draftFields=['source','mode','sample','chord','angle','finish','finish-size','export-scale','file-name','shading-mode','preview-mode'];
+const draftFields=['source','mode','sample','chord','angle','finish','finish-size','export-scale','file-name','shading-mode','preview-mode','grid-spacing','grid-plane','grid-offset','projection-mode'];
 const draftChecks=['show-axes','show-grid'];
 function saveDraft(){
   draftEdited=true;
@@ -103,12 +103,14 @@ function restoreDraft(){
     if(!raw)return false;
     const draft=JSON.parse(raw);
     if(draft.version!==1 || !draft.fields || !draft.checks ||
-       !draftFields.every(id=>typeof draft.fields[id]==='string') ||
+       !draftFields.slice(0,-4).every(id=>typeof draft.fields[id]==='string') ||
+       !draftFields.slice(-4).every(id=>draft.fields[id]===undefined || typeof draft.fields[id]==='string') ||
        !draftChecks.every(id=>typeof draft.checks[id]==='boolean'))throw Error('Invalid draft');
     const options={mode:['text','python'],sample:['clear','default','gallery','circular','sweeps','offsets'],
-      finish:['none','chamfer','fillet'],'shading-mode':['shading','wireframe','normal'],'preview-mode':['webgl','model']};
-    if(Object.entries(options).some(([id,values])=>!values.includes(draft.fields[id])))throw Error('Invalid draft option');
-    for(const id of draftFields)$(id).value=draft.fields[id];
+      finish:['none','chamfer','fillet'],'shading-mode':['shading','wireframe','normal'],'preview-mode':['webgl','model'],
+      'grid-plane':['xy','yz','zx'],'projection-mode':['perspective','orthographic']};
+    if(Object.entries(options).some(([id,values])=>draft.fields[id]!==undefined && !values.includes(draft.fields[id])))throw Error('Invalid draft option');
+    for(const id of draftFields)if(draft.fields[id]!==undefined)$(id).value=draft.fields[id];
     for(const id of draftChecks)$(id).checked=draft.checks[id];
     $('finish-size').disabled=$('finish').value==='none';
     if($('preview-mode').value==='model' && modelModeError())$('preview-mode').value='webgl';
@@ -135,6 +137,7 @@ function showPreviewMode(){
   usdModel.hidden=!native;
   modelStatus.hidden=!native;
   $('shading-mode').hidden=native;
+  $('projection-mode').hidden=native;
   $('view-controls').hidden=native;
   $('hint').hidden=native;
   if(!native)draw();
@@ -146,14 +149,23 @@ function setupRenderer(){
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
-  camera.up.set(0, 0, 1);
-  scene.add(camera);
+  perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+  orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
+  for(const view of [perspectiveCamera,orthographicCamera]){
+    view.up.set(0, 0, 1);
+    scene.add(view);
+  }
   scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-  const key = new THREE.DirectionalLight(0xffffff, 3);
-  key.position.set(...cameraLightDirection);
-  camera.add(key);
-  camera.add(key.target);
+  cameraLight = new THREE.DirectionalLight(0xffffff, 3);
+  cameraLight.position.set(...cameraLightDirection);
+  changeProjection();
+}
+function changeProjection(){
+  if(!renderer)return;
+  camera=$('projection-mode').value==='orthographic'?orthographicCamera:perspectiveCamera;
+  camera.add(cameraLight);
+  camera.add(cameraLight.target);
+  draw();
 }
 function sub(a,b){return a.map((v,i)=>v-b[i]);}
 function cameraEye(){const d=radius*zoom;return [center[0]+d*Math.cos(pitch)*Math.cos(yaw),center[1]+d*Math.cos(pitch)*Math.sin(yaw),center[2]+d*Math.sin(pitch)];}
@@ -163,7 +175,11 @@ function draw(){
   if(w!==viewportWidth || h!==viewportHeight){
     renderer.setSize(w,h,false);viewportWidth=w;viewportHeight=h;
   }
-  camera.aspect=w/h;
+  if(camera.isOrthographicCamera){
+    const halfHeight=radius*zoom*Math.tan(Math.PI/8);
+    camera.left=-halfHeight*w/h;camera.right=halfHeight*w/h;
+    camera.top=halfHeight;camera.bottom=-halfHeight;
+  }else camera.aspect=w/h;
   camera.near=Math.max(0.01,radius*zoom/1000);
   camera.far=radius*zoom+radius*10;
   camera.updateProjectionMatrix();
@@ -178,25 +194,39 @@ function draw(){
   for(const guide of guides)guide.object.visible=$(guide.toggle).checked;
   renderer.render(scene,camera);
 }
-function gridRange(low, high){
-  const first=Math.floor(low)-2,last=Math.ceil(high)+2;
+function gridSettings(){
+  const spacing=Number($('grid-spacing').value),offset=Number($('grid-offset').value);
+  const plane=$('grid-plane').value;
+  if(!$('grid-spacing').value.trim() || !Number.isFinite(spacing) || spacing<=0 ||
+     !$('grid-offset').value.trim() || !Number.isFinite(offset) || Math.abs(offset)>1e30 ||
+     !['xy','yz','zx'].includes(plane))return null;
+  return {spacing,offset,axes:{xy:[0,1,2],yz:[1,2,0],zx:[2,0,1]}[plane]};
+}
+function gridRange(low, high, spacing=1){
+  const first=Math.floor(low/spacing)-2,last=Math.ceil(high/spacing)+2;
   if(last-first<=100)return [first,last];
-  const middle=Math.round((low+high)/2);
+  const middle=Math.round((low/spacing+high/spacing)/2);
   return [middle-50,middle+50];
 }
-function gridPoints(lo,hi){
-  // Above this range Float32 positions cannot represent every integer unit.
-  if([...lo.slice(0,2),...hi.slice(0,2)].some(value=>Math.abs(value)>8_388_608))return [];
-  const [x0,x1]=gridRange(lo[0],hi[0]);
-  const [y0,y1]=gridRange(lo[1],hi[1]);
+function gridPoints(lo,hi,settings={spacing:1,offset:0,axes:[0,1,2]}){
+  const {spacing,offset,axes:[u,v,n]}=settings;
+  if(!Number.isFinite(spacing) || spacing<=0 || !Number.isFinite(offset) || Math.abs(offset)>1e30)return [];
+  // Above this range Float32 positions cannot resolve adjacent grid points.
+  if([lo[u],hi[u],lo[v],hi[v]].some(value=>Math.abs(value/spacing)>8_388_608))return [];
+  const [u0,u1]=gridRange(lo[u],hi[u],spacing);
+  const [v0,v1]=gridRange(lo[v],hi[v],spacing);
   const positions=[];
-  for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++)positions.push(x,y,0);
+  for(let a=u0;a<=u1;a++)for(let b=v0;b<=v1;b++){
+    const point=[0,0,0];point[u]=a*spacing;point[v]=b*spacing;point[n]=offset;
+    positions.push(...point);
+  }
   return positions;
 }
 function updateGuides(lo,hi){
   for(const guide of guides){scene.remove(guide.object);guide.object.geometry.dispose();guide.object.material.dispose();}
   guides=[];
-  if(!lo.every(Number.isFinite) || !hi.every(Number.isFinite))return;
+  guideBounds=lo.every(Number.isFinite) && hi.every(Number.isFinite)?[lo.slice(),hi.slice()]:null;
+  if(!guideBounds)return;
   const pad=Math.max(2,radius*0.1);
   const ends=[0,1,2].map(axis=>[Math.min(0,lo[axis]-pad),Math.max(0,hi[axis]+pad)]);
   for(const [axis,color] of [[0,0xff6262],[1,0x65d98a],[2,0x69aaff]]){
@@ -209,9 +239,15 @@ function updateGuides(lo,hi){
     scene.add(object);guides.push({object,toggle:'show-axes'});
   }
   const geometry=new THREE.BufferGeometry();
-  geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(gridPoints(lo,hi)),3));
+  geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(gridPoints(lo,hi,gridSettings()||{spacing:1,offset:0,axes:[0,1,2]})),3));
   const object=new THREE.Points(geometry,new THREE.PointsMaterial({color:0xb3c4d0,size:3,sizeAttenuation:false,transparent:true,opacity:0.65,depthWrite:false,toneMapped:false}));
   scene.add(object);guides.push({object,toggle:'show-grid'});
+}
+function changeGrid(){
+  const valid=!!gridSettings();
+  $('grid-spacing').setAttribute?.('aria-invalid',String(!valid));
+  $('grid-offset').setAttribute?.('aria-invalid',String(!valid));
+  if(valid && guideBounds){updateGuides(...guideBounds);draw();}
 }
 function triangleEdges(positions){
   const edges=new Float32Array(positions.length*2);
@@ -368,7 +404,11 @@ $('save-model').onclick=saveModel;
 $('load-model').onclick=()=>$('model-file').click();
 $('model-file').onchange=e=>loadModel(e.target.files[0]);
 $('shading-mode').onchange=draw;
+$('projection-mode').onchange=changeProjection;
 $('show-axes').onchange=draw;$('show-grid').onchange=draw;
+for(const id of ['grid-spacing','grid-plane','grid-offset']){
+  $(id).oninput=changeGrid;$(id).onchange=changeGrid;
+}
 $('preview-mode').onchange=()=>{
   if($('preview-mode').value==='model'){
     const error=modelModeError();

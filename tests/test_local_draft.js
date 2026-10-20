@@ -7,7 +7,8 @@ const storage = new Map();
 function page() {
   const events = {};
   const values = {source:'', mode:'text', sample:'default', chord:'0.08', angle:'20', finish:'none',
-    'finish-size':'1', 'export-scale':'1', 'file-name':'model', 'shading-mode':'shading', 'preview-mode':'webgl'};
+    'finish-size':'1', 'export-scale':'1', 'file-name':'model', 'shading-mode':'shading', 'preview-mode':'webgl',
+    'grid-spacing':'1', 'grid-plane':'xy', 'grid-offset':'0', 'projection-mode':'orthographic'};
   const elements = Object.fromEntries(Object.entries(values).map(([id,value])=>[id,{value,addEventListener(){}}]));
   const window = {localStorage:{getItem:k=>storage.get(k) ?? null,setItem:(k,v)=>storage.set(k,v)}, addEventListener(name,fn){events[name]=fn;}};
   const context = vm.createContext({window, console, location:{protocol:'http:'},
@@ -22,6 +23,10 @@ first.elements.source.value = 'box unfinished';
 first.elements.chord.value = ''; // Preserve incomplete input too.
 first.elements['file-name'].value = 'draft';
 first.elements['show-grid'].checked = false;
+first.elements['grid-spacing'].value = '2.5';
+first.elements['grid-plane'].value = 'yz';
+first.elements['grid-offset'].value = '-3';
+first.elements['projection-mode'].value = 'orthographic';
 first.events.input({target:{id:'source'}});
 assert(storage.has(key));
 const reloaded = page();
@@ -29,6 +34,18 @@ assert.equal(reloaded.elements.source.value, 'box unfinished');
 assert.equal(reloaded.elements.chord.value, '');
 assert.equal(reloaded.elements['file-name'].value, 'draft');
 assert.equal(reloaded.elements['show-grid'].checked, false);
+assert.equal(reloaded.elements['grid-spacing'].value, '2.5');
+assert.equal(reloaded.elements['grid-plane'].value, 'yz');
+assert.equal(reloaded.elements['grid-offset'].value, '-3');
+assert.equal(reloaded.elements['projection-mode'].value, 'orthographic');
+const oldDraft = JSON.parse(storage.get(key));
+for(const id of ['grid-spacing','grid-plane','grid-offset','projection-mode'])delete oldDraft.fields[id];
+storage.set(key,JSON.stringify(oldDraft));
+const migrated = page();
+assert.equal(migrated.elements['grid-spacing'].value, '1');
+assert.equal(migrated.elements['grid-plane'].value, 'xy');
+assert.equal(migrated.elements['grid-offset'].value, '0');
+assert.equal(migrated.elements['projection-mode'].value, 'orthographic');
 reloaded.context.clearModel();
 const cleared = page();
 assert.equal(cleared.elements.source.value, '');

@@ -8,6 +8,10 @@ const elements = {
   message: {style: {}},
   'show-axes': {checked: true},
   'show-grid': {checked: true},
+  'grid-spacing': {value: '1'},
+  'grid-plane': {value: 'xy'},
+  'grid-offset': {value: '0'},
+  'projection-mode': {value: 'orthographic'},
   'shading-mode': {value: 'shading'}
 };
 class Geometry {
@@ -38,7 +42,7 @@ const scene = {
 };
 const camera = {
   updateProjectionMatrix() {},
-  position: {set() {}}, lookAt() {}
+  position: {set() {}}, lookAt() {}, add() {}
 };
 let renders = 0;
 const renderer = {setSize() {}, render() { renders++; }};
@@ -62,17 +66,58 @@ assert.deepEqual(Array.from(first[1].geometry.attributes.position.array), [0, -3
 assert.deepEqual(Array.from(first[2].geometry.attributes.position.array), [0, 0, -3, 0, 0, 3]);
 assert.equal(first[3].geometry.attributes.position.array.length / 3, 49);
 assert.deepEqual(Array.from(first[3].geometry.attributes.position.array.slice(0, 3)), [-3, -3, 0]);
-
+const orthoCamera = {isOrthographicCamera:true,updateProjectionMatrix(){},position:{set(){}},lookAt(){},add(){}};
+context.orthographicCamera=orthoCamera;
+context.perspectiveCamera=camera;
+context.cameraLight={target:{}};
+vm.runInContext('orthographicCamera=globalThis.orthographicCamera; perspectiveCamera=globalThis.perspectiveCamera; cameraLight=globalThis.cameraLight',context);
+elements['projection-mode'].value='orthographic';
+elements['projection-mode'].onchange();
+assert.equal(vm.runInContext('camera',context),orthoCamera);
+const halfHeight=20*2.8*Math.tan(Math.PI/8);
+assert(Math.abs(orthoCamera.top-halfHeight)<1e-9);
+assert(Math.abs(orthoCamera.right-halfHeight*1.5)<1e-9);
+context.setZoom(2);
+elements.canvas.clientWidth=400;
 context.draw();
-assert.equal(renders, 1);
+assert(Math.abs(orthoCamera.top-20*2*Math.tan(Math.PI/8))<1e-9);
+assert(Math.abs(orthoCamera.right-orthoCamera.top)<1e-9);
+context.setZoom(2.8);
+elements.canvas.clientWidth=600;
+elements['projection-mode'].value='perspective';
+elements['projection-mode'].onchange();
+assert.equal(vm.runInContext('camera',context),camera);
+elements['grid-spacing'].value = '2';
+elements['grid-plane'].value = 'yz';
+elements['grid-offset'].value = '5';
+elements['grid-offset'].oninput();
+let changed = Array.from(objects)[3];
+assert.equal(changed.geometry.attributes.position.array.length / 3, 49);
+assert.deepEqual(Array.from(changed.geometry.attributes.position.array.slice(0, 3)), [5, -6, -6]);
+elements['grid-plane'].value = 'zx';
+elements['grid-plane'].onchange();
+changed = Array.from(objects)[3];
+assert.deepEqual(Array.from(changed.geometry.attributes.position.array.slice(0, 3)), [-6, 5, -6]);
+elements['grid-spacing'].value = '0';
+elements['grid-spacing'].oninput();
+assert.equal(Array.from(objects)[3], changed, 'invalid spacing retains the last valid grid');
+elements['grid-spacing'].value = '1';
+elements['grid-plane'].value = 'xy';
+elements['grid-offset'].value = '0';
+elements['grid-spacing'].oninput();
+
+const current = Array.from(objects);
+const beforeDraw = renders;
+context.draw();
+assert.equal(renders, beforeDraw + 1);
 elements['show-axes'].checked = false;
 elements['show-axes'].onchange();
-assert.equal(renders, 2);
-assert(first.slice(0, 3).every(object => !object.visible));
-assert.equal(first[3].visible, true);
+assert.equal(renders, beforeDraw + 2);
+assert(current.slice(0, 3).every(object => !object.visible));
+assert.equal(current[3].visible, true);
 elements['show-grid'].checked = false;
 elements['show-grid'].onchange();
-assert.equal(first[3].visible, false);
+assert.equal(current[3].visible, false);
 
 context.updateGuides([10, 20, 0], [11, 21, 1]);
 assert(first.every(object => object.geometry.disposed && object.material.disposed));
@@ -117,7 +162,7 @@ context.show([mesh]);
 assert(preview.solid.geometry.disposed);
 assert(preview.normal.material.disposed);
 assert.equal(vm.runInContext('rendered[0].normal.visible', context), true);
-console.log('preview guides: axes, unit grid, toggles, and recalculation passed');
+console.log('preview guides: axes, configurable grid, toggles, and recalculation passed');
 
 // Clear removes geometry and guides, resets counts, and invalidates pending work.
 elements['usd-model'].src = '/preview/assets/old.usdz';

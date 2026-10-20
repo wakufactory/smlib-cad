@@ -43,18 +43,20 @@ button.primary{background:#1784ab;border-color:#32a5ca;color:white}button:disabl
 .command-list{max-height:36dvh;overflow-y:auto;overscroll-behavior:contain;padding:0 10px 10px;line-height:1.6;-webkit-user-select:text;user-select:text}
 .command-list:focus-visible{outline:2px solid #57b7d9;outline-offset:-2px}
 .command-list p{margin:6px 0 10px;color:#adc2d0}.command-list dl{margin:0}.command-entry{padding:8px 0;border-top:1px solid #263b4d}.command-list dt{color:#7ed2ef;font-weight:600}.command-list dd{margin:4px 0 0;color:#adc2d0}.command-list code,.command-list pre{font:11px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;overflow-wrap:anywhere}.command-list pre{white-space:pre-wrap;margin:6px 0}
-#message{font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;max-height:140px;color:#e7ad90;overscroll-behavior:none}
+#message{position:sticky;top:0;z-index:2;flex-shrink:0;padding:6px 8px;border:1px solid #36516a;border-radius:6px;background:#152538;font:12px/1.4 ui-monospace,monospace;white-space:pre-wrap;overflow:auto;max-height:140px;color:#e7ad90;overscroll-behavior:none}#message:empty{display:none}
 .source-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-heading span{font-size:11px;color:#8faabb}
 #viewport{position:relative;min-width:0;min-height:0;overflow:hidden;background-color:#0e1a26}
 canvas{width:100%;height:100%;display:block;touch-action:none}
 #shading-mode{position:absolute;top:12px;right:12px;background:#152538dd;z-index:1}
-#preview-mode{position:absolute;top:12px;left:12px;z-index:1;background:#152538dd}
-#view-controls{position:absolute;top:52px;right:12px;z-index:1;display:flex;gap:10px;align-items:center;padding:6px 8px;border:1px solid #36516a;border-radius:6px;background:#152538dd}
-#view-controls label{display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer}#view-controls input{margin:0;padding:0;accent-color:#57b7d9}
+#preview-options{position:absolute;top:12px;left:12px;z-index:1;display:flex;gap:6px;max-width:calc(100% - 120px)}#preview-options select{background:#152538dd}
+#view-controls{position:absolute;top:52px;right:12px;z-index:1;display:flex;padding:6px 8px;border:1px solid #36516a;border-radius:6px;background:#152538ee}
+#view-controls label,#grid-settings .grid-toggle{display:flex;align-items:center;gap:5px}
+#view-controls input[type="checkbox"],#grid-settings input[type="checkbox"]{margin:0;padding:0;accent-color:#57b7d9}
+#grid-settings [aria-invalid="true"]{border-color:#ff9b93}
 #mesh-stats{flex-shrink:0;padding:8px 10px;border:1px solid #36516a;border-radius:6px;background:#152538;color:#dbe8f0;font-size:12px;line-height:1.7;font-variant-numeric:tabular-nums;white-space:pre-line}
 #hint{position:absolute;bottom:12px;left:12px;right:12px;font-size:11px;color:#a5bdc9;pointer-events:none}
 #usd-model{display:block;width:100%;height:100%;background-color:#0e1a26}
-canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#view-controls[hidden],#hint[hidden]{display:none}
+canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#projection-mode[hidden],#view-controls[hidden],#hint[hidden]{display:none}
 #model-status{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:#adc2d0;pointer-events:none}
 @media(max-width:1100px) and (min-width:801px){main{grid-template-columns:228px minmax(0,1fr) minmax(280px,34%)}aside,.source-pane{padding:10px}.source-heading{flex-wrap:wrap}}
 @media(max-width:800px){main{grid-template-columns:210px minmax(0,1fr);grid-template-rows:minmax(0,55%) minmax(0,45%)}aside{grid-column:1;grid-row:1/-1;padding:10px}#viewport{grid-column:2;grid-row:1}.source-pane{grid-column:2;grid-row:2;border-left:0;border-top:1px solid #2c4154;padding:10px}.source-heading{flex-wrap:wrap;gap:4px}}
@@ -63,11 +65,12 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#v
 </head>
 <body><header><h1>SMLib Modeler</h1><span id="status">ライブラリを確認中…</span></header>
 <main><aside>
-<h2>設定</h2>
+<div id="message" role="status"></div>
+
 <div id="mesh-stats" aria-live="polite">トライアングル数: —
 ソリッド数: —</div>
 <div id="draft-status" class="help" role="status"></div>
-<details id="command-reference" open>
+<details id="command-reference">
 <summary>テキストコマンド一覧</summary>
 <div class="command-list" tabindex="0" role="region" aria-label="テキストコマンド一覧">
 <p>1行に1命令。<code>#</code> 以降はコメント。<code>[…]</code> は省略可能な引数です。名前は英字・下線で始め、英数字・下線を使います。角度は度数です。</p>
@@ -113,6 +116,7 @@ subtract result body hole</pre>
 <p>Boolean は左右の入力を消費し、出力名に結果を作ります。材質の RGB・metallic・roughness は 0〜1。グループの変換は scale → euler → position の順です。</p>
 </div>
 </details>
+<h2>設定</h2>
 <div class="settings-group">
 <div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span class="help">小さいほど滑らか</span></div>
 <div class="controls"><label for="angle">角度条件</label><input id="angle" type="number" min="1" max="90" step="any" value="20"><span class="help">度 · 大きいほど粗い</span></div>
@@ -126,8 +130,14 @@ subtract result body hole</pre>
 </div>
 <button class="primary" id="preview" disabled>プレビュー</button>
 <div class="row"><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
-<div id="message" role="status"></div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label><label><input id="show-grid" type="checkbox" checked>1単位グリッド点</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
+<div id="grid-settings" class="settings-group">
+<h2>グリッド表示</h2>
+<label class="grid-toggle"><input id="show-grid" type="checkbox" checked>グリッド点を表示</label>
+<div class="controls"><label for="grid-spacing">間隔</label><input id="grid-spacing" type="number" min="0" step="any" value="1" inputmode="decimal"></div>
+<div class="controls"><label for="grid-plane">平面</label><select id="grid-plane"><option value="xy">XY</option><option value="yz">YZ</option><option value="zx">ZX</option></select></div>
+<div class="controls"><label for="grid-offset">法線軸座標</label><input id="grid-offset" type="number" step="any" value="0" inputmode="decimal" aria-describedby="grid-offset-help"><span id="grid-offset-help" class="help">XY→Z · YZ→X · ZX→Y · WebGL のみ</span></div>
+</div>
+</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><div id="preview-options"><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="projection-mode" aria-label="WebGL 投影方式"><option value="orthographic">平行投影</option><option value="perspective">透視投影</option></select></div><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
 <div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
 <textarea id="source" spellcheck="false"></textarea></div>
 <section class="chat-pane" aria-label="モデル編集チャット">

@@ -1,11 +1,24 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const html = fs.readFileSync(require.resolve('../index.html'), 'utf8');
+const leftPane = html.split('</aside>')[0];
+const leftMarkup = html.split('<main><aside>')[1].split('</aside>')[0];
+const viewport = html.split('</aside>')[1].split('<section class="source-pane"')[0];
+assert(leftMarkup.trimStart().startsWith('<div id="message" role="status"></div>'));
+assert(!/<details id="command-reference"[^>]*\sopen(?:\s|>)/.test(leftMarkup));
+assert(leftMarkup.lastIndexOf('id="grid-settings"') > leftMarkup.lastIndexOf('id="export-usdz"'));
+assert(leftMarkup.trimEnd().endsWith('</div>'), 'grid settings are the last left-pane element');
+for(const id of ['show-grid','grid-spacing','grid-plane','grid-offset']){
+  assert(leftPane.includes(`id="${id}"`), `${id} belongs in the left settings pane`);
+  assert(!viewport.includes(`id="${id}"`));
+}
+assert.match(viewport, /id="projection-mode"[^>]*><option value="orthographic">平行投影<\/option>/);
 
 const values = {
   mode: 'text', source: 'box first 0 0 0 1 1 1', chord: '0.08', angle: '20',
   finish: 'none', 'finish-size': '1', sample: 'default', 'file-name': 'model',
-  'export-scale': '1'
+  'export-scale': '1', 'grid-spacing':'1', 'grid-plane':'xy', 'grid-offset':'0', 'projection-mode':'orthographic'
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
   [id, {value, disabled: false, labels: [{textContent: id}], checkValidity: () => true}]));
@@ -171,11 +184,13 @@ for (const invalid of [
   assert.equal(elements.canvas.hidden, true);
   assert.equal(elements['usd-model'].hidden, false);
   assert.equal(elements['view-controls'].hidden, true);
+  assert.equal(elements['projection-mode'].hidden, true);
   context.location.protocol = 'http:';
   elements['preview-mode'].onchange();
   assert.equal(elements['preview-mode'].value, 'webgl');
   assert.equal(elements.canvas.hidden, false);
   assert.equal(elements['view-controls'].hidden, false);
+  assert.equal(elements['projection-mode'].hidden, false);
   assert.equal(elements['show-axes'].checked, true);
   assert.equal(elements['show-grid'].checked, true);
   assert.match(elements.message.textContent, /HTTPS/);
