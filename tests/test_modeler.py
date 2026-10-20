@@ -2,7 +2,7 @@ import json
 import struct
 import unittest
 
-from modeler import apply_finish, evaluate, tessellate, to_glb
+from modeler import _number_expression, apply_finish, evaluate, tessellate, to_glb
 
 
 class Solid:
@@ -262,6 +262,43 @@ class ModelerTests(unittest.TestCase):
         self.assertEqual(list(objects), ["cell_1_2", "cell_1_1", "cell_1_0",
                                          "cell_2_2", "cell_2_1", "cell_2_0", "computed_2", "last"])
 
+    def test_math_functions_in_let_interpolation_if_and_range(self):
+        source = ("let radius = 10\n"
+                  "let x = radius * cos(radians(60))\n"
+                  "for i in range(exp(0) + 2)\n"
+                  "  if i + exp(0)\n"
+                  "    group placed_${i}\n"
+                  "      position ${x} ${radius * sin(pi / 6)} ${exp(0)}\n"
+                  "      box body_${i} 0 0 0 1 1 1\n"
+                  "    end\n"
+                  "  end\n"
+                  "end\n")
+        sm = FakeBrep()
+        objects, _, _ = evaluate(source, "text", sm)
+        self.assertEqual(list(objects), ["body_0", "body_1", "body_2"])
+        for _, _, _, position in sm.transforms:
+            self.assertAlmostEqual(position[0], 5)
+            self.assertAlmostEqual(position[1], 5)
+            self.assertEqual(position[2], 1)
+        self.assertAlmostEqual(_number_expression("tan(pi / 4)", {}), 1)
+        self.assertAlmostEqual(_number_expression("asin(0) + acos(1) + atan(0) + atan2(0, 1)", {}), 0)
+        self.assertAlmostEqual(_number_expression("log(e) + sqrt(4) + abs(-3) + degrees(pi) / 180", {}), 7)
+
+    def test_math_functions_reject_unapproved_calls_and_bad_results(self):
+        cases = (
+            ("__import__('os')", "unknown function"),
+            ("math.sin(0)", "approved math functions"),
+            ("sin.__globals__", "approved math functions"),
+            ("sin(0, 1)", "expected 1 positional"),
+            ("sin(x=0)", "expected 1 positional"),
+            ("log(0)", "log: invalid argument"),
+            ("sqrt(-1)", "sqrt: invalid argument"),
+            ("exp(1000)", "exp: invalid argument"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, message):
+                _number_expression(source, {})
+
     def test_if_expands_only_nonzero_branch(self):
         source = ("let enabled = -2\n"
                   "box body 0 0 0 10 10 4\n"
@@ -330,7 +367,7 @@ class ModelerTests(unittest.TestCase):
             ("box a 0 0 0 ${missing} 1 1", "Line 1: unknown variable"),
             ("let n = 1\nlet n = 2\nbox a 0 0 0 1 1 1", "Line 2: duplicate variable"),
             ("let n = 1 / 0\nbox a 0 0 0 1 1 1", "Line 1: invalid arithmetic"),
-            ("box a 0 0 0 ${__import__('os')} 1 1", "only numbers"),
+            ("box a 0 0 0 ${__import__('os')} 1 1", "unknown function"),
             ("for i in range(513)\nbox a_${i} 0 0 0 1 1 1\nend", "iteration limit"),
             ("for i in range(2)\nbox a 0 0 0 1 1 1", "for has no end"),
             ("for i in range(2)\nbox a_${i} 0 0 0 1 1 1\nend\nbox b 0 0 0 ${i} 1 1",

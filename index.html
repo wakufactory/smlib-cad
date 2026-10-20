@@ -105,7 +105,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <div class="command-entry"><dt><code>scale</code></dt><dd>グループ内で <code>scale sx sy sz</code>（各軸の正の倍率）</dd></div>
 <div class="command-entry"><dt><code>euler</code></dt><dd>グループ内で <code>euler rx ry rz</code>（度数）</dd></div>
 <div class="command-entry"><dt><code>position</code></dt><dd>グループ内で <code>position x y z</code>（親座標での移動）</dd></div>
-<div class="command-entry"><dt><code>let</code></dt><dd><code>let 名前 = 式</code>（数値変数。<code>${式}</code> を数値引数や形状名に埋め込める）</dd></div>
+<div class="command-entry"><dt><code>let</code></dt><dd><code>let 名前 = 式</code>（数値変数。<code>${式}</code> を数値引数や形状名に埋め込める）。<code>pi</code>、<code>e</code>、<code>sin</code> / <code>cos</code> / <code>tan</code>（ラジアン）、<code>asin</code> / <code>acos</code> / <code>atan</code> / <code>atan2</code>、<code>exp</code>、<code>log</code>、<code>sqrt</code>、<code>abs</code>、<code>radians</code> / <code>degrees</code> が使える</dd></div>
 <div class="command-entry"><dt><code>for</code> / <code>end</code></dt><dd><code>for i in range(回数)</code> または <code>range(開始, 終了[, 刻み])</code>。<code>end</code> で閉じる。終了値を含まない</dd></div>
 <div class="command-entry"><dt><code>if</code> / <code>end</code></dt><dd><code>if 式</code>。式が0以外なら <code>end</code> までを展開する。<code>let</code> と同じ数値式を使用</dd></div>
 <div class="command-entry"><dt><code>tessellation</code></dt><dd><code>形状名 曲面精度 角度条件</code>（形状ごとの指定。曲面精度は 0.001〜2、角度は 1〜90。<code>default</code> でUI設定を使用）</dd></div></dl>

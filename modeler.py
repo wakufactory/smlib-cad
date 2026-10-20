@@ -105,6 +105,14 @@ def normalize_materials(materials, objects):
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
 _INTERPOLATION = re.compile(r"\$\{([^{}]+)\}")
+_EXPRESSION_CONSTANTS = {"pi": math.pi, "e": math.e}
+_EXPRESSION_FUNCTIONS = {
+    "sin": (math.sin, 1), "cos": (math.cos, 1), "tan": (math.tan, 1),
+    "asin": (math.asin, 1), "acos": (math.acos, 1), "atan": (math.atan, 1),
+    "atan2": (math.atan2, 2), "exp": (math.exp, 1), "log": (math.log, 1),
+    "sqrt": (math.sqrt, 1), "abs": (abs, 1),
+    "radians": (math.radians, 1), "degrees": (math.degrees, 1),
+}
 
 
 def _number_expression(source, variables):
@@ -120,9 +128,24 @@ def _number_expression(source, variables):
         if isinstance(node, ast.Constant) and type(node.value) in (int, float):
             value = node.value
         elif isinstance(node, ast.Name):
-            if node.id not in variables:
+            if node.id in variables:
+                value = variables[node.id]
+            elif node.id in _EXPRESSION_CONSTANTS:
+                value = _EXPRESSION_CONSTANTS[node.id]
+            else:
                 raise ValueError(f"unknown variable: {node.id}")
-            value = variables[node.id]
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            name = node.func.id
+            if name not in _EXPRESSION_FUNCTIONS:
+                raise ValueError(f"unknown function: {name}")
+            function, arity = _EXPRESSION_FUNCTIONS[name]
+            if node.keywords or len(node.args) != arity:
+                raise ValueError(f"{name}: expected {arity} positional argument(s)")
+            arguments = [visit(argument, depth + 1) for argument in node.args]
+            try:
+                value = function(*arguments)
+            except (ValueError, OverflowError, ZeroDivisionError) as exc:
+                raise ValueError(f"{name}: invalid argument or result: {exc}") from exc
         elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
             value = visit(node.operand, depth + 1)
             if isinstance(node.op, ast.USub):
@@ -135,7 +158,7 @@ def _number_expression(source, variables):
             except (ZeroDivisionError, OverflowError) as exc:
                 raise ValueError(f"invalid arithmetic: {exc}") from exc
         else:
-            raise ValueError("only numbers, variables, +, -, *, /, and parentheses are allowed")
+            raise ValueError("only numeric expressions and approved math functions are allowed")
         try:
             finite = math.isfinite(value)
         except OverflowError:
