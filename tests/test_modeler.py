@@ -35,6 +35,7 @@ class FakeBrep:
         self.last_cylinder_axis = axis
         return Solid()
     def create_profile(self, points): return tuple(points)
+    def create_spline_profile(self, points): return ("spline", tuple(points))
     def create_extrude(self, profile, origin, start, end, **options):
         self.last_sweep = (profile, origin, start, end, options)
         return Solid()
@@ -144,6 +145,21 @@ class ModelerTests(unittest.TestCase):
         for source, message in cases:
             with self.subTest(source=source), self.assertRaisesRegex(ValueError, message):
                 evaluate(source, "text", FakeBrep())
+
+    def test_spline_profile_uses_existing_sweeps(self):
+        source = ("profile curved\n"
+                  "spline through 2 0 4 0 5 1 5 3 4 4 2 4 1 3 1 1 closed\n"
+                  "end\nextrude raised curved 0 0 0 0 2\n"
+                  "revolve turned curved 10 0 0 0 180\n")
+        sm = FakeBrep()
+        objects, _, _ = evaluate(source, "text", sm)
+        self.assertEqual(list(objects), ["raised", "turned"])
+        self.assertEqual(sm.last_sweep[0][0], "spline")
+        for definition in ("spline through 0 0 1 0 1 1 closed",
+                           "spline 0 0 1 0 1 1 0 1 closed",
+                           "spline through 0 0 1 0 1 1 0 1"):
+            with self.subTest(definition=definition), self.assertRaisesRegex(ValueError, "Line 2"):
+                evaluate(f"profile bad\n{definition}\nend", "text", sm)
 
     def test_part_use_builds_distinct_solids_and_namespaces_materials(self):
         source = ("use clamp left\n"

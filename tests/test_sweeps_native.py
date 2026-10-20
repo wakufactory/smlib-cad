@@ -131,12 +131,69 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertIs(sm.chamfer_fillet(body, 0.1), body)
         self.assertGreater(len(tessellate({"shape": body}, sm)[0]["positions"]), 0)
 
+    def test_closed_spline_profile_extrudes_and_revolves(self):
+        points = [(2, 0), (4, 0), (5, 1), (5, 3),
+                  (4, 4), (2, 4), (1, 3), (1, 1)]
+        profile = sm.create_spline_profile(points)
+        self.assertTrue(profile.spline)
+        self.assertEqual([tuple(point) for point in profile.points], points)
+        # Reusing the value profile must create independent, closed solids.
+        extruded = sm.create_extrude(profile, (0, 0, 0), 0, 2)
+        revolved = sm.create_revolve(profile, (12, 0, 0), 0, 360)
+        self.assertTrue(extruded.valid and revolved.valid)
+        for solid in (extruded, revolved):
+            mesh = tessellate({"shape": solid}, sm, chord=0.03, angle=12)[0]
+            self.assertGreater(len(mesh["positions"]) // 9, 80)
+            self.assertGreater(mesh_volume(mesh), 0)
+            edges = Counter()
+            xyz = mesh["positions"]
+            for i in range(0, len(xyz), 9):
+                vertices = [tuple(round(v, 7) for v in xyz[j:j + 3]) for j in (i, i + 3, i + 6)]
+                for a, b in zip(vertices, vertices[1:] + vertices[:1]):
+                    edges[tuple(sorted((a, b)))] += 1
+            self.assertTrue(all(count == 2 for count in edges.values()))
+        self.assertEqual(profile.points, sm.create_spline_profile(points).points)
+
+    def test_repeated_spline_point_forms_corner(self):
+        points = [(2, 0), (4, 0), (4, 0), (5, 1), (5, 3),
+                  (4, 4), (2, 4), (1, 3), (1, 1)]
+        profile = sm.create_spline_profile(points)
+        self.assertEqual([tuple(point) for point in profile.points], points)
+        extruded = sm.create_extrude(profile, (0, 0, 0), 0, 2)
+        revolved = sm.create_revolve(profile, (12, 0, 0), 0, 360)
+        for solid in (extruded, revolved):
+            mesh = tessellate({"shape": solid}, sm, chord=0.03, angle=12)[0]
+            self.assertGreater(mesh_volume(mesh), 0)
+        mesh = tessellate({"shape": extruded}, sm, chord=0.03, angle=12)[0]
+        corner_normals = []
+        for i in range(0, len(mesh["positions"]), 3):
+            x, y, _ = mesh["positions"][i:i + 3]
+            nx, ny, nz = mesh["normals"][i:i + 3]
+            if abs(x - 4) < 1e-6 and abs(y) < 1e-6 and abs(nz) < 0.1:
+                corner_normals.append((nx, ny))
+        self.assertTrue(any(abs(nx) < 0.1 and ny < -0.9 for nx, ny in corner_normals))
+        self.assertTrue(any(nx > 0.6 and ny < -0.6 for nx, ny in corner_normals))
+        with self.assertRaisesRegex(ValueError, "at most two consecutive"):
+            sm.create_spline_profile(points[:3] + [points[2]] + points[3:])
+
+    def test_spline_profile_rejects_bad_boundaries(self):
+        for points in (
+            [(0, 0), (1, 0), (0, 1)],
+            [(0, 0), (3, 3), (0, 3), (3, 0)],
+            [(0, 0), (2, 0), (2, 0), (0, 2)],
+        ):
+            with self.subTest(points=points), self.assertRaises(ValueError):
+                sm.create_spline_profile(points)
+        profile = sm.create_spline_profile([(0.1, 0), (2, 0), (3, 1), (2, 2), (0.1, 2), (0.05, 1)])
+        with self.assertRaisesRegex(ValueError, "non-negative radius"):
+            sm.create_revolve(profile, (0, 0, 0), 0, 360)
+
     def test_sample_and_python_mode(self):
         source = (Path(__file__).resolve().parents[1] / "examples/extrude_revolve.txt").read_text()
         objects, materials, _ = evaluate(source, "text", sm)
-        self.assertEqual(list(objects), ["bracket", "sleeve", "sector"])
+        self.assertEqual(list(objects), ["bracket", "sleeve", "sector", "curved_plate", "curved_ring"])
         meshes = tessellate(objects, sm, materials=materials)
-        self.assertEqual(len(meshes), 3)
+        self.assertEqual(len(meshes), 5)
         self.assertEqual(to_glb(meshes)[:4], b"glTF")
         objects, _, _ = evaluate("p = sm.create_profile([(0,0), (2,0), (0,2)])\n"
                                  "result = sm.create_extrude(p, (0,0,0), 0, 3)", "python", sm)

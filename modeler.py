@@ -339,19 +339,29 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                         raise ValueError("profile requires one polygon with at least three u v pairs")
                     values = [float(x) for x in args]
                     profile_block["points"] = list(zip(values[::2], values[1::2]))
+                    profile_block["kind"] = "polygon"
+                elif op == "spline":
+                    if (profile_block["points"] is not None or len(args) < 10 or
+                            args[0].lower() != "through" or args[-1].lower() != "closed" or
+                            (len(args) - 2) % 2):
+                        raise ValueError("profile spline requires: spline through u1 v1 ... u4 v4 closed")
+                    values = [float(x) for x in args[1:-1]]
+                    profile_block["points"] = list(zip(values[::2], values[1::2]))
+                    profile_block["kind"] = "spline"
                 elif op == "end" and not args:
                     if profile_block["points"] is None:
-                        raise ValueError("profile requires a polygon")
-                    frame["profiles"][profile_block["name"]] = sm.create_profile(profile_block["points"])
+                        raise ValueError("profile requires a polygon or spline")
+                    constructor = sm.create_spline_profile if profile_block["kind"] == "spline" else sm.create_profile
+                    frame["profiles"][profile_block["name"]] = constructor(profile_block["points"])
                     profile_block = None
                 else:
-                    raise ValueError("only polygon and end are allowed inside a profile")
+                    raise ValueError("only polygon, spline, and end are allowed inside a profile")
             elif op == "profile":
                 if len(args) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
                     raise ValueError("profile: one valid profile name required")
                 if args[0] in frame["profiles"]:
                     raise ValueError(f"duplicate profile name: {args[0]}")
-                profile_block = {"name": args[0], "line": line_number, "points": None}
+                profile_block = {"name": args[0], "line": line_number, "points": None, "kind": None}
             elif op in ("extrude", "revolve"):
                 if len(args) not in (7, 10, 13) or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
                     raise ValueError(f"{op}: name profile x y z start end [dx dy dz [ux uy uz]] required")

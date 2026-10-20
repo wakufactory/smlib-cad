@@ -134,7 +134,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `sphere_no_pole` | `名前 x y z 半径` |
 | `plane` | `名前 x y z X長さ Y長さ`（面） |
 | `planar_circle` | `名前 x y z 半径`（面） |
-| `profile` / `polygon` / `end` | `profile 断面名` 内に `polygon u1 v1 u2 v2 ...` を1行記述して `end` で閉じる |
+| `profile` / `polygon` / `spline` / `end` | `profile 断面名` 内に `polygon u1 v1 ...` または `spline through u1 v1 ... closed` を1行記述して `end` で閉じる |
 | `extrude` | `名前 断面名 x y z 開始距離 終了距離 [dx dy dz [ux uy uz]]` |
 | `revolve` | `名前 断面名 x y z 開始角 終了角 [dx dy dz [ux uy uz]]`（度数） |
 | `union` / `subtract` / `intersect` | `出力名 左の形状名またはグループ名 右の形状名またはグループ名` |
@@ -181,7 +181,7 @@ end
 
 ### 押し出しと回転体
 
-`profile` は穴なしの閉じた多角形断面です。3〜1024頂点の `(u, v)` を並べ、最後から最初への辺は自動で閉じます。最初の点を末尾にもう一度書くこともできます。時計回り・反時計回りのどちらも受け付け、自己交差、自己接触、辺の重なり、長さゼロの辺、面積ゼロを拒否します。円弧・スプライン・穴付き断面は未対応です。
+`profile` は穴なしの閉じた断面です。`polygon` は3〜1024頂点の `(u, v)` を直線で結び、最後から最初への辺は自動で閉じます。最初の点を末尾にもう一度書くこともできます。`spline through` は4〜64組の通過点を指定し、`closed` を末尾に付けます。各点を通る3次スプラインが最後から最初へつながります。同じ通過点を隣接して2回書くと、その位置で接線が折れます（例: `... 4 0  4 0 ...`）。3回以上の連続や、異なる点が4個未満の輪郭は拒否します。末尾に始点を再記載した場合は閉じ指定として取り除きます。どちらも時計回り・反時計回りを受け付け、自己交差、自己接触、重なり、ゼロ面積を拒否します。スプラインの検査は各区間16分割のサンプルに基づきます。穴付き断面は未対応です。
 
 ```text
 profile section
@@ -194,6 +194,12 @@ profile wall
 end
 revolve sleeve wall 30 0 0 0 360
 revolve sector wall 60 0 0 30 270
+
+profile curved_wall
+  spline through 2 0  4 0  4 0  5 1  5 3  4 4  2 4  1 3  1 1 closed
+end
+extrude curved_plate curved_wall 90 0 0 0 2
+revolve curved_ring curved_wall 110 0 0 0 360
 ```
 
 `extrude` は断面をローカルXY面に置き、ローカルZ座標の `開始距離 < 終了距離` の間に押し出して両端を閉じます。負の距離も使え、`-3 3` は断面を中心に両側3ずつ押し出します。原点 `(x, y, z)` は距離0の断面原点です。
@@ -202,7 +208,7 @@ revolve sector wall 60 0 0 30 270
 
 軸 `dx dy dz` の既定は +Z、長さは形状に影響しません。横方向 `ux uy uz` は押し出しのローカル+X／回転角0度の半径方向を指定し、軸に垂直な面へ投影して正規化します。ゼロベクトルや軸に平行な横方向はエラーです。横方向を省略した場合は、既存プリミティブと同じ +Z から軸への最短回転を使います。横方向だけ指定したい場合は軸も明記します。
 
-断面は生成後も再利用できます。グループ内の断面はそのグループと子グループで参照でき、`part` 内でも定義・利用できます。`use` は呼び出し位置で見える断面を継承し、各部品内の定義はその部品だけで有効です。断面は使用する命令より前に定義してください。グループの変換は生成したBRepに適用します。生成結果には既存の Boolean、材質、面取り・丸めを適用できます。
+多角形とスプラインの断面は生成後も再利用できます。グループ内の断面はそのグループと子グループで参照でき、`part` 内でも定義・利用できます。`use` は呼び出し位置で見える断面を継承し、各部品内の定義はその部品だけで有効です。断面は使用する命令より前に定義してください。グループの変換は生成したBRepに適用します。生成結果には既存の Boolean、材質、面取り・丸めを適用できます。
 
 Python API でも同じ形状を生成できます。入力点列と `Profile` は生成で変更されません。
 
@@ -212,9 +218,13 @@ result = sm.create_extrude(section, (0, 0, 0), -3, 3)
 # 半径・高さ断面を +X 軸の周りに回す。角度0の半径方向は +Y。
 wall = sm.create_profile([(5, 0), (9, 0), (9, 12), (5, 12)])
 result = sm.create_revolve(wall, (0, 0, 0), 30, 270, axis=(1, 0, 0), xdir=(0, 1, 0))
+smooth = sm.create_spline_profile([(2, 0), (4, 0), (5, 1), (5, 3),
+                                   (4, 4), (2, 4), (1, 3), (1, 1)])
+result = sm.create_extrude(smooth, (0, 0, 0), 0, 2)
+result = sm.create_revolve(smooth, (10, 0, 0), 0, 360)
 ```
 
-画面の「押し出し・回転体」→「読込」で、凹断面の押し出しと全回転・部分回転の3形状を読み込めます。ソースは `examples/extrude_revolve.txt`、JSONモデルは `examples/extrude_revolve.json`、生成済みGLBは `outputs/extrude_revolve.glb` です。再生成は `make glb MODEL=examples/extrude_revolve.json GLB=outputs/extrude_revolve.glb` で行います。
+画面の「押し出し・回転体・スプライン」→「読込」で、折線断面の押し出しと回転体3形状、スプライン断面の押し出しと回転体2形状を読み込めます。ソースは `examples/extrude_revolve.txt`、JSONモデルは `examples/extrude_revolve.json`、生成済みGLBは `outputs/extrude_revolve.glb` です。再生成は `make glb MODEL=examples/extrude_revolve.json GLB=outputs/extrude_revolve.glb` で行います。
 
 ### オフセットとシェル
 
