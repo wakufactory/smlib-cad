@@ -131,6 +131,21 @@ class SweepIntegrationTests(unittest.TestCase):
         self.assertIs(sm.chamfer_fillet(body, 0.1), body)
         self.assertGreater(len(tessellate({"shape": body}, sm)[0]["positions"]), 0)
 
+    def test_polygon_duplicate_points_are_ignored(self):
+        vertices = [(0, 0), (4, 0), (4, 0), (4, 3),
+                    (0, 3), (4, 0), (0, 0)]
+        profile = sm.create_profile(vertices)
+        self.assertEqual([tuple(point) for point in profile.points],
+                         [(0, 0), (4, 0), (4, 3), (0, 3)])
+        self.assertEqual(len(vertices), 7)
+        self.check_solid(sm.create_extrude(profile, (0, 0, 0), 0, 2), 24)
+        self.check_solid(sm.create_revolve(profile, (10, 0, 0), 0, 360),
+                         math.pi * 4**2 * 3)
+        source = ("profile p\npolygon 0 0 4 0 4 0 4 3 0 3 4 0 0 0\nend\n"
+                  "extrude body p 0 0 0 0 2\n")
+        objects, _, _ = evaluate(source, "text", sm)
+        self.check_solid(objects["body"], 24)
+
     def test_closed_spline_profile_extrudes_and_revolves(self):
         points = [(2, 0), (4, 0), (5, 1), (5, 3),
                   (4, 4), (2, 4), (1, 3), (1, 1)]
@@ -203,7 +218,7 @@ class SweepIntegrationTests(unittest.TestCase):
         invalid = (
             [(0, 0), (1, 0)],
             [(0, 0), (1, 0), (2, 0)],
-            [(0, 0), (1, 0), (1, 0), (0, 1)],
+            [(0, 0), (1, 0), (1, 0), (0, 0)],
             [(0, 0), (2, 2), (0, 2), (2, 0)],
             [(0, 0), (2, 0), (1, 0), (1, 1)],
             [(0, 0), (1, 0), (0, float("nan"))],
