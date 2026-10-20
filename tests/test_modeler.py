@@ -161,6 +161,22 @@ class ModelerTests(unittest.TestCase):
             with self.subTest(definition=definition), self.assertRaisesRegex(ValueError, "Line 2"):
                 evaluate(f"profile bad\n{definition}\nend", "text", sm)
 
+    def test_extrude_draft_option(self):
+        profile = "profile p\npolygon 0 0 10 0 10 10 0 10\nend\n"
+        sm = FakeBrep()
+        evaluate(profile + "extrude plain p 0 0 0 0 5", "text", sm)
+        self.assertEqual(sm.last_sweep[-1], {})
+        evaluate(profile + "extrude tapered p 0 0 0 0 5 0 0 1 1 0 0 draft 5", "text", sm)
+        self.assertEqual(sm.last_sweep[-1],
+                         {"axis": (0.0, 0.0, 1.0), "xdir": (1.0, 0.0, 0.0), "draft_angle": 5.0})
+        evaluate(profile + "extrude expanded p 0 0 0 0 5 draft -5", "text", sm)
+        self.assertEqual(sm.last_sweep[-1], {"draft_angle": -5.0})
+        for command in ("extrude bad p 0 0 0 0 5 draft 90",
+                        "extrude bad p 0 0 0 0 5 draft nan",
+                        "revolve bad p 0 0 0 0 90 draft 5"):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Line 4"):
+                evaluate(profile + command, "text", sm)
+
     def test_part_use_builds_distinct_solids_and_namespaces_materials(self):
         source = ("use clamp left\n"
                   "group moved\n"

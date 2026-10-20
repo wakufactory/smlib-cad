@@ -373,8 +373,12 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     raise ValueError(f"duplicate profile name: {args[0]}")
                 profile_block = {"name": args[0], "line": line_number, "points": None, "kind": None}
             elif op in ("extrude", "revolve"):
-                if len(args) not in (7, 10, 13) or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
-                    raise ValueError(f"{op}: name profile x y z start end [dx dy dz [ux uy uz]] required")
+                has_draft = op == "extrude" and len(args) >= 2 and args[-2].lower() == "draft"
+                sweep_args = args[:-2] if has_draft else args
+                if (len(sweep_args) not in (7, 10, 13) or not sweep_args or
+                        not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", sweep_args[0])):
+                    raise ValueError(f"{op}: name profile x y z start end [dx dy dz [ux uy uz]]"
+                                     + (" [draft angle] required" if op == "extrude" else " required"))
                 if args[0] in objects:
                     raise ValueError(f"duplicate solid name: {args[0]}")
                 profiles = dict(inherited_profiles)
@@ -382,7 +386,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     profiles.update(scope["profiles"])
                 if args[1] not in profiles:
                     raise ValueError(f"unknown profile: {args[1]}")
-                values = tuple(float(x) for x in args[2:])
+                values = tuple(float(x) for x in sweep_args[2:])
                 if not all(math.isfinite(x) for x in values):
                     raise ValueError("coordinates, range, axis, and xdir must be finite")
                 options = {}
@@ -390,6 +394,11 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     options["axis"] = values[5:8]
                 if len(values) == 11:
                     options["xdir"] = values[8:11]
+                if has_draft:
+                    draft_angle = float(args[-1])
+                    if not math.isfinite(draft_angle) or abs(draft_angle) >= 90:
+                        raise ValueError("draft angle must be finite and between -90 and 90 degrees")
+                    options["draft_angle"] = draft_angle
                 objects[args[0]] = getattr(sm, f"create_{op}")(
                     profiles[args[1]], values[:3], values[3], values[4], **options)
             elif op == "use":

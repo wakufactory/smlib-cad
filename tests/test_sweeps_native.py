@@ -68,6 +68,39 @@ class SweepIntegrationTests(unittest.TestCase):
                     self.assertAlmostEqual(min(mesh["positions"][j::3]), low)
                     self.assertAlmostEqual(max(mesh["positions"][j::3]), high)
 
+    def test_extrude_draft_inward_outward_and_collision(self):
+        profile = sm.create_profile([(0, 0), (10, 0), (10, 10), (0, 10)])
+        height = 5
+        for draft_angle in (5, -5):
+            offset = height * math.tan(math.radians(draft_angle))
+            expected_volume = 100 * height - 20 * math.tan(math.radians(draft_angle)) * height**2
+            expected_volume += 4 * math.tan(math.radians(draft_angle))**2 * height**3 / 3
+            solid = sm.create_extrude(profile, (0, 0, 0), 0, height, draft_angle=draft_angle)
+            mesh = self.check_solid(solid, expected_volume)
+            xyz = mesh["positions"]
+            top = [(x, y) for x, y, z in zip(*[iter(xyz)] * 3) if abs(z - height) < 1e-7]
+            self.assertAlmostEqual(min(x for x, _ in top), offset, delta=1e-6)
+            self.assertAlmostEqual(max(x for x, _ in top), 10 - offset, delta=1e-6)
+        oriented = sm.create_extrude(profile, (10, 20, 30), -2, 3,
+                                     axis=(1, 0, 0), xdir=(0, 1, 0), draft_angle=5)
+        inward_tangent = math.tan(math.radians(5))
+        inward_volume = 100 * height - 20 * inward_tangent * height**2
+        inward_volume += 4 * inward_tangent**2 * height**3 / 3
+        self.check_solid(oriented, inward_volume)
+        spline = sm.create_spline_profile([(2, 0), (4, 0), (5, 1), (5, 3),
+                                           (4, 4), (2, 4), (1, 3), (1, 1)])
+        for draft_angle in (5, -5):
+            mesh = tessellate({"shape": sm.create_extrude(spline, (0, 0, 0), 0, 2,
+                                                           draft_angle=draft_angle)}, sm)[0]
+            self.assertGreater(mesh_volume(mesh), 0)
+        narrow = sm.create_profile([(0, 0), (2, 0), (2, 2), (0, 2)])
+        for angle, end in ((30, 10), (45, 1)):
+            with self.subTest(angle=angle, end=end), self.assertRaisesRegex(ValueError, "collapses"):
+                sm.create_extrude(narrow, (0, 0, 0), 0, end, draft_angle=angle)
+        for angle in (float("nan"), 90, -90):
+            with self.subTest(angle=angle), self.assertRaisesRegex(ValueError, "draft angle"):
+                sm.create_extrude(profile, (0, 0, 0), 0, 5, draft_angle=angle)
+
     def test_full_and_partial_revolve_with_axis_contact(self):
         for inner in (0, 1):
             profile = sm.create_profile([(inner, 0), (2, 0), (2, 3), (inner, 3)])
@@ -206,9 +239,10 @@ class SweepIntegrationTests(unittest.TestCase):
     def test_sample_and_python_mode(self):
         source = (Path(__file__).resolve().parents[1] / "examples/extrude_revolve.txt").read_text()
         objects, materials, _ = evaluate(source, "text", sm)
-        self.assertEqual(list(objects), ["bracket", "sleeve", "sector", "curved_plate", "curved_ring"])
+        self.assertEqual(list(objects), ["bracket", "tapered_block", "sleeve", "sector",
+                                         "curved_plate", "curved_ring"])
         meshes = tessellate(objects, sm, materials=materials)
-        self.assertEqual(len(meshes), 5)
+        self.assertEqual(len(meshes), 6)
         self.assertEqual(to_glb(meshes)[:4], b"glTF")
         objects, _, _ = evaluate("p = sm.create_profile([(0,0), (2,0), (0,2)])\n"
                                  "result = sm.create_extrude(p, (0,0,0), 0, 3)", "python", sm)

@@ -135,7 +135,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `plane` | `名前 x y z X長さ Y長さ`（面） |
 | `planar_circle` | `名前 x y z 半径`（面） |
 | `profile` / `polygon` / `spline` / `end` | `profile 断面名` 内に `polygon u1 v1 ...` または `spline through u1 v1 ... closed` を1行記述して `end` で閉じる |
-| `extrude` | `名前 断面名 x y z 開始距離 終了距離 [dx dy dz [ux uy uz]]` |
+| `extrude` | `名前 断面名 x y z 開始距離 終了距離 [dx dy dz [ux uy uz]] [draft 角度]` |
 | `revolve` | `名前 断面名 x y z 開始角 終了角 [dx dy dz [ux uy uz]]`（度数） |
 | `union` / `subtract` / `intersect` | `出力名 左の形状名またはグループ名 右の形状名またはグループ名` |
 | `chamfer` | `形状名 幅`（その形状の全エッジを面取り） |
@@ -199,6 +199,7 @@ profile section
   polygon 0 0  18 0  18 0  18 5  6 5  6 16  0 16
 end
 extrude bracket section 0 0 0 -3 3
+extrude tapered section 30 0 0 0 5 draft 5
 
 profile wall
   polygon 5 0  9 0  9 12  5 12
@@ -215,6 +216,8 @@ revolve curved_ring curved_wall 110 0 0 0 360
 
 `extrude` は断面をローカルXY面に置き、ローカルZ座標の `開始距離 < 終了距離` の間に押し出して両端を閉じます。負の距離も使え、`-3 3` は断面を中心に両側3ずつ押し出します。原点 `(x, y, z)` は距離0の断面原点です。
 
+末尾に `draft 角度` を付けると抜き勾配を付けます。角度は度数で `-90 < 角度 < 90`、正で内向き（終端側が小さく）、負で外向き（終端側が大きく）です。省略または `draft 0` は従来の直線押し出しです。`draft` は軸・横方向の指定より後に書きます。指定高さより手前で断面がつぶれる場合や、終端面ができない場合はエラーです。
+
 `revolve` は断面の `(u, v)` を `(半径, 高さ)` として使い、原点を通る軸の周りに右ねじ方向へ回転します。半径は0以上で、軸への接触を許可します。`0 < 終了角 - 開始角 <= 360`、部分回転は開始・終了の端面を閉じ、360度は全回転になります。`wall` は穴のない長方形断面ですが、軸から離れているため全回転すると中空の筒になります。
 
 軸 `dx dy dz` の既定は +Z、長さは形状に影響しません。横方向 `ux uy uz` は押し出しのローカル+X／回転角0度の半径方向を指定し、軸に垂直な面へ投影して正規化します。ゼロベクトルや軸に平行な横方向はエラーです。横方向を省略した場合は、既存プリミティブと同じ +Z から軸への最短回転を使います。横方向だけ指定したい場合は軸も明記します。
@@ -226,6 +229,7 @@ Python API でも同じ形状を生成できます。入力点列と `Profile` �
 ```python
 section = sm.create_profile([(0, 0), (18, 0), (18, 5), (6, 5), (6, 16), (0, 16)])
 result = sm.create_extrude(section, (0, 0, 0), -3, 3)
+result = sm.create_extrude(section, (0, 0, 0), 0, 5, draft_angle=5)
 # 半径・高さ断面を +X 軸の周りに回す。角度0の半径方向は +Y。
 wall = sm.create_profile([(5, 0), (9, 0), (9, 12), (5, 12)])
 result = sm.create_revolve(wall, (0, 0, 0), 30, 270, axis=(1, 0, 0), xdir=(0, 1, 0))
@@ -235,7 +239,7 @@ result = sm.create_extrude(smooth, (0, 0, 0), 0, 2)
 result = sm.create_revolve(smooth, (10, 0, 0), 0, 360)
 ```
 
-画面の「押し出し・回転体・スプライン」→「読込」で、折線断面の押し出しと回転体3形状、スプライン断面の押し出しと回転体2形状を読み込めます。ソースは `examples/extrude_revolve.txt`、JSONモデルは `examples/extrude_revolve.json`、生成済みGLBは `outputs/extrude_revolve.glb` です。再生成は `make glb MODEL=examples/extrude_revolve.json GLB=outputs/extrude_revolve.glb` で行います。
+画面の「押し出し・回転体・スプライン」→「読込」で、折線断面の押し出し・回転体・抜き勾配付き押し出し4形状と、スプライン断面の押し出し・回転体2形状を読み込めます。ソースは `examples/extrude_revolve.txt`、JSONモデルは `examples/extrude_revolve.json`、生成済みGLBは `outputs/extrude_revolve.glb` です。再生成は `make glb MODEL=examples/extrude_revolve.json GLB=outputs/extrude_revolve.glb` で行います。
 
 ### オフセットとシェル
 
