@@ -92,9 +92,9 @@ function saveDraft(){
     const fields=Object.fromEntries(draftFields.map(id=>[id,String($(id).value)]));
     const checks=Object.fromEntries(draftChecks.map(id=>[id,$(id).checked]));
     window.localStorage.setItem(draftKey,JSON.stringify({version:1,fields,checks}));
-    if($('draft-status'))$('draft-status').textContent='ブラウザに自動保存済み';
+//    note('ブラウザに自動保存済み');
   }catch(error){
-    if($('draft-status'))$('draft-status').textContent='自動保存できません。JSONで保存してください';
+    note('自動保存できません。JSONで保存してください',true);
   }
 }
 function restoreDraft(){
@@ -114,10 +114,10 @@ function restoreDraft(){
     for(const id of draftChecks)$(id).checked=draft.checks[id];
     $('finish-size').disabled=$('finish').value==='none';
     if($('preview-mode').value==='model' && modelModeError())$('preview-mode').value='webgl';
-    if($('draft-status'))$('draft-status').textContent='前回の編集内容を復元しました';
+    note('前回の編集内容を復元しました');
     return true;
   }catch(error){
-    if($('draft-status'))$('draft-status').textContent='前回の編集内容を復元できませんでした';
+    note('前回の編集内容を復元できませんでした',true);
     return false;
   }
 }
