@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Reproduction: the two solids tessellate separately, but this union returns status 1001.\n# Extracted from truss1-1 2.json without changing the section or brace construction.\nprofile angle_section\n  polygon 0 0 0.04 0 0.04 0.004 0.004 0.004 0.004 0.04 0 0.04\nend\n\npart angle_member\n  extrude steel angle_section 0 0 0 0 ${member_length}\nend\n\ngroup column_0_0\n  position 0 0 0\n  euler 0 0 0\n  let member_length = 1\n  use angle_member column_0_0\nend\n\ngroup brace_x_0\n  extrude raw_x_0 angle_section 0.04 0 0.04 -0.1 1.6 1 0 1 0 1 0\n  box trim_x_0 0.04 0 0.04 0.92 0.04 0.92\n  intersect steel_x_0 raw_x_0 trim_x_0\nend\n\nunion pair column_0_0 brace_x_0\n",
+  "parameters": {
+    "chord": 0.08,
+    "angle": 20,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

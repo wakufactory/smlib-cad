@@ -4,6 +4,7 @@
   let editorRevision = 0, loginTimer = null;
   let transcript = [], restoredContext = null;
   let attachments = [], readingImages = false;
+  let stopRequested = false;
   const history = $('chat-history');
   function entry(role, text, error = false, record = true, images = []) {
     if(record){
@@ -21,7 +22,7 @@
   }
   function controls() {
     $('chat-send').disabled = busy || readingImages || !ready;
-    $('chat-stop').disabled = !busy || !sessionId;
+    $('chat-stop').disabled = !busy || !sessionId || stopRequested;
     $('chat-reset').disabled = busy || readingImages;
     $('chat-undo').disabled = busy || !undo;
     $('chat-apply').disabled = busy || !proposal;
@@ -91,55 +92,78 @@
   for (const [id, event] of [['source', 'input'], ['mode', 'change'], ['example', 'click'], ['model-file', 'change']]) {
     $(id).addEventListener(event, changed);
   }
-  async function apply(source, mode) {
-    undo = {source: $('source').value, mode: $('mode').value};
+  async function apply(source, mode, preserveUndo = false) {
+    if(!preserveUndo)undo = {source: $('source').value, mode: $('mode').value};
     $('source').value = source; $('mode').value = mode; $('sample').value = 'default';
     changed(); proposal = null; controls();
+    const revision=editorRevision;
     $('export').disabled = true; $('export-usdz').disabled = true;
     const ok = await preview();
-    if (ok === false) entry('system', `プレビューでエラーが出ました。次の送信時にこの内容も添えます。\n${previewFailure?.error || message.textContent}`, true);
+    if (ok === false) {
+      const error=previewFailure?.error || message.textContent;
+      entry('system', `プレビューでエラーが出ました。\n${error}`, true);
+      return {source,mode,revision,error};
+    }
+    return null;
+  }
+  async function exchange(text, images = [], preserveUndo = false) {
+    const document=modelDocument(), revision=editorRevision;
+    const {source, mode, parameters} = document;
+    const previewError = previewFailure?.source === source && previewFailure?.mode === mode ? previewFailure.error : null;
+    entry('user', text, false, true, images);
+    $('chat-status').textContent = '送信中…';
+    const sent = await api('/chat/send', {sessionId, message: text, source, mode, parameters, previewError,
+      ...(images.length ? {images} : {}),
+      ...(restoredContext ? {restoredHistory:restoredContext} : {})});
+    sessionId = sent.sessionId; restoredContext=null; attachments=[];showAttachments();controls();
+    if(stopRequested)await api('/chat/cancel',{sessionId});
+    const deadline = Date.now() + 330000;
+    let state;
+    do {
+      state = await api('/chat/poll', {sessionId});
+      if (state.state !== 'running') break;
+      if (Date.now() > deadline) throw Error('応答の確認が時間切れになりました。停止を押して再試行してください。');
+      $('chat-status').textContent = state.progress || '考えています…';
+      await new Promise(resolve => setTimeout(resolve, 700));
+    } while (true);
+    if (state.state === 'cancelled' || stopRequested) {
+      entry('system', '停止しました。自動修正は続行しません。');
+    } else if (state.state === 'failed') {
+      throw Error(state.error || 'Codex の処理に失敗しました');
+    } else if (state.state === 'completed') {
+      entry('assistant', state.result.message);
+      if (state.result.source !== null && (state.result.source !== source || previewError)) {
+        if (revision !== editorRevision || $('source').value !== source || $('mode').value !== mode) {
+          proposal = {source: state.result.source, mode};
+          entry('system', '応答待ちの間にソースが変更されたため、変更案を保留しました。');
+        } else {
+          return await apply(state.result.source, mode, preserveUndo);
+        }
+      }
+    } else throw Error('チャットの状態を読み取れませんでした');
+    return null;
+  }
+  async function repair(failure) {
+    for(let retry=1;failure && retry<=2;retry++){
+      if(stopRequested)return;
+      if(failure.revision!==editorRevision || failure.source!==$('source').value || failure.mode!==$('mode').value){
+        entry('system','プレビュー中にソースが変更されたため、自動修正を止めました。');
+        return;
+      }
+      entry('system',`エラーを添えて自動修正を依頼します（${retry}/2）。`);
+      failure=await exchange(`モデルのプレビューに失敗しました。以下のエラーを修正し、現在のソース全文を返してください。\n\n${String(failure.error).slice(0,7000)}`,[],true);
+    }
+    if(failure && !stopRequested)entry('system','自動修正を2回試しましたが、プレビューに失敗しました。ソースとエラーを確認してください。',true);
   }
   async function send() {
     if (busy || readingImages || !ready || (!$('chat-input').value.trim() && !attachments.length)) return;
-    let document;
-    try { document = modelDocument(); }
-    catch (error) { entry('system', error.message, true); return; }
-    const text = $('chat-input').value.trim() || '添付画像を参考にモデルを編集してください。', revision = editorRevision;
+    try { modelDocument(); }
+    catch(error){entry('system',error.message,true);return;}
+    const text=$('chat-input').value.trim() || '添付画像を参考にモデルを編集してください。';
     const images=attachments.map(item=>({...item}));
-    const {source, mode, parameters} = document;
-    const previewError = previewFailure?.source === source && previewFailure?.mode === mode ? previewFailure.error : null;
-    busy = true; proposal = null; controls();
-    entry('user', text, false, true, images); $('chat-input').value = '';
-    $('chat-status').textContent = '送信中…';
+    busy=true;stopRequested=false;proposal=null;$('chat-input').value='';controls();
     try {
-      const sent = await api('/chat/send', {sessionId, message: text, source, mode, parameters, previewError,
-        ...(images.length ? {images} : {}),
-        ...(restoredContext ? {restoredHistory:restoredContext} : {})});
-      sessionId = sent.sessionId; restoredContext=null; attachments=[];showAttachments();controls();
-      const deadline = Date.now() + 330000;
-      let state;
-      do {
-        state = await api('/chat/poll', {sessionId});
-        if (state.state !== 'running') break;
-        if (Date.now() > deadline) throw Error('応答の確認が時間切れになりました。停止を押して再試行してください。');
-        $('chat-status').textContent = state.progress || '考えています…';
-        await new Promise(resolve => setTimeout(resolve, 700));
-      } while (true);
-      if (state.state === 'cancelled') {
-        entry('system', '停止しました。ソースは変更していません。');
-      } else if (state.state === 'failed') {
-        throw Error(state.error || 'Codex の処理に失敗しました');
-      } else if (state.state === 'completed') {
-        entry('assistant', state.result.message);
-        if (state.result.source !== null && state.result.source !== source) {
-          if (revision !== editorRevision || $('source').value !== source || $('mode').value !== mode) {
-            proposal = {source: state.result.source, mode};
-            entry('system', '応答待ちの間にソースが変更されたため、変更案を保留しました。');
-          } else {
-            await apply(state.result.source, mode);
-          }
-        }
-      } else throw Error('チャットの状態を読み取れませんでした');
+      await repair(await exchange(text,images));
       $('chat-status').textContent = 'ChatGPT 接続済み';
     } catch (error) {
       entry('system', error.message, true);
@@ -169,6 +193,7 @@
     finally { controls(); }
   };
   $('chat-stop').onclick = async () => {
+    stopRequested=true;
     $('chat-stop').disabled = true;
     try { await api('/chat/cancel', {sessionId}); $('chat-status').textContent = '停止しています…'; }
     catch (error) { entry('system', error.message, true); controls(); }
@@ -191,8 +216,9 @@
   };
   $('chat-apply').onclick = async () => {
     if (!proposal || busy) return;
-    busy = true; controls();
-    try { await apply(proposal.source, proposal.mode); }
+    busy = true; stopRequested=false;controls();
+    try { await repair(await apply(proposal.source, proposal.mode));$('chat-status').textContent='ChatGPT 接続済み'; }
+    catch(error){entry('system',error.message,true);$('chat-status').textContent='自動修正に失敗しました';if(sessionId)api('/chat/cancel',{sessionId}).catch(()=>{});}
     finally { busy = false; controls(); }
   };
   globalThis.ModelChat = {

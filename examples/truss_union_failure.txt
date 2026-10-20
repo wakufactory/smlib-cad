@@ -1,0 +1,24 @@
+# Reproduction: the two solids tessellate separately, but this union returns status 1001.
+# Extracted from truss1-1 2.json without changing the section or brace construction.
+profile angle_section
+  polygon 0 0 0.04 0 0.04 0.004 0.004 0.004 0.004 0.04 0 0.04
+end
+
+part angle_member
+  extrude steel angle_section 0 0 0 0 ${member_length}
+end
+
+group column_0_0
+  position 0 0 0
+  euler 0 0 0
+  let member_length = 1
+  use angle_member column_0_0
+end
+
+group brace_x_0
+  extrude raw_x_0 angle_section 0.04 0 0.04 -0.1 1.6 1 0 1 0 1 0
+  box trim_x_0 0.04 0 0.04 0.92 0.04 0.92
+  intersect steel_x_0 raw_x_0 trim_x_0
+end
+
+union pair column_0_0 brace_x_0

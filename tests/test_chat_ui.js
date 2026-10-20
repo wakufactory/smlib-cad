@@ -18,6 +18,8 @@ const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
 elements.source.value = 'box body 0 0 0 1 1 1'; elements.mode.value = 'text';
 let responseSource = 'box body 0 0 0 2 2 2', responseState = 'completed', polling;
 let previewCalls = 0, lastSend, cancelled = 0, failPreview = false;
+const sentRequests = [];
+let previewSteps = [], replySources = [], replyStates = [];
 const context = vm.createContext({
   $, URL, console, Date, setTimeout, clearTimeout,
   FileReader: class {readAsDataURL(file){this.result=file.dataUrl;this.onload();}},
@@ -26,16 +28,19 @@ const context = vm.createContext({
   modelDocument: () => ({source: elements.source.value, mode: elements.mode.value, parameters: {angle: 20}}),
   preview: async () => {
     previewCalls++;
-    if (failPreview) context.previewFailure = {source: elements.source.value, mode: elements.mode.value, error: 'bad geometry'};
-    return !failPreview;
+    const source=elements.source.value,mode=elements.mode.value;
+    const step=previewSteps.shift();
+    const ok=typeof step==='function' ? await step() : (step===undefined ? !failPreview : step);
+    context.previewFailure=ok ? null : {source,mode,error:'bad geometry'};
+    return ok;
   },
   fetch: async (path, options) => {
     let data;
     if (path === '/chat/status') data = {available: true, ready: true, message: 'connected'};
-    if (path === '/chat/send') {lastSend = JSON.parse(options.body); data = {sessionId: 'session'};}
+    if (path === '/chat/send') {lastSend = JSON.parse(options.body);sentRequests.push(lastSend); data = {sessionId: 'session'};}
     if (path === '/chat/poll') {
       if (polling) await polling;
-      data = {state: responseState, error: 'usage limit', result: {message: '変更しました', source: responseSource}};
+      data = {state:replyStates.length ? replyStates.shift() : responseState, error: 'usage limit', result: {message: '変更しました', source:replySources.length ? replySources.shift() : responseSource}};
     }
     if (path === '/chat/cancel') { cancelled++; data = {ok: true}; }
     if (path === '/chat/reset') data = {ok: true};
@@ -87,7 +92,14 @@ vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context)
   assert.equal(elements.source.value, 'manual edit');
 
   failPreview = true;
+  const failedStart=sentRequests.length;
   await send('直して');
+  assert.equal(sentRequests.length-failedStart,3); // Initial request plus at most two automatic corrections.
+  for(const request of sentRequests.slice(failedStart+1)){
+    assert.equal(request.previewError,'bad geometry');
+    assert.match(request.message,/bad geometry/);
+    assert.equal(request.sessionId,'session');
+  }
   assert.equal(context.previewFailure.error, 'bad geometry');
   responseSource = null;
   await send('このエラーを直して');
@@ -141,5 +153,67 @@ vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context)
   await elements['chat-files'].onchange({target:elements['chat-files']});
   elements['chat-images'].children[0].removeButton.onclick();
   assert.equal(elements['chat-images'].hidden,true);
+
+  // Stop after the first successful correction and use the failing source as input.
+  context.ModelChat.restore(undefined);
+  const originalSource=elements.source.value;
+  let start=sentRequests.length, calls=previewCalls;
+  replySources=['invalid first','corrected first'];previewSteps=[false,true];
+  await send('変更して');
+  assert.equal(sentRequests.length-start,2);
+  assert.equal(previewCalls-calls,2);
+  assert.equal(sentRequests[start+1].source,'invalid first');
+  assert.equal(elements.source.value,'corrected first');
+  await elements['chat-undo'].onclick();
+  assert.equal(elements.source.value,originalSource); // Undo covers the whole correction chain.
+
+  // A second correction may succeed; no fourth request is made on repeated failure.
+  start=sentRequests.length;
+  replySources=['invalid second','still invalid','corrected second'];previewSteps=[false,false,true];
+  await send('別の変更');
+  assert.equal(sentRequests.length-start,3);
+  assert.equal(sentRequests[start+2].source,'still invalid');
+  assert.equal(elements.source.value,'corrected second');
+  start=sentRequests.length;
+  replySources=['bad one','bad two','bad three'];previewSteps=[false,false,false];
+  await send('また変更');
+  assert.equal(sentRequests.length-start,3);
+  assert.match(context.ModelChat.snapshot().messages.at(-1).text,/2回/);
+  assert.equal(elements['chat-send'].disabled,false);
+  // A new user request starts a fresh two-retry allowance.
+  start=sentRequests.length;
+  replySources=['bad four','bad five','good six'];previewSteps=[false,false,true];
+  await send('もう一度');
+  assert.equal(sentRequests.length-start,3);
+
+  // Manual edits during preview prevent automatic correction of stale source.
+  start=sentRequests.length;replySources=['bad while editing'];
+  previewSteps=[()=>{elements.source.value='manual during preview';elements.source.events.input();return false;}];
+  await send('変更');
+  assert.equal(sentRequests.length-start,1);
+  assert.equal(elements.source.value,'manual during preview');
+
+  // Stop during preview prevents the first retry, even though the GPT turn is already completed.
+  start=sentRequests.length;replySources=['bad when stopped'];
+  previewSteps=[async()=>{await elements['chat-stop'].onclick();return false;}];
+  await send('停止テスト');
+  assert.equal(sentRequests.length-start,1);
+
+  // Cancellation of an automatic request ends the chain immediately.
+  start=sentRequests.length;replySources=['bad before cancellation',null];
+  replyStates=['completed','cancelled'];previewSteps=[false];
+  await send('リトライ中に停止');
+  assert.equal(sentRequests.length-start,2);
+  assert.equal(elements.source.value,'bad before cancellation');
+
+  // Explicitly applying a conflict proposal uses the same two-retry limit.
+  polling=new Promise(resolve=>{resolvePoll=resolve;});
+  replySources=['proposal with error'];
+  const conflict=send('保留する変更');await tick();
+  elements.source.value='manual before proposal';elements.source.events.input();resolvePoll();await conflict;polling=null;
+  start=sentRequests.length;replySources=['fixed proposal'];previewSteps=[false,true];
+  await elements['chat-apply'].onclick();
+  assert.equal(sentRequests.length-start,1);
+  assert.equal(elements.source.value,'fixed proposal');
   console.log('chat UI tests passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});
