@@ -158,10 +158,27 @@ def _expand_text(line, variables):
     return result + separator + comment
 
 
+def _block_end(records, start, opener):
+    """Locate an end for a preprocessing block, including nested CAD blocks."""
+    depth = 0
+    for index in range(start + 1, len(records)):
+        words = records[index][1].partition("#")[0].split()
+        op = words[0].lower() if words else ""
+        if op in ("for", "if", "group", "profile"):
+            depth += 1
+        elif op == "end":
+            if len(words) != 1:
+                raise ValueError(f"Line {records[index][0]}: end takes no arguments")
+            if depth == 0:
+                return index
+            depth -= 1
+    raise ValueError(f"Line {records[start][0]}: {opener} has no end")
+
+
 def _expand_commands(records, inherited, counter, depth=0):
-    """Expand variables and loops, preserving source lines and use-site environments."""
+    """Expand variables, loops, and conditions with source line metadata."""
     if depth > 32:
-        raise ValueError("loop nesting limit exceeded (32)")
+        raise ValueError("control block nesting limit exceeded (32)")
     output = []
     scopes = [dict(inherited)]
     definitions = [set()]
@@ -207,22 +224,7 @@ def _expand_commands(records, inherited, counter, depth=0):
                     iteration_count = 513
                 if iteration_count > 512:
                     raise ValueError("loop iteration limit exceeded (512)")
-                depth = 0
-                end = index + 1
-                while end < len(records):
-                    inner = records[end][1].partition("#")[0].split()
-                    inner_op = inner[0].lower() if inner else ""
-                    if inner_op in ("for", "group", "profile"):
-                        depth += 1
-                    elif inner_op == "end":
-                        if depth == 0:
-                            break
-                        depth -= 1
-                    end += 1
-                if end == len(records):
-                    raise ValueError("for has no end")
-                if records[end][1].partition("#")[0].strip().lower() != "end":
-                    raise ValueError("end takes no arguments")
+                end = _block_end(records, index, "for")
                 body = records[index + 1:end]
                 for value in iteration:
                     nested = dict(scopes[-1])
@@ -231,6 +233,14 @@ def _expand_commands(records, inherited, counter, depth=0):
                         output.extend(_expand_commands(body, nested, counter, depth + 1))
                     except ValueError as exc:
                         raise ValueError(f"for {name}={value}: {exc}") from exc
+                index = end
+            elif op == "if":
+                if len(words) != 2:
+                    raise ValueError("if: expected a numeric expression")
+                condition = _number_expression(words[1], scopes[-1])
+                end = _block_end(records, index, "if")
+                if condition != 0:
+                    output.extend(_expand_commands(records[index + 1:end], scopes[-1], counter, depth + 1))
                 index = end
             else:
                 expanded = _expand_text(raw, scopes[-1])
@@ -262,7 +272,7 @@ def _extract_parts(lines, parts, in_part):
     while index < len(lines):
         words = lines[index][1].partition("#")[0].split()
         op = words[0].lower() if words else ""
-        if op in ("group", "profile", "for"):
+        if op in ("group", "profile", "for", "if"):
             group_depth += 1
         elif op == "end":
             group_depth -= 1
@@ -281,8 +291,8 @@ def _extract_parts(lines, parts, in_part):
                 inner_words = lines[end][1].partition("#")[0].split()
                 inner_op = inner_words[0].lower() if inner_words else ""
                 if inner_op == "part":
-                    raise ValueError(f"Line {line_offset + end + 1}: part definitions cannot be nested")
-                if inner_op in ("group", "profile", "for"):
+                    raise ValueError(f"Line {lines[end][0]}: part definitions cannot be nested")
+                if inner_op in ("group", "profile", "for", "if"):
                     nested_groups += 1
                 elif inner_op == "end":
                     if nested_groups == 0:

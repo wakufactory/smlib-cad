@@ -246,6 +246,69 @@ class ModelerTests(unittest.TestCase):
         self.assertEqual(list(objects), ["cell_1_2", "cell_1_1", "cell_1_0",
                                          "cell_2_2", "cell_2_1", "cell_2_0", "computed_2", "last"])
 
+    def test_if_expands_only_nonzero_branch(self):
+        source = ("let enabled = -2\n"
+                  "box body 0 0 0 10 10 4\n"
+                  "if 0\n"
+                  "  group skipped_group\n"
+                  "    for i in range(2)\n"
+                  "      unknown_command ignored\n"
+                  "    end\n"
+                  "  end\n"
+                  "end\n"
+                  "if enabled\n"
+                  "  cylinder boss 5 5 4 2 3\n"
+                  "  union body body boss\n"
+                  "end\n")
+        sm = FakeBrep()
+        objects, _, _ = evaluate(source, "text", sm)
+        self.assertEqual(list(objects), ["body"])
+        self.assertEqual([call[0] for call in sm.booleans], ["union"])
+
+    def test_if_nested_in_for_group_and_part(self):
+        source = ("part piece\n"
+                  "  box body 0 0 0 2 2 2\n"
+                  "  if enabled\n"
+                  "    sphere boss 1 1 2 1\n"
+                  "    union body body boss\n"
+                  "  end\n"
+                  "end\n"
+                  "group assembly\n"
+                  "  for i in range(3)\n"
+                  "    let enabled = i\n"
+                  "    if i\n"
+                  "      group station_${i}\n"
+                  "        position ${i * 3} 0 0\n"
+                  "        use piece item_${i}\n"
+                  "      end\n"
+                  "    end\n"
+                  "  end\n"
+                  "end\n")
+        sm = FakeBrep()
+        objects, _, _ = evaluate(source, "text", sm)
+        self.assertEqual(list(objects), ["item_1__body", "item_2__body"])
+        self.assertEqual([call[0] for call in sm.booleans], ["union", "union"])
+        self.assertEqual([call[3] for call in sm.transforms[:2]], [(3., 0., 0.), (6., 0., 0.)])
+
+    def test_if_local_variables_and_errors(self):
+        cases = (
+            ("box a 0 0 0 1 1 1\nif 1\nlet local = 2\nend\n"
+             "box b ${local} 0 0 1 1 1", "unknown variable: local"),
+            ("if missing\nbox a 0 0 0 1 1 1\nend", "Line 1: unknown variable"),
+            ("if 1 / 0\nbox a 0 0 0 1 1 1\nend", "Line 1: invalid arithmetic"),
+            ("if\nbox a 0 0 0 1 1 1\nend", "Line 1: if: expected"),
+            ("if 1\nbox a 0 0 0 1 1 1", "Line 1: if has no end"),
+            ("if 0\nbox a 0 0 0 1 1 1\nend extra\n"
+             "box b 0 0 0 1 1 1", "end takes no arguments"),
+            ("if 1\npart nested\nbox a 0 0 0 1 1 1\nend\nend",
+             "part definitions must be at the root level"),
+            ("if 1\n" * 33 + "box a 0 0 0 1 1 1\n" + "end\n" * 33,
+             "control block nesting limit"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, message):
+                evaluate(source, "text", FakeBrep())
+
     def test_text_expression_and_loop_errors(self):
         cases = (
             ("box a 0 0 0 ${missing} 1 1", "Line 1: unknown variable"),
