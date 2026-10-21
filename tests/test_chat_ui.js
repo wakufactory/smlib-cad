@@ -20,8 +20,9 @@ let responseSource = 'box body 0 0 0 2 2 2', responseState = 'completed', pollin
 let previewCalls = 0, lastSend, cancelled = 0, failPreview = false;
 const sentRequests = [];
 let previewSteps = [], replySources = [], replyStates = [];
+let cancelBlocked = null;
 const context = vm.createContext({
-  $, URL, console, Date, setTimeout, clearTimeout,
+  $, URL, console, Date, setTimeout, clearTimeout, AbortController,
   FileReader: class {readAsDataURL(file){this.result=file.dataUrl;this.onload();}},
   document: {createElement: () => new Element(), createTextNode: text => ({textContent: text})},
   message: {textContent: 'preview error'}, previewFailure: null,
@@ -42,7 +43,7 @@ const context = vm.createContext({
       if (polling) await polling;
       data = {state:replyStates.length ? replyStates.shift() : responseState, error: 'usage limit', result: {message: '変更しました', source:replySources.length ? replySources.shift() : responseSource}};
     }
-    if (path === '/chat/cancel') { cancelled++; data = {ok: true}; }
+    if (path === '/chat/cancel') { cancelled++; if(cancelBlocked)await cancelBlocked;data = {ok: true}; }
     if (path === '/chat/reset') data = {ok: true};
     return {ok: true, json: async () => data};
   }
@@ -215,5 +216,52 @@ vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context)
   await elements['chat-apply'].onclick();
   assert.equal(sentRequests.length-start,1);
   assert.equal(elements.source.value,'fixed proposal');
+
+  // The overall polling deadline must release the stale server session and allow another send.
+  start=sentRequests.length;
+  const actualDate=context.Date;
+  let now=0;context.Date={now:()=>{now+=400000;return now;}};
+  responseState='running';
+  const beforeTimeout=elements.source.value;
+  await send('応答確認の時間切れ');
+  context.Date=actualDate;responseState='completed';responseSource=null;
+  assert.equal(elements['chat-send'].disabled,false);
+  assert.equal(elements['chat-input'].disabled,false);
+  assert.equal(elements['chat-reset'].disabled,false);
+  assert.match(elements['chat-status'].textContent,/次の指示/);
+  await send('時間切れの後に再送');
+  assert.equal(lastSend.sessionId,null);
+  assert.ok(lastSend.restoredHistory.some(item=>item.text==='応答確認の時間切れ'));
+  assert.equal(elements.source.value,beforeTimeout);
+
+  // Stop must abort a hung poll locally, without waiting for its network response.
+  polling=new Promise(resolve=>{resolvePoll=resolve;});
+  const hung=send('停止できる待機');await tick();
+  await elements['chat-stop'].onclick();await hung;
+  assert.equal(elements['chat-send'].disabled,false);
+  assert.equal(elements['chat-reset'].disabled,false);
+  polling=null;
+  await send('停止後も送信できる');
+  assert.equal(lastSend.sessionId,null);
+  const afterStop=elements.source.value;
+  responseSource='late response must not apply';resolvePoll();await tick();
+  assert.equal(elements.source.value,afterStop);
+  responseSource=null;
+
+  // A hung HTTP poll and a hung cancellation call both have bounded lifetimes.
+  const actualTimeout=context.setTimeout;
+  context.setTimeout=(callback,ms)=>setTimeout(callback,(ms===15000 || ms===10000)?1:ms);
+  polling=new Promise(resolve=>{resolvePoll=resolve;});
+  cancelBlocked=new Promise(()=>{});
+  await send('通信自体が止まった場合');
+  assert.equal(elements['chat-send'].disabled,false);
+  assert.equal(elements['chat-input'].disabled,false);
+  assert.match(elements['chat-status'].textContent,/次の指示/);
+  polling=null;cancelBlocked=null;
+  await send('通信復帰後に再送');
+  assert.equal(lastSend.sessionId,null);
+  resolvePoll();await tick();
+  await new Promise(resolve=>setTimeout(resolve,10));
+  context.setTimeout=actualTimeout;
   console.log('chat UI tests passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

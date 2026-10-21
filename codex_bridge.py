@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import base64
 import binascii
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import queue
@@ -16,6 +17,7 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parent
+TURN_TIMEOUT_SECONDS = 300
 OUTPUT_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "properties": {"message": {"type": "string"}, "source": {"type": ["string", "null"]}},
@@ -70,7 +72,7 @@ def codex_executable():
 
 
 def instructions():
-    guide = (ROOT / "README.md").read_text(encoding="utf-8").split("## 入力\n", 1)[1].split("\n## ", 1)[0]
+    guide = (ROOT / "chat-modeling-guide.md").read_text(encoding="utf-8")
     stub = (ROOT / "usd-brep/source/SmPyCore/stubs/_smlib_core.pyi").read_text(encoding="utf-8")
     return """You edit model source for SMLib Modeler. Reply in Japanese, briefly.
 Return only the JSON object requested by the output schema: message and source.
@@ -220,13 +222,27 @@ class RpcClient:
 
 class ChatBridge:
     """One app-server, independent in-memory conversation per browser tab."""
-    def __init__(self):
+    def __init__(self, *, log=None):
         self.client = None
+        self.log_enabled = (os.environ.get("CAD_CHAT_LOG", "").lower() in ("1", "true", "yes", "on")) if log is None else log
+        self.log_lock = threading.Lock()
         self.start_lock = threading.Lock()
         self.lock = threading.RLock()
         self.sessions = {}
         self.login = None
         self.login_lock = threading.Lock()
+
+    def _log(self, event, session, **details):
+        if not self.log_enabled:
+            return
+        record = {"time": datetime.now(timezone.utc).isoformat(timespec="milliseconds"), "event": event,
+                  "requestId": session.get("log_id"), "threadId": session.get("thread"),
+                  "turnId": session.get("turn"), **details}
+        try:
+            with self.log_lock:
+                print("[cad-chat] " + json.dumps(record, ensure_ascii=False), flush=True)
+        except (OSError, ValueError):
+            pass  # A closed log pipe must not fail or strand a model request.
 
     def connect(self):
         with self.start_lock:
@@ -325,8 +341,13 @@ class ChatBridge:
                 self.sessions[session_id] = session
             if session["state"] == "running":
                 raise CodexError("この会話は応答待ちです。")
-            session.update(state="running", touched=time.monotonic(), turn=None, cancelled=False,
-                           done=threading.Event(), result=None, error=None, text="", progress="考えています…")
+            # A cancelled worker may still be unwinding. Never let it mutate
+            # the next request's state or reuse its possibly running thread.
+            session = {"thread": session["thread"] if session["state"] == "completed" else None,
+                       "model": session.get("model"), "log_id": secrets.token_hex(6),
+                       "state": "running", "touched": time.monotonic(), "turn": None, "cancelled": False,
+                       "done": threading.Event(), "result": None, "error": None, "text": "", "progress": "考えています…"}
+            self.sessions[session_id] = session
             validated = {**request, "images": images, "restoredHistory": restored_clean}
             threading.Thread(target=self._run, args=(session, validated), daemon=True).start()
             if expired_threads:
@@ -353,6 +374,8 @@ class ChatBridge:
                 response = client.call("thread/start", params)
                 with self.lock:
                     session["thread"] = response["thread"]["id"]
+                    session["model"] = response.get("model", model)
+                self._log("instructions", session, model=session["model"], text=params["baseInstructions"])
             with self.lock:
                 if session["cancelled"]:
                     session["state"] = "cancelled"
@@ -369,14 +392,18 @@ class ChatBridge:
             for image in request.get("images", []):
                 image_inputs.append((f"Current attachment: {image['name']}", image))
             inputs = [{"type": "text", "text": json.dumps(payload, ensure_ascii=False)}]
+            image_log = []
             if image_inputs:
                 image_dir = tempfile.TemporaryDirectory(prefix="images-", dir=client.workspace.name)
                 for index, (label, image) in enumerate(image_inputs):
                     header, encoded = image["dataUrl"].split(",", 1)
                     extension = header.split("/")[1].split(";")[0]
                     path = Path(image_dir.name) / f"{index}.{extension}"
-                    path.write_bytes(base64.b64decode(encoded, validate=True))
+                    data = base64.b64decode(encoded, validate=True)
+                    path.write_bytes(data)
+                    image_log.append({"name": image["name"], "bytes": len(data), "mime": header.split(":", 1)[1].split(";", 1)[0], "context": label})
                     inputs.extend([{"type": "text", "text": label}, {"type": "localImage", "path": str(path)}])
+            self._log("request", session, model=session.get("model"), payload=payload, images=image_log)
             response = client.call("turn/start", {
                 "threadId": session["thread"], "input": inputs,
                 "outputSchema": OUTPUT_SCHEMA, "approvalPolicy": "never",
@@ -386,9 +413,13 @@ class ChatBridge:
                 cancelled = session["cancelled"]
             if cancelled:
                 self._interrupt(session)
-            if not session["done"].wait(timeout=300):
-                self._interrupt(session)
-                raise CodexError("応答が5分以内に完了しませんでした。もう一度お試しください。")
+            if not session["done"].wait(timeout=TURN_TIMEOUT_SECONDS):
+                with self.lock:
+                    if session["cancelled"]:
+                        return
+                    session.update(state="failed", error="応答が5分以内に完了しませんでした。もう一度お試しください。")
+                threading.Thread(target=self._cancel_remote, args=(session,), daemon=True).start()
+                return
             with self.lock:
                 if session["cancelled"]:
                     session["state"] = "cancelled"
@@ -404,13 +435,17 @@ class ChatBridge:
                 if "source" not in result:
                     raise ValueError("source is missing")
                 session.update(state="completed", result={"message": result["message"], "source": source})
-        except (CodexError, ValueError, KeyError, TypeError, OSError) as exc:
+        except Exception as exc:
             with self.lock:
                 session.update(state="cancelled" if session["cancelled"] else "failed",
-                               error=str(exc) if isinstance(exc, CodexError) else "Codex の編集結果を読み取れませんでした。再試行してください。")
+                               error=str(exc) if isinstance(exc, CodexError) else f"Codex の処理に失敗しました（{type(exc).__name__}: {exc}）。再試行してください。")
         finally:
+            self._log("finished", session, state=session["state"], error=session.get("error"))
+            session["done"].set()
             if image_dir:
                 image_dir.cleanup()
+            if session["cancelled"] and session["thread"]:
+                self._release([session["thread"]])
 
     def _notify(self, method, params):
         with self.lock:
@@ -425,6 +460,7 @@ class ChatBridge:
                 elif params.get("threadId") == session["thread"]:
                     if method == "item/completed" and params.get("item", {}).get("type") == "agentMessage":
                         item = params["item"]
+                        self._log("response", session, turnId=params.get("turnId"), text=item["text"], phase=item.get("phase"))
                         if item.get("phase") in (None, "final_answer"):
                             session["text"] = item["text"]
                     elif method == "item/agentMessage/delta":
@@ -456,9 +492,21 @@ class ChatBridge:
                 raise ValueError("会話が見つかりません。")
             if session["state"] != "running":
                 return {"ok": True}
-            session["cancelled"] = True
-        self._interrupt(session)
+            session.update(cancelled=True, state="cancelled")
+            session["done"].set()
+        # Do not depend on Codex delivering turn/completed or acknowledging
+        # interruption before making the browser/session usable again.
+        threading.Thread(target=self._cancel_remote, args=(session,), daemon=True).start()
         return {"ok": True}
+
+    def _cancel_remote(self, session):
+        try:
+            self._interrupt(session)
+        except CodexError:
+            pass
+        finally:
+            if session["thread"]:
+                self._release([session["thread"]])
 
     def reset(self, session_id):
         with self.lock:

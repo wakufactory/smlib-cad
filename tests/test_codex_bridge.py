@@ -1,8 +1,11 @@
 """Exercise the real stdio bridge with a deterministic app-server peer, no model usage."""
 import json
+import io
+from contextlib import redirect_stdout
 import os
 from pathlib import Path
 import tempfile
+import threading
 import time
 import unittest
 from unittest.mock import patch
@@ -143,6 +146,79 @@ class BridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.bridge.poll(session)
 
+    def wait_for_turn(self, session):
+        deadline=time.monotonic()+3
+        while not self.bridge.sessions[session]['turn'] and time.monotonic()<deadline: time.sleep(.01)
+        self.assertIsNotNone(self.bridge.sessions[session]['turn'])
+
+    def test_cancel_does_not_wait_for_codex_and_late_worker_cannot_replace_new_result(self):
+        session=self.send(message='wait')
+        self.wait_for_turn(session)
+        old=self.bridge.sessions[session]
+        entered,released,finished=threading.Event(),threading.Event(),threading.Event()
+        def blocked_interrupt(job):
+            entered.set()
+            released.wait(timeout=3)
+            finished.set()
+        with patch.object(self.bridge,'_interrupt',side_effect=blocked_interrupt):
+            try:
+                self.bridge.cancel(session)
+                self.assertTrue(entered.wait(timeout=1))
+                self.assertEqual(self.bridge.poll(session)['state'],'cancelled')
+                self.send(session=session)
+                result=self.finish(session)
+                self.assertEqual(result['state'],'completed')
+                self.assertIsNot(self.bridge.sessions[session],old)
+                self.assertNotEqual(self.bridge.sessions[session]['thread'],old['thread'])
+                self.bridge._notify('turn/completed',{'threadId':old['thread'],'turn':{'id':old['turn'],'status':'interrupted'}})
+                self.assertEqual(self.bridge.poll(session)['result'],result['result'])
+            finally:
+                released.set()
+                finished.wait(timeout=1)
+
+    def test_worker_exception_ends_session_and_retry_is_possible(self):
+        with patch('codex_bridge.instructions',side_effect=IndexError('missing documentation section')):
+            session=self.send()
+            failure=self.finish(session)
+        self.assertEqual(failure['state'],'failed')
+        self.assertIn('IndexError',failure['error'])
+        self.send(session=session)
+        self.assertEqual(self.finish(session)['state'],'completed')
+
+    def test_backend_deadline_is_reported_without_waiting_for_interrupt_ack(self):
+        with patch('codex_bridge.TURN_TIMEOUT_SECONDS',.02), patch.object(self.bridge,'_interrupt',side_effect=CodexError('unresponsive')):
+            session=self.send(message='wait')
+            result=self.finish(session)
+        self.assertEqual(result['state'],'failed')
+        self.assertIn('5分',result['error'])
+        self.send(session=session)
+        self.assertEqual(self.finish(session)['state'],'completed')
+
+    def test_prompt_reads_dedicated_specification_without_readme(self):
+        read_text=Path.read_text
+        reads=[]
+        def read(path,*args,**kwargs):
+            reads.append(path.name)
+            if path.name=='README.md': raise AssertionError('README must not be used for chat prompts')
+            if path.name=='chat-modeling-guide.md': return 'Dedicated specification: box reference 0 0 0 1 1 1\n'
+            return read_text(path,*args,**kwargs)
+        with patch.object(Path,'read_text',read):
+            self.assertIn('Dedicated specification: box reference',instructions())
+        self.assertEqual(reads,['chat-modeling-guide.md','_smlib_core.pyi'])
+
+    def test_missing_specification_is_a_completed_failure_not_a_stuck_job(self):
+        read_text=Path.read_text
+        def read(path,*args,**kwargs):
+            if path.name=='chat-modeling-guide.md': raise FileNotFoundError('chat-modeling-guide.md')
+            return read_text(path,*args,**kwargs)
+        with patch.object(Path,'read_text',read):
+            session=self.send()
+            failure=self.finish(session)
+        self.assertEqual(failure['state'],'failed')
+        self.assertIn('chat-modeling-guide.md',failure['error'])
+        self.send(session=session)
+        self.assertEqual(self.finish(session)['state'],'completed')
+
     def test_failed_and_malformed_results_leave_no_edit(self):
         for message in ("fail", "malformed"):
             result = self.finish(self.send(message=message))
@@ -228,6 +304,72 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("create_box", text)
         self.assertIn("group", text)
         self.assertIn("source is null", text)
+
+    def log_records(self, output, count=1):
+        deadline=time.monotonic()+2
+        while time.monotonic()<deadline:
+            lines=output.getvalue().splitlines()
+            records=[json.loads(line[len('[cad-chat] '):]) for line in lines if line.startswith('[cad-chat] ')]
+            if sum(record['event']=='finished' for record in records)>=count: return records
+            time.sleep(.01)
+        self.fail('completion log did not arrive')
+
+    def test_stdout_logging_is_disabled_by_default(self):
+        self.bridge.log_enabled=False
+        output=io.StringIO()
+        with redirect_stdout(output):
+            self.finish(self.send())
+        self.assertEqual(output.getvalue(),'')
+
+    def test_stdout_logs_full_exchange_with_image_metadata_and_no_auth_events(self):
+        self.bridge.log_enabled=True
+        image={'name':'reference.png','dataUrl':'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aDm8AAAAASUVORK5CYII='}
+        output=io.StringIO()
+        with redirect_stdout(output):
+            self.bridge.status()
+            self.bridge.login_start()
+            session=self.bridge.send({'message':'幅を修正','source':'box body 0 0 0 1 1 1','mode':'text',
+                'previewError':'test preview error','images':[image],
+                'restoredHistory':[{'role':'user','text':'画像の参照','images':[image]}]})['sessionId']
+            self.assertEqual(self.finish(session)['state'],'completed')
+            records=self.log_records(output)
+        events=[record['event'] for record in records]
+        self.assertEqual(events,['instructions','request','response','finished'])
+        request=records[1]
+        self.assertEqual(request['payload']['source'],'box body 0 0 0 1 1 1')
+        self.assertEqual(request['payload']['message'],'幅を修正')
+        self.assertEqual(request['payload']['previewError'],'test preview error')
+        self.assertEqual(len(request['images']),2)
+        self.assertEqual(request['images'][0]['mime'],'image/png')
+        self.assertGreater(request['images'][0]['bytes'],0)
+        reply=json.loads(records[2]['text'])
+        self.assertIn('# edited',reply['source'])
+        self.assertEqual(records[-1]['state'],'completed')
+        self.assertEqual(len({record['requestId'] for record in records}),1)
+        self.assertNotIn('data:image',output.getvalue())
+        self.assertNotIn(image['dataUrl'].split(',')[1],output.getvalue())
+        self.assertNotIn('authUrl',output.getvalue())
+        self.assertNotIn('auth.openai.com',output.getvalue())
+
+    def test_failed_reply_is_logged_before_json_validation(self):
+        self.bridge.log_enabled=True
+        output=io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(self.finish(self.send(message='malformed'))['state'],'failed')
+            records=self.log_records(output)
+        self.assertEqual(next(record for record in records if record['event']=='response')['text'],'not JSON')
+        self.assertEqual(records[-1]['state'],'failed')
+        self.assertTrue(records[-1]['error'])
+
+    def test_broken_stdout_does_not_fail_chat(self):
+        self.bridge.log_enabled=True
+        with patch('builtins.print',side_effect=BrokenPipeError('closed output')):
+            self.assertEqual(self.finish(self.send())['state'],'completed')
+
+    def test_stdout_log_mode_can_be_enabled_by_environment(self):
+        for value,expected in (('1',True),('true',True),('0',False),('',False)):
+            with patch.dict(os.environ,{'CAD_CHAT_LOG':value}):
+                self.assertEqual(ChatBridge().log_enabled,expected)
 
 
 if __name__ == "__main__":

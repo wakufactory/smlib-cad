@@ -19,6 +19,8 @@ CXXFLAGS := -std=c++17 -O1 -fPIC -arch arm64 -MMD -MP -Wno-inconsistent-missing-
 MODEL ?= model.json
 PORT ?= 8765
 HOST ?= 0.0.0.0
+CHAT_LOG ?= 0
+CHAT_LOG_FLAG = $(if $(filter 1 true yes on,$(CHAT_LOG)),--chat-log)
 CERT_DIR ?= .certs
 
 -include $(SMLIB_OBJ:.o=.d) $(SMAPI_OBJ:.o=.d) $(CORE_OBJ:.o=.d)
@@ -35,13 +37,13 @@ test-pole-normals: $(BUILD_DIR)/test-pole-normals
 start: start-https
 
 start-http: $(OUTPUT)
-	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT)
+	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT) $(CHAT_LOG_FLAG)
 
 cert:
 	@$(PYTHON) local_cert.py --dir "$(CERT_DIR)" $(if $(CERT_IP),--ip "$(CERT_IP)")
 
 start-https: $(OUTPUT) cert
-	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT) --cert "$(CERT_DIR)/server.crt" --key "$(CERT_DIR)/server.key"
+	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT) --cert "$(CERT_DIR)/server.crt" --key "$(CERT_DIR)/server.key" $(CHAT_LOG_FLAG)
 
 glb: $(OUTPUT)
 	@$(PYTHON) json_to_glb.py "$(MODEL)" $(if $(GLB),-o "$(GLB)")

@@ -222,6 +222,7 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--cert", type=Path, help="TLS server certificate")
     parser.add_argument("--key", type=Path, help="TLS server private key")
+    parser.add_argument("--chat-log", action="store_true", help="Log GPT instructions, requests and replies to stdout (images are metadata only)")
     args = parser.parse_args()
     if bool(args.cert) != bool(args.key):
         parser.error("--cert and --key must be specified together")
@@ -230,6 +231,8 @@ def main():
     except ipaddress.AddressValueError:
         parser.error("--host must be an IPv4 address")
     server = ModelHTTPServer((args.host, args.port), Handler)
+    if args.chat_log:
+        server.chat.log_enabled = True
     server.scheme = "https" if args.cert else "http"
     server.preview_store = PreviewStore()
     if args.cert:
@@ -241,6 +244,8 @@ def main():
         server.socket = context.wrap_socket(server.socket, server_side=True,
                                             do_handshake_on_connect=False)
     scheme = server.scheme
+    if server.chat.log_enabled:
+        print("GPT exchange logging enabled on stdout ([cad-chat]).", flush=True)
     if args.host == "0.0.0.0":
         print(f"Listening on all IPv4 interfaces, port {args.port}. Open {scheme}://<this Mac's LAN IPv4>:{args.port}", flush=True)
     else:

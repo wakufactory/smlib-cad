@@ -5,6 +5,7 @@
   let transcript = [], restoredContext = null;
   let attachments = [], readingImages = false;
   let stopRequested = false;
+  let activePoll = null;
   const history = $('chat-history');
   function entry(role, text, error = false, record = true, images = []) {
     if(record){
@@ -61,13 +62,40 @@
     }catch(error){entry('system',error.message,true);}
     finally{event.target.value='';readingImages=false;controls();}
   };
-  async function api(path, body) {
-    const response = await fetch(path, body === undefined ? {} : {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+  async function api(path, body, timeoutMs = 45000) {
+    const controller=new AbortController();
+    if(path==='/chat/poll')activePoll=controller;
+    let timer;
+    const aborted=new Promise((_,reject)=>{
+      controller.signal.addEventListener('abort',()=>reject(Error(stopRequested ? '停止しました。' : '通信が時間切れになりました。次の指示を送信できます。')),{once:true});
+      timer=setTimeout(()=>controller.abort(),timeoutMs);
     });
-    const data = await response.json();
-    if (!response.ok) throw Error(data.error || 'チャットの処理に失敗しました');
-    return data;
+    try {
+      return await Promise.race([(async()=>{
+        const response = await fetch(path, {signal:controller.signal,...(body===undefined ? {} : {
+          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+        })});
+        const data = await response.json();
+        if (!response.ok) throw Error(data.error || 'チャットの処理に失敗しました');
+        return data;
+      })(),aborted]);
+    } finally {
+      clearTimeout(timer);
+      if(activePoll===controller)activePoll=null;
+    }
+  }
+  function releaseSession() {
+    const previous=sessionId;
+    sessionId=null;
+    // The next request starts a fresh Codex thread using the visible transcript.
+    restoredContext=transcript.map(item=>({...item}));
+    if(previous)api('/chat/cancel',{sessionId:previous},10000)
+      .then(()=>api('/chat/reset',{sessionId:previous},10000)).catch(()=>{});
+  }
+  function failed(error) {
+    entry('system',stopRequested ? '停止しました。自動修正は続行しません。' : error.message,!stopRequested);
+    $('chat-status').textContent=stopRequested ? '停止しました。次の指示を送信できます。' : '次の指示を送信できます。';
+    releaseSession();
   }
   async function connect() {
     try {
@@ -120,9 +148,9 @@
     const deadline = Date.now() + 330000;
     let state;
     do {
-      state = await api('/chat/poll', {sessionId});
+      state = await api('/chat/poll', {sessionId},15000);
       if (state.state !== 'running') break;
-      if (Date.now() > deadline) throw Error('応答の確認が時間切れになりました。停止を押して再試行してください。');
+      if (Date.now() > deadline) throw Error('応答の確認が時間切れになりました。待機を終了しました。次の指示を送信できます。');
       $('chat-status').textContent = state.progress || '考えています…';
       await new Promise(resolve => setTimeout(resolve, 700));
     } while (true);
@@ -166,11 +194,9 @@
       await repair(await exchange(text,images));
       $('chat-status').textContent = 'ChatGPT 接続済み';
     } catch (error) {
-      entry('system', error.message, true);
-      $('chat-status').textContent = '送信に失敗しました';
-      // Best effort interruption also covers a lost polling connection.
-      if (sessionId) api('/chat/cancel', {sessionId}).catch(() => {});
-      if (!sessionId) $('chat-input').value = text;
+      const accepted=!!sessionId;
+      failed(error);
+      if(!accepted)$('chat-input').value=text;
     } finally { busy = false; controls(); }
   }
   $('chat-send').onclick = send;
@@ -195,7 +221,9 @@
   $('chat-stop').onclick = async () => {
     stopRequested=true;
     $('chat-stop').disabled = true;
-    try { await api('/chat/cancel', {sessionId}); $('chat-status').textContent = '停止しています…'; }
+    activePoll?.abort();
+    const stopping=sessionId;
+    try { if(stopping)await api('/chat/cancel', {sessionId:stopping},10000);if(busy && sessionId===stopping)$('chat-status').textContent = '停止しています…'; }
     catch (error) { entry('system', error.message, true); controls(); }
   };
   $('chat-reset').onclick = async () => {
@@ -218,7 +246,7 @@
     if (!proposal || busy) return;
     busy = true; stopRequested=false;controls();
     try { await repair(await apply(proposal.source, proposal.mode));$('chat-status').textContent='ChatGPT 接続済み'; }
-    catch(error){entry('system',error.message,true);$('chat-status').textContent='自動修正に失敗しました';if(sessionId)api('/chat/cancel',{sessionId}).catch(()=>{});}
+    catch(error){failed(error);}
     finally { busy = false; controls(); }
   };
   globalThis.ModelChat = {
