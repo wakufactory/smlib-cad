@@ -341,12 +341,33 @@ class SolidObjects(dict):
         self.tessellation = {}
 
 
+def _command_records(source, line_offset):
+    """Join backslash-continued physical lines and retain the first line number."""
+    records = []
+    fragments = []
+    start_line = None
+    for line_number, raw in enumerate(source.splitlines(), line_offset + 1):
+        if start_line is None:
+            start_line = line_number
+        stripped = raw.rstrip()
+        continued = "#" not in stripped and stripped.endswith("\\")
+        fragments.append(stripped[:-1].rstrip() if continued else raw)
+        if continued:
+            continue
+        records.append((start_line, " ".join(fragments)))
+        fragments = []
+        start_line = None
+    if fragments:
+        raise ValueError(f"Line {start_line}: trailing backslash requires a following line")
+    return records
+
+
 def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line_offset=0, _profiles=None,
                    _variables=None):
     """Evaluate text commands; each use builds fresh BReps from a part body."""
     parts = {} if _parts is None else _parts
     counter = {"expansions": 0, "names": {}, "commands": 0} if _counter is None else _counter
-    records = ([(index, raw) for index, raw in enumerate(source.splitlines(), _line_offset + 1)]
+    records = (_command_records(source, _line_offset)
                if isinstance(source, str) else source)
     commands = _expand_commands(_extract_parts(records, parts, bool(_stack)), _variables or {}, counter)
     frames = [{"name": None, "line": 0, "objects": SolidObjects(), "materials": {}, "profiles": {}, "groups": {},

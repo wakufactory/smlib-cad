@@ -64,6 +64,41 @@ class FakeBrep:
 
 
 class ModelerTests(unittest.TestCase):
+    def test_text_line_continuation(self):
+        slash = "\\"
+        sm = FakeBrep()
+        objects, materials, _ = evaluate(
+            f"box body 0 0 0 {slash}\n  2 3 4\n"
+            f"material body 0.2 0.4 {slash}\n  0.6 0.5 0.3",
+            "text", sm)
+        self.assertIn("body", objects)
+        self.assertEqual(materials["body"]["baseColor"], [0.2, 0.4, 0.6])
+
+        objects, _, _ = evaluate(
+            f"part block\n  box body 0 0 0 {slash}\n    2 3 4\nend\nuse block",
+            "text", sm)
+        self.assertIn("block_1__body", objects)
+        objects, _, _ = evaluate(
+            f"profile section\n  polygon 0 0  2 0 {slash}\n    2 2  0 2\nend\n"
+            "extrude body section 0 0 0 0 2", "text", sm)
+        self.assertIn("body", objects)
+        objects, _, _ = evaluate(
+            f"let size = 2 + {slash}\n  3\n"
+            f"for i in {slash}\n  range(2)\n"
+            f"  box part_${{i}} ${{i}} 0 0 {slash}\n    ${{size}} 1 1\nend",
+            "text", sm)
+        self.assertEqual(set(objects), {"part_0", "part_1"})
+
+        for source, line in (
+            (f"box body 0 0 0 {slash}\n  2 -3 4", 1),
+            (f"box body 0 0 0 {slash}\n  2 3 4\nunknown", 3),
+            (f"box body 0 0 0 {slash}", 1),
+        ):
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, f"Line {line}:"):
+                evaluate(source, "text", sm)
+        objects, _, _ = evaluate(f"# note {slash}\nbox body 0 0 0 2 3 4", "text", sm)
+        self.assertIn("body", objects)
+
     def test_per_solid_tessellation(self):
         sm = FakeBrep()
         calls = []

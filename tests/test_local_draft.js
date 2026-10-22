@@ -59,5 +59,5 @@ assert.equal(corrupt.elements.mode.value,'text');
 assert.equal(vm.runInContext('restoredDraft',corrupt.context),false);
 corrupt.window.localStorage.setItem=()=>{throw Error('QuotaExceededError');};
 assert.doesNotThrow(()=>corrupt.context.saveDraft());
-assert.match(corrupt.elements['draft-status'].textContent,/自動保存できません/);
+assert.match(corrupt.elements.message.textContent,/自動保存できません/);
 console.log('local draft: reload, unfinished input, clear, pagehide, corrupt data, and storage failure passed');

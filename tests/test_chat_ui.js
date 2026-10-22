@@ -18,6 +18,7 @@ const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
 elements.source.value = 'box body 0 0 0 1 1 1'; elements.mode.value = 'text';
 let responseSource = 'box body 0 0 0 2 2 2', responseState = 'completed', polling;
 let previewCalls = 0, lastSend, cancelled = 0, failPreview = false;
+let lineRefreshes = 0;
 const sentRequests = [];
 let previewSteps = [], replySources = [], replyStates = [];
 let cancelBlocked = null;
@@ -26,6 +27,7 @@ const context = vm.createContext({
   FileReader: class {readAsDataURL(file){this.result=file.dataUrl;this.onload();}},
   document: {createElement: () => new Element(), createTextNode: text => ({textContent: text})},
   message: {textContent: 'preview error'}, previewFailure: null,
+  refreshSourceLines: () => {lineRefreshes++;},
   modelDocument: () => ({source: elements.source.value, mode: elements.mode.value, parameters: {angle: 20}}),
   preview: async () => {
     previewCalls++;
@@ -63,9 +65,11 @@ vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context)
   assert.equal(lastSend.source, original);
   assert.equal(lastSend.mode, 'text');
   assert.equal(elements.source.value, responseSource);
+  assert.equal(lineRefreshes, 1);
   assert.equal(previewCalls, 1);
   await elements['chat-undo'].onclick();
   assert.equal(elements.source.value, original);
+  assert.equal(lineRefreshes, 2);
   assert.equal(elements['chat-undo'].disabled, true);
   const saved = JSON.parse(JSON.stringify(context.ModelChat.snapshot()));
   assert.equal(saved.messages[0].text,'大きくして');

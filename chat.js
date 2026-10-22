@@ -123,6 +123,7 @@
   async function apply(source, mode, preserveUndo = false) {
     if(!preserveUndo)undo = {source: $('source').value, mode: $('mode').value};
     $('source').value = source; $('mode').value = mode; $('sample').value = 'default';
+    globalThis.refreshSourceLines?.();
     changed(); proposal = null; controls();
     const revision=editorRevision;
     $('export').disabled = true; $('export-usdz').disabled = true;
@@ -238,6 +239,7 @@
     if (!undo || busy) return;
     const previous = undo; undo = null; proposal = null;
     $('source').value = previous.source; $('mode').value = previous.mode;
+    globalThis.refreshSourceLines?.();
     $('sample').value = 'default'; changed(); controls();
     entry('system', 'チャットによる変更の直前のソースに戻しました。');
     await preview();

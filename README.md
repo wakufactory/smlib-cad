@@ -126,7 +126,7 @@ GLB は保存時にも同じソースから再計算するため、プレビュ�
 
 ### テキスト命令
 
-「テキスト命令」は 1 行に 1 命令を書きます。`#` 以降はコメントです。単位は任意ですが、モデル内では統一してください。
+「テキスト命令」は通常 1 行に 1 命令を書きます。長い命令は行末の `\` で次の行へ続けられ、つながった行を空白区切りの 1 命令として解釈します。末尾が `\` のまま終わるとエラーになり、エラー位置には命令の開始行を表示します。`#` 以降はコメントです。単位は任意ですが、モデル内では統一してください。
 
 ```text
 box body -10 -10 0 20 20 8
@@ -152,7 +152,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `sphere_no_pole` | `名前 x y z 半径` |
 | `plane` | `名前 x y z X長さ Y長さ`（面） |
 | `planar_circle` | `名前 x y z 半径`（面） |
-| `profile` / `polygon` / `spline` / `end` | `profile 断面名` 内に `polygon u1 v1 ...` または `spline through u1 v1 ... closed` を1行記述して `end` で閉じる |
+| `profile` / `polygon` / `spline` / `end` | `profile 断面名` 内に `polygon u1 v1 ...` または `spline through u1 v1 ... closed` を記述して `end` で閉じる |
 | `extrude` | `名前 断面名 x y z 開始距離 終了距離 [dx dy dz [ux uy uz]] [draft 角度]` |
 | `revolve` | `名前 断面名 x y z 開始角 終了角 [dx dy dz [ux uy uz]]`（度数） |
 | `union` / `subtract` / `intersect` | `出力名 左の形状名またはグループ名 右の形状名またはグループ名` |
@@ -170,7 +170,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `position` | グループ内で `position x y z`（親座標での移動） |
 | `tessellation` | `形状名 曲面精度 角度条件`（形状別。各値に `default` を指定すると UI 設定を使用） |
 
-Web UI の左ペインにある「テキストコマンド一覧」でも書式を参照できます。一覧だけをスクロールでき、右側のモデル定義を見ながら編集できます。初期状態では閉じています。見出しを押すと開閉できます。
+Web UI の左ペインにある「テキストコマンド一覧」でも書式を参照できます。一覧だけをスクロールでき、右側のモデル定義を見ながら編集できます。右ペインのモデル定義には行番号を表示し、長い行は折り返さず横スクロールで確認できます。初期状態では閉じています。見出しを押すと開閉できます。
 
 ### プリミティブの軸と角度
 
@@ -276,7 +276,7 @@ result = sm.create_revolve(smooth, (10, 0, 0), 0, 360)
 
 回転軸上に断面の点を置くことは有効です。円錐の先端など、法線が一意に決まらない特異点では、SMLibの多角形生成時に各多角形が接する方向から曲面法線を評価してコーナーごとに保持します。`_smlib_core` によるテッセレーション後の全メッシュ補正は不要です。先端1点に全周共通の法線を割り当てないため、内壁の片側だけ陰影が反転する問題を防ぎます。再現・確認用の断面は `examples/revolve_cone_tip.txt` にあります。`make test-pole-normals` はPythonを通さず、PolyBrepと6種類の描画コールバック、全回転・部分回転、Z軸・X軸の法線を検証します。
 
-画面の「押し出し・回転体・スプライン」→「読込」で、折線断面の押し出し・回転体・抜き勾配付き押し出し4形状と、スプライン断面の押し出し・回転体2形状を読み込めます。ソースは `examples/extrude_revolve.txt`、JSONモデルは `examples/extrude_revolve.json`、生成済みGLBは `outputs/extrude_revolve.glb` です。再生成は `make glb MODEL=examples/extrude_revolve.json GLB=outputs/extrude_revolve.glb` で行います。
+画面の「押し出し・回転体・スプライン」→「読込」で、折線断面の押し出し・回転体・抜き勾配付き押し出し4形状と、スプライン断面の押し出し・回転体2形状を読み込めます。長い `spline through` 命令は行末の `\` で2行に分けています。ソースは `examples/extrude_revolve.txt`、JSONモデルは `examples/extrude_revolve.json`、生成済みGLBは `outputs/extrude_revolve.glb` です。再生成は `make glb MODEL=examples/extrude_revolve.json GLB=outputs/extrude_revolve.glb` で行います。
 
 ### オフセットとシェル
 

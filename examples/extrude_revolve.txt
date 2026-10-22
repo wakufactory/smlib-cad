@@ -25,7 +25,8 @@ material sector 0.45 0.75 0.25 0.3 0.45
 
 # One reusable curved section with a corner for both extrusion and revolution.
 profile curved_section
-  spline through 2 0  4 0  4 0  5 1  5 3  4 4  2 4  1 3  1 1 closed
+  spline through 2 0  4 0  4 0  5 1 \
+    5 3  4 4  2 4  1 3  1 1 closed
 end
 extrude curved_plate curved_section 48 0 0 0 2
 material curved_plate 0.75 0.25 0.55 0.4 0.3

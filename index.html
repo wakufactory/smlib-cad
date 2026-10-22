@@ -16,6 +16,10 @@ aside,.source-pane{min-width:0;min-height:0;padding:12px;display:flex;flex-direc
 aside{border-right:1px solid #2c4154;overflow-y:auto;overscroll-behavior:none}
 .source-pane{border-left:1px solid #2c4154;background:#101b29;overflow-y:auto}
 .source-editor{display:flex;flex:1 1 55%;min-height:180px;flex-direction:column;gap:10px;overflow:hidden}
+.source-code{display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;border:1px solid #36516a;border-radius:8px;background:#101f2e}
+#source-line-numbers{flex:none;overflow:hidden;border-right:1px solid #36516a;color:#7794a8;background:#122435;text-align:right;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;user-select:none;-webkit-user-select:none}
+#source-line-numbers-inner{padding:12px 8px 12px 4px;will-change:transform}
+#source{flex:1;min-width:0;height:100%;border:0;border-radius:0;white-space:pre;overflow-wrap:normal}
 .chat-pane{display:flex;flex:1 1 45%;min-height:350px;flex-direction:column;gap:8px;border-top:1px solid #36516a;padding-top:10px;overflow-y:auto}
 .chat-images{display:flex;gap:6px;flex:none;overflow-x:auto;max-height:90px}.chat-image{display:flex;align-items:center;gap:4px;max-width:180px;font-size:10px;overflow-wrap:anywhere}.chat-image img,.chat-entry img{max-width:100%;width:auto;height:60px;object-fit:contain;border-radius:4px}.chat-entry img{height:auto;max-height:140px;display:block;margin-top:6px}.chat-image button{padding:3px 6px}.chat-images[hidden]{display:none}
 .chat-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.chat-heading{flex-wrap:wrap;gap:4px 8px}.chat-tools{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}.chat-tools button{flex:none;font-size:11px;line-height:1.3;padding:4px 6px;white-space:nowrap}.chat-connection{display:flex;align-items:center;gap:6px}.chat-connection #chat-status{flex:1;min-width:0}.chat-connection button{flex:none;font-size:11px;padding:4px 6px}
@@ -72,7 +76,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <details id="command-reference">
 <summary>テキストコマンド一覧</summary>
 <div class="command-list" tabindex="0" role="region" aria-label="テキストコマンド一覧">
-<p>1行に1命令。<code>#</code> 以降はコメント。<code>[…]</code> は省略可能な引数です。名前は英字・下線で始め、英数字・下線を使います。角度は度数です。</p>
+<p>通常1行に1命令。行末の <code>\</code> で次の行へ接続。<code>#</code> 以降はコメント。<code>[…]</code> は省略可能な引数です。名前は英字・下線で始め、英数字・下線を使います。角度は度数です。</p>
 <p><code>x y z</code> は位置、<code>dx dy dz</code> は軸方向（省略時は +Z）、<code>ux uy uz</code> は断面のX方向です。</p>
 <dl><div class="command-entry"><dt><code>box</code></dt><dd><code>名前 x y z 幅 奥行 高さ</code></dd></div>
 <div class="command-entry"><dt><code>sphere</code></dt><dd><code>名前 x y z 半径</code></dd></div>
@@ -139,7 +143,7 @@ subtract result body hole</pre>
 </div>
 </aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><div id="preview-options"><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="projection-mode" aria-label="WebGL 投影方式"><option value="orthographic">平行投影</option><option value="perspective">透視投影</option></select></div><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
 <div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
-<textarea id="source" spellcheck="false"></textarea></div>
+<div class="source-code"><div id="source-line-numbers" aria-hidden="true"><div id="source-line-numbers-inner">1</div></div><textarea id="source" wrap="off" spellcheck="false"></textarea></div></div>
 <section class="chat-pane" aria-label="モデル編集チャット">
 <div class="chat-heading"><h2>モデル編集チャット</h2><div class="chat-tools"><button id="chat-connect" type="button">接続確認</button><button id="chat-attach" type="button" title="PNG / JPEG / WebP · 3枚まで · 各2 MiB">画像を添付</button><button id="chat-reset" type="button">新しい会話</button></div></div>
 <div class="chat-connection"><div id="chat-status" role="status">Codex の接続を確認中…</div><button id="chat-login" type="button" hidden>ChatGPT にログイン</button></div>

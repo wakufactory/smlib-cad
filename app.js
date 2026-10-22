@@ -69,6 +69,23 @@ const ModelFile = (() => {
 const $ = id => document.getElementById(id);
 const canvas = $('canvas');
 const message = $('message');
+let sourceLineCount = 0;
+function syncSourceLineScroll(){
+  const numbers=$('source-line-numbers-inner');
+  if(numbers?.style)numbers.style.transform=`translateY(${-$('source').scrollTop}px)`;
+}
+function refreshSourceLines(){
+  const source=$('source'),gutter=$('source-line-numbers'),numbers=$('source-line-numbers-inner');
+  if(!gutter?.style || !numbers?.style)return;
+  let count=1;
+  for(const char of source.value)if(char==='\n')count++;
+  if(count!==sourceLineCount){
+    numbers.textContent=Array.from({length:count},(_,index)=>index+1).join('\n');
+    gutter.style.width=`calc(${Math.max(2,String(count).length)}ch + 20px)`;
+    sourceLineCount=count;
+  }
+  syncSourceLineScroll();
+}
 const usdModel = $('usd-model');
 const modelStatus = $('model-status');
 let examples = {}, currentMeshes = [], rendered = [], center = [0, 0, 0], radius = 20;
@@ -111,6 +128,7 @@ function restoreDraft(){
       'grid-plane':['xy','yz','zx'],'projection-mode':['perspective','orthographic']};
     if(Object.entries(options).some(([id,values])=>draft.fields[id]!==undefined && !values.includes(draft.fields[id])))throw Error('Invalid draft option');
     for(const id of draftFields)if(draft.fields[id]!==undefined)$(id).value=draft.fields[id];
+    refreshSourceLines();
     for(const id of draftChecks)$(id).checked=draft.checks[id];
     $('finish-size').disabled=$('finish').value==='none';
     if($('preview-mode').value==='model' && modelModeError())$('preview-mode').value='webgl';
@@ -388,6 +406,7 @@ async function loadModel(file){
     const data=ModelFile.parse(await file.text()),p=data.parameters;
     globalThis.ModelChat?.assertIdle();
     $('mode').value=data.mode;$('sample').value='default';$('source').value=data.source;
+    refreshSourceLines();
     $('chord').value=p.chord;$('angle').value=p.angle;
     $('finish').value=p.finish;$('finish-size').value=p.finishSize;$('export-scale').value=p.exportScale;
     if(file.name && /\.json$/i.test(file.name))$('file-name').value=file.name.replace(/\.json$/i,'');
@@ -417,12 +436,13 @@ $('preview-mode').onchange=()=>{
   showPreviewMode();preview();
 };
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
-$('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
+$('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
 function clearModel(){
   // Invalidate pending previews so an older response cannot restore the model.
   ++previewRequestId;
   previewFailure=null;
   $('source').value='';
+  refreshSourceLines();
   currentMeshes=[];
   if(scene)show([]);
   usdModel.removeAttribute('src');usdModel.hidden=true;
@@ -440,10 +460,13 @@ $('example').onclick=()=>{
     $('mode').value='text';$('source').value=examples[$('sample').value]||'';
   }
   else $('source').value=examples[$('mode').value]||'';
+  refreshSourceLines();
   $('export').disabled=true;$('export-usdz').disabled=true;
   preview();
 };
 $('source').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();preview();}});
+$('source').addEventListener('input',refreshSourceLines);
+$('source').addEventListener('scroll',syncSourceLineScroll);
 // Track captured pointers so a second finger switches rotation to pinch zoom.
 const viewPointers = new Map();
 function pinchDistance(){
@@ -478,9 +501,10 @@ canvas.addEventListener('wheel',e=>{e.preventDefault();setZoom(zoom*Math.exp(e.d
 canvas.ondblclick=()=>{yaw=0.72;pitch=0.44;zoom=2.8;draw();};
 new ResizeObserver(draw).observe(canvas);
 const restoredDraft=restoreDraft();
+refreshSourceLines();
 (async()=>{
   examples=await(await fetch('/examples')).json();
-  if(!restoredDraft && !draftEdited && !$('source').value)$('source').value=examples.text;
+  if(!restoredDraft && !draftEdited && !$('source').value){$('source').value=examples.text;refreshSourceLines();}
   const state=await(await fetch('/status')).json();
   $('status').textContent=state.ready?'SMLib 接続済み':`_smlib_core 未導入: ${state.error}`;
   if(!state.ready)note('SMLib の Python バインディングをビルドしてください。セットアップは README を参照。',true);
