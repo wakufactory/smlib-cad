@@ -106,7 +106,9 @@ make usdz
 make usdz MODEL=design.json USDZ=outputs/design.usdz
 ```
 
-USDZ はプレビュー・GLB と同じテッセレーション結果を Z-up の USD Mesh として保存し、各形状の色・metallic・roughness を UsdPreviewSurface 材質に設定します。元の BRep や編集用のモデル定義は含まれません。USDZ は非圧縮で、テキスト形式の `model.usda` を格納するため、大きなモデルでは GLB よりファイルサイズが増えます。座標値には指定した保存時の倍率を掛け、USD上の単位は 1 = 1 m として記録します。
+USDZ はプレビュー・GLB と同じテッセレーション結果を Z-up の USD Mesh として保存します。GLB と同様に最上位の `group` ごとに 1 つのメッシュを作り、グループ内に複数の色・metallic・roughness がある場合は面の `GeomSubset` ごとに UsdPreviewSurface 材質を割り当てます。元の BRep や編集用のモデル定義は含まれません。USDZ は非圧縮で、テキスト形式の `model.usda` を格納するため、大きなモデルでは GLB よりファイルサイズが増えます。座標値には指定した保存時の倍率を掛け、USD上の単位は 1 = 1 m として記録します。
+
+門型トラスの統合例は `examples/truss_material_merged.json`、生成済みファイルは `outputs/truss_material_merged.glb` と `outputs/truss_material_merged.usdz` です。再生成は `make glb MODEL=examples/truss_material_merged.json GLB=outputs/truss_material_merged.glb` または `make usdz MODEL=examples/truss_material_merged.json USDZ=outputs/truss_material_merged.usdz` で行います。
 
 ```json
 {
@@ -118,7 +120,7 @@ USDZ はプレビュー・GLB と同じテッセレーション結果を Z-up �
 }
 ```
 
-GLB は保存時にも同じソースから再計算するため、プレビュー後に編集した場合は最新の内容が保存されます。GLB は glTF 標準の Y-up 座標へ変換します。
+GLB は保存時にも同じソースから再計算するため、プレビュー後に編集した場合は最新の内容が保存されます。GLB は glTF 標準の Y-up 座標へ変換します。GLB 保存時には最上位の `group` ごとに 1 つのメッシュを作り、その中の同じマテリアル（色・metallic・roughness）の部材の三角形を連結します。異なるマテリアルは同じメッシュ内の別プリミティブになります。最上位グループに属さない部材は個別メッシュのままです。GLB・USDZ ともメッシュデータの連結であり、Boolean の `union` は実行しません。部材間の境界面や重なった面は残り、保存後は個々の部材を別メッシュとして選択できません。元の部材名は GLB ノードの `extras.sourceSolids` と USDZ メッシュの `sourceSolids` に記録します。画面プレビューのメッシュ分割は変わりません。
 
 ### 編集内容の自動保存
 

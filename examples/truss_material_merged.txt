@@ -1,0 +1,88 @@
+# 単位: m
+# 外寸: 幅5 m、高さ5 m、奥行1 m
+# L形材: 40 x 40 mm、厚さ4 mm
+profile angle_section
+  polygon 0 0 0.04 0 0.04 0.004 0.004 0.004 0.004 0.04 0 0.04
+end
+
+part angle_member
+  extrude steel angle_section 0 0 0 0 ${member_length}
+  material steel 0.32 0.38 0.44 0.8 0.32
+end
+
+# 1 m長の四角柱トラス
+part truss_cell
+  for x in range(2)
+    for y in range(2)
+      group column_${x}_${y}
+        position ${x} ${y} 0
+        euler 0 0 ${90*x + 270*y - 180*x*y}
+        let member_length = 1
+        use angle_member column_${x}_${y}
+      end
+    end
+  end
+
+  # 両端枠
+  for level in range(2)
+    let frame_top = 0.04 + 0.96*level
+    for side in range(2)
+      group beam_x_${level}_${side}
+        position 0.04 ${0.96*side} ${frame_top}
+        euler 0 90 0
+        let member_length = 0.92
+        use angle_member beam_x_${level}_${side}
+      end
+      group beam_y_${level}_${side}
+        position ${0.96*side} 0.04 ${frame_top}
+        euler -90 0 0
+        let member_length = 0.92
+        use angle_member beam_y_${level}_${side}
+      end
+    end
+  end
+
+  # 四側面の斜材
+  for side in range(2)
+    group brace_x_${side}
+      extrude raw_x_${side} angle_section 0.04 ${0.96*side} 0.04 -0.1 1.6 1 0 1 0 1 0
+      box trim_x_${side} 0.04 ${0.96*side} 0.04 0.92 0.04 0.92
+      intersect steel_x_${side} raw_x_${side} trim_x_${side}
+      material steel_x_${side} 0.32 0.38 0.44 0.8 0.32
+    end
+    group brace_y_${side}
+      extrude raw_y_${side} angle_section ${0.96*side} 0.04 0.04 -0.1 1.6 0 1 1 1 0 0
+      box trim_y_${side} ${0.96*side} 0.04 0.04 0.04 0.92 0.92
+      intersect steel_y_${side} raw_y_${side} trim_y_${side}
+      material steel_y_${side} 0.32 0.38 0.44 0.8 0.32
+    end
+  end
+end
+
+group square_truss
+  # 左右の脚: 各4段
+  group all_legs
+    for leg_side in range(2)
+      for leg_level in range(4)
+        group leg_${leg_side}_${leg_level}
+          position ${4*leg_side} 0 ${leg_level}
+          use truss_cell leg_${leg_side}_${leg_level}
+        end
+      end
+    end
+  end
+
+  # 上梁: 5個を横向きに配置
+  # 梁下面Z=4、上面Z=5
+  group all_lintels
+    for lintel_span in range(5)
+      group lintel_${lintel_span}
+        position ${lintel_span} 0 5
+        euler 0 90 0
+        use truss_cell lintel_${lintel_span}
+      end
+    end
+  end
+
+  # GLB保存時に同一マテリアルの三角形をまとめる
+end

@@ -334,11 +334,12 @@ def _extract_parts(lines, parts, in_part):
 
 
 class SolidObjects(dict):
-    """Named BReps with per-solid meshing settings, independent of materials."""
+    """Named BReps with per-solid meshing settings and export group names."""
 
     def __init__(self):
         super().__init__()
         self.tessellation = {}
+        self.top_groups = {}
 
 
 def _command_records(source, line_offset):
@@ -478,6 +479,8 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 objects.update((names[name], solid) for name, solid in members.items())
                 objects.tessellation.update((names[name], settings)
                                             for name, settings in members.tessellation.items())
+                objects.top_groups.update((names[name], f"{instance_name}__{group_name}")
+                                          for name, group_name in members.top_groups.items())
                 materials.update((names[name], material) for name, material in member_materials.items())
             elif op == "group":
                 if len(args) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
@@ -506,6 +509,9 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 frames.pop()
                 parent["objects"].update(objects)
                 parent["objects"].tessellation.update(objects.tessellation)
+                parent["objects"].top_groups.update(objects.top_groups)
+                if len(frames) == 1:
+                    parent["objects"].top_groups.update((name, frame["name"]) for name in objects)
                 parent["materials"].update(materials)
                 parent["groups"].update(groups)
                 parent["groups"][frame["name"]] = set(objects)
@@ -546,6 +552,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 if operands[0] & operands[1]:
                     raise ValueError("Boolean operands must not share group members")
                 consumed = operands[0] | operands[1]
+                source_top_groups = {objects.top_groups.get(name) for name in consumed}
                 if args[0] in groups and args[0] not in args[1:]:
                     raise ValueError(f"output name already used by group: {args[0]}")
                 if args[0] in objects and args[0] not in consumed:
@@ -562,6 +569,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 for name in consumed:
                     materials.pop(name, None)
                     objects.tessellation.pop(name, None)
+                    objects.top_groups.pop(name, None)
                 for name, members in list(groups.items()):
                     if name in args[1:]:
                         del groups[name]
@@ -571,6 +579,8 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                         if contained:
                             members.add(args[0])
                 objects[args[0]] = fn(left, right)
+                if len(source_top_groups) == 1 and None not in source_top_groups:
+                    objects.top_groups[args[0]] = source_top_groups.pop()
             elif op == "faces":
                 if len(args) != 1 or args[0] not in objects:
                     raise ValueError("faces: existing solid name required")
@@ -854,7 +864,8 @@ def tessellate(objects, sm, chord: float = 0.08, angle: float = 20, materials=No
         if len(positions) > 3_000_000:
             raise ValueError("Mesh exceeds the 1 million vertex preview limit")
         output.append({"name": name, "positions": positions, "normals": normals,
-                       "material": materials.get(name, normalize_material({}))})
+                       "material": materials.get(name, normalize_material({})),
+                       "group": getattr(objects, "top_groups", {}).get(name, name)})
     return output
 
 
@@ -874,13 +885,14 @@ def _scaled_positions(positions, scale):
 
 
 def to_glb(meshes, scale=1):
-    """Encode the exact preview triangles as a glTF 2.0 binary scene."""
+    """Encode one glTF mesh per top-level group, with material primitives."""
     scale = _export_scale(scale)
     blob = bytearray()
     doc = {"asset": {"version": "2.0", "generator": "USD BRep Modeler"},
            "scene": 0, "scenes": [{"nodes": []}], "nodes": [], "meshes": [],
            "buffers": [], "bufferViews": [], "accessors": [], "materials": []}
     material_indices = {}
+    groups = {}
 
     def accessor(values, kind, target):
         while len(blob) % 4:
@@ -908,16 +920,35 @@ def to_glb(meshes, scale=1):
                 "baseColorFactor": [*material["baseColor"], 1.0],
                 "metallicFactor": material["metallic"],
                 "roughnessFactor": material["roughness"]}, "doubleSided": True})
-        # The editor uses Z up; glTF requires Y up. This mapping preserves handedness.
-        def y_up(v):
-            return [item for i in range(0, len(v), 3)
-                    for item in (v[i], v[i+2], -v[i+1])]
-        p = accessor(y_up(_scaled_positions(mesh["positions"], scale)), "POSITION", 34962)
-        n = accessor(y_up(mesh["normals"]), "NORMAL", 34962)
+        group_name = mesh.get("group", mesh["name"])
+        if group_name not in groups:
+            groups[group_name] = {"materials": {}, "names": []}
+        group = groups[group_name]
+        group["materials"].setdefault(material_key, []).append(mesh)
+        group["names"].append(mesh["name"])
+
+    # The editor uses Z up; glTF requires Y up. This mapping preserves handedness.
+    def y_up(v):
+        return [item for i in range(0, len(v), 3)
+                for item in (v[i], v[i+2], -v[i+1])]
+
+    for group_name, group in groups.items():
+        primitives = []
+        for material_key, members in group["materials"].items():
+            positions, normals = [], []
+            for mesh in members:
+                positions.extend(y_up(_scaled_positions(mesh["positions"], scale)))
+                normals.extend(y_up(mesh["normals"]))
+            p = accessor(positions, "POSITION", 34962)
+            n = accessor(normals, "NORMAL", 34962)
+            primitives.append({"attributes": {"POSITION": p, "NORMAL": n},
+                               "material": material_indices[material_key], "mode": 4})
         index = len(doc["meshes"])
-        doc["meshes"].append({"primitives": [{"attributes": {"POSITION": p, "NORMAL": n},
-                                               "material": material_indices[material_key], "mode": 4}]})
-        doc["nodes"].append({"name": mesh["name"], "mesh": index})
+        doc["meshes"].append({"name": group_name, "primitives": primitives})
+        node = {"name": group_name, "mesh": index}
+        if len(group["names"]) > 1:
+            node["extras"] = {"sourceSolids": group["names"]}
+        doc["nodes"].append(node)
         doc["scenes"][0]["nodes"].append(index)
     doc["buffers"].append({"byteLength": len(blob)})
     js = json.dumps(doc, separators=(",", ":")).encode()
@@ -961,21 +992,36 @@ def to_usdz(meshes, scale=1):
             '                token outputs:surface', "            }", "        }",
         ])
     lines.extend(["    }", '    def Xform "Geometry"', "    {"])
-    for index, mesh in enumerate(meshes):
+    groups = {}
+    for mesh in meshes:
         positions, normals = mesh["positions"], mesh["normals"]
         if not positions or len(positions) != len(normals) or len(positions) % 9:
             raise ValueError("Mesh positions and normals must contain matching triangles")
-        positions = _scaled_positions(positions, scale)
         material = normalize_material(mesh.get("material", {}))
         key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
+        group_name = mesh.get("group", mesh["name"])
+        if group_name not in groups:
+            groups[group_name] = {"positions": [], "normals": [], "names": [], "faces": {}}
+        group = groups[group_name]
+        first_face = len(group["positions"]) // 9
+        group["positions"].extend(_scaled_positions(positions, scale))
+        group["normals"].extend(normals)
+        group["names"].append(mesh["name"])
+        group["faces"].setdefault(key, []).extend(range(first_face, first_face + len(positions) // 9))
+
+    for index, (group_name, group) in enumerate(groups.items()):
+        positions, normals = group["positions"], group["normals"]
         count = len(positions) // 3
         bounds = [(min(positions[i::3]), max(positions[i::3])) for i in range(3)]
         extent = triples([bounds[i][j] for j in range(2) for i in range(3)])
+        names = group["names"]
         lines.extend([
             f'        def Mesh "Mesh_{index}" (',
             '            prepend apiSchemas = ["MaterialBindingAPI"]',
             "        )", "        {",
-            f'            custom string sourceName = {json.dumps(mesh["name"], ensure_ascii=False)}',
+            f'            custom string sourceName = {json.dumps(group_name, ensure_ascii=False)}',
+            *([f'            custom string[] sourceSolids = {json.dumps(names, ensure_ascii=False)}']
+              if len(names) > 1 else []),
             f'            int[] faceVertexCounts = [{", ".join(["3"] * (count // 3))}]',
             f'            int[] faceVertexIndices = [{", ".join(map(str, range(count)))}]',
             f'            normal3f[] normals = {triples(normals)} (',
@@ -983,9 +1029,25 @@ def to_usdz(meshes, scale=1):
             f'            point3f[] points = {triples(positions)}',
             f'            float3[] extent = {extent}',
             '            uniform token subdivisionScheme = "none"',
-            f'            rel material:binding = </Model/Materials/Material_{material_indices[key]}>',
-            "        }",
         ])
+        if len(group["faces"]) == 1:
+            key = next(iter(group["faces"]))
+            lines.append(f'            rel material:binding = </Model/Materials/Material_{material_indices[key]}>')
+        else:
+            lines.append('            uniform token subsetFamily:materialBind:familyType = "partition"')
+            for subset_index, (key, face_indices) in enumerate(group["faces"].items()):
+                lines.extend([
+                    f'            def GeomSubset "MaterialSubset_{subset_index}" (',
+                    '                prepend apiSchemas = ["MaterialBindingAPI"]',
+                    '            )',
+                    '            {',
+                    '                uniform token elementType = "face"',
+                    '                uniform token familyName = "materialBind"',
+                    f'                int[] indices = [{", ".join(map(str, face_indices))}]',
+                    f'                rel material:binding = </Model/Materials/Material_{material_indices[key]}>',
+                    '            }',
+                ])
+        lines.append("        }")
     lines.extend(["    }", "}", ""])
     stage = "\n".join(lines).encode("utf-8")
     buffer = io.BytesIO()

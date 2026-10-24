@@ -559,6 +559,54 @@ class ModelerTests(unittest.TestCase):
             "metallicFactor": 0.0, "roughnessFactor": 0.8})
         self.assertEqual(doc["materials"][1]["pbrMetallicRoughness"]["roughnessFactor"], 0.2)
 
+    def test_glb_combines_top_level_group_without_boolean(self):
+        sm = FakeBrep()
+        source = ("group assembly\n"
+                  "box left 0 0 0 2 2 2\n"
+                  "group nested\nbox right 10 0 0 2 2 2\nend\n"
+                  "material left 0.5 0.6 0.7 1 0.2\n"
+                  "material right 0.5 0.6 0.7 1 0.2\nend")
+        objects, materials, _ = evaluate(source, "text", sm)
+        meshes = tessellate(objects, sm, materials=materials)
+        data = to_glb(meshes)
+        json_length = struct.unpack_from("<I", data, 12)[0]
+        doc = json.loads(data[20:20 + json_length])
+        self.assertEqual(sm.booleans, [])
+        self.assertEqual(len(meshes), 2)
+        self.assertEqual([mesh["group"] for mesh in meshes], ["assembly", "assembly"])
+        self.assertEqual(len(doc["meshes"]), 1)
+        self.assertEqual(len(doc["materials"]), 1)
+        self.assertEqual(doc["nodes"][0]["name"], "assembly")
+        self.assertEqual(doc["nodes"][0]["extras"]["sourceSolids"], ["left", "right"])
+        position = doc["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
+        self.assertEqual(doc["accessors"][position]["count"],
+                         sum(len(mesh["positions"]) // 3 for mesh in meshes))
+
+    def test_glb_keeps_top_level_groups_separate_with_shared_material(self):
+        source = ("group left\nbox a 0 0 0 2 2 2\nend\n"
+                  "group right\nbox b 10 0 0 2 2 2\nend\n"
+                  "box loose 20 0 0 2 2 2")
+        objects, materials, _ = evaluate(source, "text", FakeBrep())
+        data = to_glb(tessellate(objects, FakeBrep(), materials=materials))
+        json_length = struct.unpack_from("<I", data, 12)[0]
+        doc = json.loads(data[20:20 + json_length])
+        self.assertEqual([node["name"] for node in doc["nodes"]], ["left", "right", "loose"])
+        self.assertEqual(len(doc["meshes"]), 3)
+        self.assertEqual(len(doc["materials"]), 1)
+
+    def test_glb_uses_material_primitives_inside_one_group(self):
+        source = ("group assembly\nbox red 0 0 0 2 2 2\n"
+                  "box blue 10 0 0 2 2 2\n"
+                  "material red 1 0 0 0 0.5\n"
+                  "material blue 0 0 1 0 0.5\nend")
+        objects, materials, _ = evaluate(source, "text", FakeBrep())
+        data = to_glb(tessellate(objects, FakeBrep(), materials=materials))
+        json_length = struct.unpack_from("<I", data, 12)[0]
+        doc = json.loads(data[20:20 + json_length])
+        self.assertEqual(len(doc["meshes"]), 1)
+        self.assertEqual(len(doc["meshes"][0]["primitives"]), 2)
+        self.assertEqual(len(doc["materials"]), 2)
+
     def test_whole_solid_chamfer_and_fillet_commands(self):
         sm = FakeBrep()
         source = ("box a 0 0 0 10 10 10\n"
