@@ -559,6 +559,48 @@ class ModelerTests(unittest.TestCase):
             "metallicFactor": 0.0, "roughnessFactor": 0.8})
         self.assertEqual(doc["materials"][1]["pbrMetallicRoughness"]["roughnessFactor"], 0.2)
 
+    def test_group_material_fills_only_unspecified_solids(self):
+        source = ("part bolt\nbox body 0 0 0 1 1 1\nend\n"
+                  "group assembly\n"
+                  "box plain 0 0 0 2 2 2\n"
+                  "box custom 3 0 0 2 2 2\n"
+                  "material custom 1 0 0 0 0.5\n"
+                  "group detail\nbox nested 6 0 0 2 2 2\nend\n"
+                  "use bolt instance\n"
+                  "material assembly 0.2 0.3 0.4 0.7 0.6\n"
+                  "end\n")
+        sm = FakeBrep()
+        objects, materials, _ = evaluate(source, "text", sm)
+        self.assertEqual(set(materials), set(objects))
+        for name in ("plain", "nested", "instance__body"):
+            self.assertEqual(materials[name]["baseColor"], [0.2, 0.3, 0.4])
+        self.assertEqual(materials["custom"]["baseColor"], [1.0, 0.0, 0.0])
+        meshes = tessellate(objects, sm, materials=materials)
+        self.assertEqual(len({tuple(m["material"]["baseColor"]) for m in meshes}), 2)
+        glb = to_glb(meshes)
+        json_length = struct.unpack_from("<I", glb, 12)[0]
+        doc = json.loads(glb[20:20 + json_length])
+        self.assertEqual(len(doc["meshes"][0]["primitives"]), 2)
+
+    def test_group_material_after_end_and_nested_priority(self):
+        source = ("group outer\nbox plain 0 0 0 1 1 1\n"
+                  "group inner\nbox nested 2 0 0 1 1 1\n"
+                  "material inner 0 0 1 0 0.5\nend\nend\n"
+                  "material outer 0 1 0 0 0.5\n"
+                  "material plain 1 0 0 0 0.5")
+        _, materials, _ = evaluate(source, "text", FakeBrep())
+        self.assertEqual(materials["plain"]["baseColor"], [1, 0, 0])
+        self.assertEqual(materials["nested"]["baseColor"], [0, 0, 1])
+        late_inner = ("group outer\nbox plain 0 0 0 1 1 1\n"
+                      "group inner\nbox nested 2 0 0 1 1 1\nend\nend\n"
+                      "material outer 0 1 0 0 0.5\n"
+                      "material inner 0 0 1 0 0.5")
+        _, materials, _ = evaluate(late_inner, "text", FakeBrep())
+        self.assertEqual(materials["plain"]["baseColor"], [0, 1, 0])
+        self.assertEqual(materials["nested"]["baseColor"], [0, 0, 1])
+        with self.assertRaisesRegex(ValueError, "Line 2: material: existing solid or group"):
+            evaluate("box plain 0 0 0 1 1 1\nmaterial missing 1 0 0 0 0.5", "text", FakeBrep())
+
     def test_glb_combines_top_level_group_without_boolean(self):
         sm = FakeBrep()
         source = ("group assembly\n"

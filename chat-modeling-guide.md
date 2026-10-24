@@ -47,7 +47,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `offset` | `形状名 距離`（正は外側、負は内側） |
 | `shell` | `形状名 厚み [開口面の番号 ...]`（正は外側、負は内側。面指定なしは閉じた中空体） |
 | `faces` | `形状名`（現在の面番号と各面の座標範囲をログへ表示） |
-| `material` | `形状名 baseColorのR G B metallic roughness` |
+| `material` | `形状名またはグループ名 baseColorのR G B metallic roughness`。グループ指定は個別指定のない形状に適用 |
 | `part` / `end` | ルート階層で `part 部品名` から `end` までを再利用可能な定義にする |
 | `use` | `use 部品名 [配置名]` で部品を新しく生成する |
 | `group` / `end` | `group 名前` から `end` までをローカル座標のグループにする。入れ子可 |
@@ -299,5 +299,5 @@ materials = {"result": {"baseColor": [0.85, 0.24, 0.12], "metallic": 0.65, "roug
 
 ## 材質
 
-材質は完成したソリッド名ごとに指定します。`baseColor` は線形 RGB の3値、`metallic` と `roughness` はそれぞれ1値で、いずれも `0` から `1` の範囲です。省略したソリッドには既定の水色の材質を使います。Boolean 演算で作った形状には、演算後の名前を指定してください。GLB には glTF の PBR 材質として保存されます。ブラウザのプレビューは three.js の `MeshStandardMaterial` で同じ値を使い、環境マップなしの平行光と環境光で照らします。
+材質は完成したソリッド名かグループ名に指定します。`material グループ名 R G B metallic roughness` は子グループと `use` の形状を含め、個別指定のない形状に適用します。グループ内でも `end` の後でも指定できます。個別指定はグループ指定より優先し、子グループ指定は親グループ指定より優先します。`baseColor` は線形 RGB の3値、`metallic` と `roughness` はそれぞれ1値で、いずれも `0` から `1` の範囲です。省略したソリッドには既定の水色の材質を使います。Boolean 演算で作った形状には、演算後の名前を指定してください。GLB と USDZ に PBR 材質として保存されます。ブラウザのプレビューは three.js の `MeshStandardMaterial` で同じ値を使い、環境マップなしの平行光と環境光で照らします。
 

@@ -371,7 +371,8 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
     records = (_command_records(source, _line_offset)
                if isinstance(source, str) else source)
     commands = _expand_commands(_extract_parts(records, parts, bool(_stack)), _variables or {}, counter)
-    frames = [{"name": None, "line": 0, "objects": SolidObjects(), "materials": {}, "profiles": {}, "groups": {},
+    frames = [{"name": None, "line": 0, "objects": SolidObjects(), "materials": {}, "material_priority": {},
+               "profiles": {}, "groups": {}, "group_depths": {}, "depth": 0,
                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
                "position": (0.0, 0.0, 0.0)}]
     profile_block = None
@@ -482,12 +483,15 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 objects.top_groups.update((names[name], f"{instance_name}__{group_name}")
                                           for name, group_name in members.top_groups.items())
                 materials.update((names[name], material) for name, material in member_materials.items())
+                frame["material_priority"].update((names[name], float("inf")) for name in member_materials)
             elif op == "group":
                 if len(args) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
                     raise ValueError("group: one valid group name required")
                 if args[0] in objects or args[0] in groups:
                     raise ValueError(f"duplicate group name: {args[0]}")
-                frames.append({"name": args[0], "line": line_number, "objects": SolidObjects(), "materials": {}, "profiles": {}, "groups": {},
+                frames.append({"name": args[0], "line": line_number, "objects": SolidObjects(), "materials": {},
+                               "material_priority": {}, "profiles": {}, "groups": {}, "group_depths": {},
+                               "depth": len(frames), "group_material": None,
                                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
                                "position": (0.0, 0.0, 0.0)})
             elif op == "end":
@@ -506,6 +510,11 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                         sm.transform_brep(solid, frame["scale"], frame["euler"], frame["position"])
                     except (ValueError, RuntimeError) as exc:
                         raise ValueError(f"group {frame['name']}, solid {name}: {exc}") from exc
+                if frame["group_material"] is not None:
+                    for name in objects:
+                        if frame["material_priority"].get(name, -1) <= frame["depth"]:
+                            materials[name] = frame["group_material"]
+                            frame["material_priority"][name] = frame["depth"]
                 frames.pop()
                 parent["objects"].update(objects)
                 parent["objects"].tessellation.update(objects.tessellation)
@@ -513,8 +522,11 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 if len(frames) == 1:
                     parent["objects"].top_groups.update((name, frame["name"]) for name in objects)
                 parent["materials"].update(materials)
+                parent["material_priority"].update(frame["material_priority"])
                 parent["groups"].update(groups)
                 parent["groups"][frame["name"]] = set(objects)
+                parent["group_depths"].update(frame["group_depths"])
+                parent["group_depths"][frame["name"]] = frame["depth"]
             elif op in ("scale", "euler", "position"):
                 if len(frames) == 1 or len(args) != 3:
                     raise ValueError(f"{op}: three numbers inside a group required")
@@ -568,6 +580,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 left, right = (take_operand(members) for members in operands)
                 for name in consumed:
                     materials.pop(name, None)
+                    frame["material_priority"].pop(name, None)
                     objects.tessellation.pop(name, None)
                     objects.top_groups.pop(name, None)
                 for name, members in list(groups.items()):
@@ -613,11 +626,23 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     raise ValueError("angle must be between 1 and 90 degrees")
                 objects.tessellation[args[0]] = (chord, angle)
             elif op == "material":
-                if len(args) != 6 or args[0] not in objects:
-                    raise ValueError("material: existing solid name and five numbers required")
-                materials[args[0]] = normalize_material({
+                if len(args) != 6 or (args[0] not in objects and args[0] not in groups and
+                                       args[0] != frame["name"]):
+                    raise ValueError("material: existing solid or group name and five numbers required")
+                material = normalize_material({
                     "baseColor": [float(x) for x in args[1:4]],
                     "metallic": float(args[4]), "roughness": float(args[5])})
+                if args[0] in objects:
+                    materials[args[0]] = material
+                    frame["material_priority"][args[0]] = float("inf")
+                elif args[0] == frame["name"]:
+                    frame["group_material"] = material
+                else:
+                    depth = frame["group_depths"][args[0]]
+                    for name in groups[args[0]]:
+                        if frame["material_priority"].get(name, -1) <= depth:
+                            materials[name] = material
+                            frame["material_priority"][name] = depth
             else:
                 raise ValueError(f"unknown command: {op}")
         except (ValueError, KeyError, RuntimeError) as exc:
