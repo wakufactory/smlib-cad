@@ -502,19 +502,51 @@ canvas.ondblclick=()=>{yaw=0.72;pitch=0.44;zoom=2.8;draw();};
 new ResizeObserver(draw).observe(canvas);
 const restoredDraft=restoreDraft();
 refreshSourceLines();
-(async()=>{
-  examples=await(await fetch('/examples')).json();
-  if(!restoredDraft && !draftEdited && !$('source').value){$('source').value=examples.text;refreshSourceLines();}
-  const state=await(await fetch('/status')).json();
-  $('status').textContent=state.ready?'SMLib 接続済み':`_smlib_core 未導入: ${state.error}`;
-  if(!state.ready)note('SMLib の Python バインディングをビルドしてください。セットアップは README を参照。',true);
-  THREE=await import('https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js');
-  setupRenderer();
-  $('preview').disabled=false;
-  $('preview-mode').disabled=false;
-  showPreviewMode();
+async function startupJson(path){
+  const controller=typeof AbortController==='function'?new AbortController():null;
+  let timer;
+  const timeout=new Promise((_,reject)=>{
+    if(typeof setTimeout==='function')timer=setTimeout(()=>{
+      reject(Error(`${path} の読み込みが時間切れになりました`));
+      controller?.abort();
+    },10000);
+  });
+  try{
+    return await Promise.race([
+      fetch(path,controller?{signal:controller.signal}:{}).then(async response=>{
+        if(!response.ok)throw Error(`${path} の読み込みに失敗しました (${response.status})`);
+        return response.json();
+      }),timeout
+    ]);
+  }finally{if(timer!==undefined)clearTimeout(timer);}
+}
+async function initializeApp(loadThree=()=>import('https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js')){
+  // These requests run independently so a stalled response cannot hide the editor.
+  const examplesTask=startupJson('/examples').then(data=>{
+    examples=data;
+    if(!restoredDraft && !draftEdited && !$('source').value){$('source').value=examples.text;refreshSourceLines();}
+  }).catch(error=>{if(!restoredDraft)note(error.message,true);});
+  const statusTask=startupJson('/status').then(state=>{
+    $('status').textContent=state.ready?'SMLib 接続済み':`_smlib_core 未導入: ${state.error}`;
+    if(!state.ready)note('SMLib の Python バインディングをビルドしてください。セットアップは README を参照。',true);
+    return state;
+  }).catch(error=>{
+    $('status').textContent='SMLib 接続確認失敗';
+    note(error.message,true);
+    return {ready:false};
+  });
+  try{
+    THREE=await loadThree();
+    setupRenderer();
+    $('preview').disabled=false;
+    $('preview-mode').disabled=false;
+    showPreviewMode();
+  }catch(error){note(error.message,true);return;}
+  const state=await statusTask;
   if(restoredDraft){
     if(!$('source').value.trim())clearModel();
     else if(state.ready)await preview();
   }
-})().catch(e=>note(e.message,true));
+  await examplesTask;
+}
+initializeApp();

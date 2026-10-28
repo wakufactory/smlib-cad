@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const handlers = {};
 const canvas = {addEventListener(name, fn) { handlers[name] = fn; }, setPointerCapture() {}};
-const elements = {canvas};
+const elements = {canvas, message:{style:{}}};
 const context = vm.createContext({
   document: {getElementById: id => elements[id] ||= {addEventListener() {}}},
   ResizeObserver: class {observe() {}},

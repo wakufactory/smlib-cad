@@ -57,10 +57,10 @@ def run_model_request(request: dict, path: str) -> bytes:
         try:
             completed = subprocess.run(
                 [sys.executable, str(ROOT / "model_worker.py"), str(request_path), str(output_path), str(error_path)],
-                capture_output=True, timeout=120, check=False,
+                capture_output=True, timeout=10, check=False,
             )
         except subprocess.TimeoutExpired as exc:
-            raise ModelError("形状計算が時間内に完了しませんでした") from exc
+            raise ModelError("形状計算が10秒以内に完了しませんでした。入力を修正して再試行してください。") from exc
         if error_path.exists():
             failure = json.loads(error_path.read_text(encoding="utf-8"))
             raise ModelError(failure["error"], failure["traceback"])

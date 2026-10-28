@@ -13,7 +13,9 @@ h1{font-size:16px;margin:0}h2{font-size:13px;margin:0;color:#dbe8f0}
 #status{font-size:12px;color:#96aabb}
 main{height:calc(100dvh - 48px);display:grid;grid-template-columns:264px minmax(0,1fr) minmax(320px,36%);min-height:0;overflow:hidden}
 aside,.source-pane{min-width:0;min-height:0;padding:12px;display:flex;flex-direction:column;gap:12px}
-aside{border-right:1px solid #2c4154;overflow-y:auto;overscroll-behavior:none}
+aside{border-right:1px solid #2c4154;overflow:hidden}
+#settings-content{display:flex;flex:1;min-height:0;flex-direction:column;gap:12px;overflow-y:auto;overscroll-behavior:none}
+#settings-content>*{flex-shrink:0}
 .source-pane{border-left:1px solid #2c4154;background:#101b29;overflow-y:auto}
 .source-editor{display:flex;flex:1 1 55%;min-height:180px;flex-direction:column;gap:10px;overflow:hidden}
 .source-code{display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;border:1px solid #36516a;border-radius:8px;background:#101f2e}
@@ -70,7 +72,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <body><header><h1>SMLib Modeler</h1><span id="status">ライブラリを確認中…</span></header>
 <main><aside>
 <div id="message" role="status"></div>
-
+<div id="settings-content">
 <div id="mesh-stats" aria-live="polite">トライアングル数: —
 ソリッド数: —</div>
 <details id="command-reference">
@@ -140,6 +142,7 @@ subtract result body hole</pre>
 <div class="controls"><label for="grid-spacing">間隔</label><input id="grid-spacing" type="number" min="0" step="any" value="1" inputmode="decimal"></div>
 <div class="controls"><label for="grid-plane">平面</label><select id="grid-plane"><option value="xy">XY</option><option value="yz">YZ</option><option value="zx">ZX</option></select></div>
 <div class="controls"><label for="grid-offset">法線軸座標</label><input id="grid-offset" type="number" step="any" value="0" inputmode="decimal" aria-describedby="grid-offset-help"><span id="grid-offset-help" class="help">XY→Z · YZ→X · ZX→Y · WebGL のみ</span></div>
+</div>
 </div>
 </aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><div id="preview-options"><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="projection-mode" aria-label="WebGL 投影方式"><option value="orthographic">平行投影</option><option value="perspective">透視投影</option></select></div><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option></select><button id="example">読込</button></div>
 <div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
