@@ -115,43 +115,69 @@ _EXPRESSION_FUNCTIONS = {
 }
 
 
-def _number_expression(source, variables):
-    """Evaluate the small numeric expression language without Python eval."""
+class _ExpressionScope(dict):
+    """Numeric bindings and calculation functions travel together through CAD scopes."""
+
+    def __init__(self, inherited=()):
+        super().__init__(inherited)
+        self.functions = dict(getattr(inherited, "functions", {}))
+
+
+def _expression_tree(source):
     try:
-        tree = ast.parse(source, mode="eval")
-    except SyntaxError as exc:
+        return ast.parse(source, mode="eval").body
+    except (SyntaxError, RecursionError) as exc:
         raise ValueError(f"invalid expression: {source}") from exc
 
-    def visit(node, depth=0):
+
+def _number_expression(source, variables):
+    """Evaluate the small numeric expression language without Python eval."""
+    budget = [10000]
+
+    def visit(node, bindings, depth=0):
+        budget[0] -= 1
+        if budget[0] < 0:
+            raise ValueError("expression evaluation limit exceeded (10000)")
         if depth > 32:
             raise ValueError("expression is too deeply nested")
         if isinstance(node, ast.Constant) and type(node.value) in (int, float):
             value = node.value
         elif isinstance(node, ast.Name):
-            if node.id in variables:
-                value = variables[node.id]
+            if node.id in bindings:
+                value = bindings[node.id]
             elif node.id in _EXPRESSION_CONSTANTS:
                 value = _EXPRESSION_CONSTANTS[node.id]
             else:
                 raise ValueError(f"unknown variable: {node.id}")
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             name = node.func.id
-            if name not in _EXPRESSION_FUNCTIONS:
+            functions = getattr(bindings, "functions", {})
+            if name not in _EXPRESSION_FUNCTIONS and name not in functions:
                 raise ValueError(f"unknown function: {name}")
-            function, arity = _EXPRESSION_FUNCTIONS[name]
+            arity = (len(functions[name][0]) if name in functions
+                     else _EXPRESSION_FUNCTIONS[name][1])
             if node.keywords or len(node.args) != arity:
                 raise ValueError(f"{name}: expected {arity} positional argument(s)")
-            arguments = [visit(argument, depth + 1) for argument in node.args]
+            arguments = [visit(argument, bindings, depth + 1) for argument in node.args]
+            if name in functions:
+                parameters, body, captured, line = functions[name]
+                local = _ExpressionScope(captured)
+                local.update(zip(parameters, arguments))
+                try:
+                    return visit(body, local, depth + 1)
+                except ValueError as exc:
+                    raise ValueError(f"{name} (defined at Line {line}): {exc}") from exc
+            function = _EXPRESSION_FUNCTIONS[name][0]
             try:
                 value = function(*arguments)
             except (ValueError, OverflowError, ZeroDivisionError) as exc:
                 raise ValueError(f"{name}: invalid argument or result: {exc}") from exc
         elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-            value = visit(node.operand, depth + 1)
+            value = visit(node.operand, bindings, depth + 1)
             if isinstance(node.op, ast.USub):
                 value = -value
         elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
-            left, right = visit(node.left, depth + 1), visit(node.right, depth + 1)
+            left, right = visit(node.left, bindings, depth + 1), visit(node.right, bindings, depth + 1)
             try:
                 value = {ast.Add: lambda: left + right, ast.Sub: lambda: left - right,
                          ast.Mult: lambda: left * right, ast.Div: lambda: left / right}[type(node.op)]()
@@ -167,7 +193,63 @@ def _number_expression(source, variables):
             raise ValueError("expression result must be finite")
         return value
 
-    return visit(tree.body)
+    return visit(_expression_tree(source), variables)
+
+
+def _define_calculation(line, scope, line_number):
+    match = re.fullmatch(r"fn\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(([^()]*)\)\s*=\s*(.+)", line, re.I)
+    if not match:
+        raise ValueError("fn: expected name(parameters) = expression")
+    name, arguments, source = match.groups()
+    parameters = [item.strip() for item in arguments.split(",")] if arguments.strip() else []
+    if any(not _IDENTIFIER.fullmatch(item) for item in parameters):
+        raise ValueError("fn: parameters must be identifiers")
+    if len(parameters) != len(set(parameters)):
+        raise ValueError("fn: duplicate parameter")
+    if name in _EXPRESSION_FUNCTIONS or name in _EXPRESSION_CONSTANTS:
+        raise ValueError(f"fn: reserved name: {name}")
+    body = _expression_tree(source)
+    # Validate even unused definitions, without evaluating parameter-dependent domains.
+    def validate(node, depth=0):
+        if depth > 32:
+            raise ValueError("expression is too deeply nested")
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            try:
+                finite = math.isfinite(node.value)
+            except OverflowError:
+                finite = False
+            if not finite:
+                raise ValueError("expression result must be finite")
+        elif isinstance(node, ast.Name):
+            if node.id not in parameters and node.id not in scope and node.id not in _EXPRESSION_CONSTANTS:
+                raise ValueError(f"unknown variable: {node.id}")
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            called = node.func.id
+            if called not in scope.functions and called not in _EXPRESSION_FUNCTIONS:
+                raise ValueError(f"unknown function: {called} (forward and recursive calls are unsupported)")
+            arity = (len(scope.functions[called][0]) if called in scope.functions
+                     else _EXPRESSION_FUNCTIONS[called][1])
+            if node.keywords or len(node.args) != arity:
+                raise ValueError(f"{called}: expected {arity} positional argument(s)")
+            for argument in node.args:
+                validate(argument, depth + 1)
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            validate(node.operand, depth + 1)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            validate(node.left, depth + 1)
+            validate(node.right, depth + 1)
+        else:
+            raise ValueError("only numeric expressions and approved math functions are allowed")
+    validate(body)
+    return name, (parameters, body, _ExpressionScope(scope), line_number)
+
+
+def _range_expressions(source):
+    """Split range arguments at AST call boundaries, preserving nested call commas."""
+    call = _expression_tree(f"range({source})")
+    if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name) or call.func.id != "range" or call.keywords:
+        raise ValueError("range arguments must be one to three integers")
+    return [ast.unparse(argument) for argument in call.args]
 
 
 def _expand_text(line, variables):
@@ -203,7 +285,7 @@ def _expand_commands(records, inherited, counter, depth=0):
     if depth > 32:
         raise ValueError("control block nesting limit exceeded (32)")
     output = []
-    scopes = [dict(inherited)]
+    scopes = [_ExpressionScope(inherited)]
     definitions = [set()]
     blocks = []
     index = 0
@@ -213,7 +295,13 @@ def _expand_commands(records, inherited, counter, depth=0):
         words = line.split(None, 1)
         op = words[0].lower() if words else ""
         try:
-            if op == "let":
+            if op == "fn":
+                name, function = _define_calculation(line, scopes[-1], line_number)
+                if name in definitions[-1]:
+                    raise ValueError(f"duplicate function or variable: {name}")
+                scopes[-1].functions[name] = function
+                definitions[-1].add(name)
+            elif op == "let":
                 match = re.fullmatch(r"let\s+([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.+)", line, re.I)
                 if not match:
                     raise ValueError("let: expected name = expression")
@@ -229,7 +317,7 @@ def _expand_commands(records, inherited, counter, depth=0):
                 name = match.group(1)
                 if name in scopes[-1]:
                     raise ValueError(f"loop variable already defined: {name}")
-                values = [_number_expression(part.strip(), scopes[-1]) for part in match.group(2).split(",")]
+                values = [_number_expression(part, scopes[-1]) for part in _range_expressions(match.group(2))]
                 if not 1 <= len(values) <= 3 or any(not float(value).is_integer() for value in values):
                     raise ValueError("range arguments must be one to three integers")
                 if len(values) == 1:
@@ -250,7 +338,7 @@ def _expand_commands(records, inherited, counter, depth=0):
                 end = _block_end(records, index, "for")
                 body = records[index + 1:end]
                 for value in iteration:
-                    nested = dict(scopes[-1])
+                    nested = _ExpressionScope(scopes[-1])
                     nested[name] = value
                     try:
                         output.extend(_expand_commands(body, nested, counter, depth + 1))
@@ -267,13 +355,13 @@ def _expand_commands(records, inherited, counter, depth=0):
                 index = end
             else:
                 expanded = _expand_text(raw, scopes[-1])
-                output.append((line_number, expanded, dict(scopes[-1])))
+                output.append((line_number, expanded, _ExpressionScope(scopes[-1])))
                 counter["commands"] += 1
                 if counter["commands"] > 20000:
                     raise ValueError("expanded line limit exceeded (20000)")
                 if op in ("group", "profile"):
                     blocks.append(op)
-                    scopes.append(dict(scopes[-1]))
+                    scopes.append(_ExpressionScope(scopes[-1]))
                     definitions.append(set())
                 elif op == "end" and blocks:
                     blocks.pop()
@@ -370,7 +458,8 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
     counter = {"expansions": 0, "names": {}, "commands": 0} if _counter is None else _counter
     records = (_command_records(source, _line_offset)
                if isinstance(source, str) else source)
-    commands = _expand_commands(_extract_parts(records, parts, bool(_stack)), _variables or {}, counter)
+    commands = _expand_commands(_extract_parts(records, parts, bool(_stack)),
+                                {} if _variables is None else _variables, counter)
     frames = [{"name": None, "line": 0, "objects": SolidObjects(), "materials": {}, "material_priority": {},
                "profiles": {}, "groups": {}, "group_depths": {}, "depth": 0,
                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),

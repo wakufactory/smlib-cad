@@ -123,7 +123,7 @@ function restoreDraft(){
        !draftFields.slice(0,-4).every(id=>typeof draft.fields[id]==='string') ||
        !draftFields.slice(-4).every(id=>draft.fields[id]===undefined || typeof draft.fields[id]==='string') ||
        !draftChecks.every(id=>typeof draft.checks[id]==='boolean'))throw Error('Invalid draft');
-    const options={mode:['text','python'],sample:['clear','default','gallery','circular','sweeps','offsets'],
+    const options={mode:['text','python'],sample:['clear','default','gallery','circular','sweeps','offsets','functions'],
       finish:['none','chamfer','fillet'],'shading-mode':['shading','wireframe','normal'],'preview-mode':['webgl','model'],
       'grid-plane':['xy','yz','zx'],'projection-mode':['perspective','orthographic']};
     if(Object.entries(options).some(([id,values])=>draft.fields[id]!==undefined && !values.includes(draft.fields[id])))throw Error('Invalid draft option');
@@ -456,7 +456,7 @@ function clearModel(){
 }
 $('example').onclick=()=>{
   if($('sample').value==='clear'){clearModel();return;}
-  if(['gallery','circular','sweeps','offsets'].includes($('sample').value)){
+  if(['gallery','circular','sweeps','offsets','functions'].includes($('sample').value)){
     $('mode').value='text';$('source').value=examples[$('sample').value]||'';
   }
   else $('source').value=examples[$('mode').value]||'';

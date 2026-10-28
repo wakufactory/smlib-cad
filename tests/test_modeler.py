@@ -334,6 +334,80 @@ class ModelerTests(unittest.TestCase):
             with self.subTest(source=source), self.assertRaisesRegex(ValueError, message):
                 _number_expression(source, {})
 
+    def test_calculation_functions_across_expression_contexts(self):
+        source = ("let pitch = 4\nfn sum(a, b) = a + b\n"
+                  "fn offset(i) = sum(i * pitch, 1)\nfn count() = 3\n"
+                  "part piece\nbox body ${offset(index)} 0 0 1 1 1\nend\n"
+                  "for index in range(sum(0, 0), sum(count(), 0), sum(0, 1))\n"
+                  "  let x = offset(index)\n"
+                  "  if sum(x, -8)\n"
+                  "    group g_${index}\nposition ${x} ${sum(2, 3)} 0\n"
+                  "      use piece p_${index}\nend\nend\nend\n")
+        sm = FakeBrep()
+        objects, _, _ = evaluate(source, "text", sm)
+        self.assertEqual(list(objects), ["p_0__body", "p_1__body", "p_2__body"])
+        self.assertEqual([item[3] for item in sm.transforms], [(1, 5, 0), (5, 5, 0), (9, 5, 0)])
+
+    def test_calculation_closures_shadowing_and_local_scopes(self):
+        source = ("let base = 2\nfn value(x) = base + x\n"
+                  "group outer\nlet base = 100\nfn value(x) = base * x\n"
+                  "fn saved(x) = value(x)\n"
+                  "group inner\nfn value(x) = x\n"
+                  "box captured_${saved(3)}_${value(3)} 0 0 0 1 1 1\nend\nend\n"
+                  "box root_${value(3)} 0 0 0 1 1 1\n"
+                  "for i in range(2)\nfn current() = i\n"
+                  "box loop_${current()} 0 0 0 1 1 1\nend\n")
+        objects, _, _ = evaluate(source, "text", FakeBrep())
+        self.assertEqual(list(objects), ["captured_300_3", "root_5", "loop_0", "loop_1"])
+        for block in ("group g", "if 1", "for i in range(1)", "part p"):
+            use = "use p\n" if block == "part p" else ""
+            with self.subTest(block=block), self.assertRaisesRegex(ValueError, "unknown function: local"):
+                evaluate(f"{block}\nfn local() = 1\nend\n{use}let x = local()", "text", FakeBrep())
+
+    def test_calculation_definition_and_call_errors(self):
+        cases = (
+            ("fn bad x = x", "Line 1: fn: expected"),
+            ("fn f(x, x) = x", "duplicate parameter"),
+            ("fn f(x,) = x", "parameters must be identifiers"),
+            ("fn f(x=1) = x", "parameters must be identifiers"),
+            ("fn sin(x) = x", "reserved name"),
+            ("fn pi() = 1", "reserved name"),
+            ("fn f() = 1\nfn f() = 2", "Line 2: duplicate"),
+            ("fn f(x) = missing + x", "unknown variable: missing"),
+            ("fn f(x) = f(x)", "recursive calls are unsupported"),
+            ("fn f(x) = later(x)\nfn later(x) = x", "unknown function: later"),
+            ("fn f(x) = x.real", "approved math functions"),
+            ("fn f(x) = __import__(x)", "unknown function"),
+            ("fn f(x) = [x]", "approved math functions"),
+            ("fn f(x) = sin(x, 0)", "expected 1 positional"),
+            ("fn f(x) = x\nlet y = f()", "Line 2: f: expected 1 positional"),
+            ("fn f(x) = x\nlet y = f(x=2)", "expected 1 positional"),
+            ("fn f(x) = 1 / x\nlet y = f(0)", "Line 2: f .*Line 1.*invalid arithmetic"),
+            ("fn f(x) = sqrt(x)\nlet y = f(-1)", "sqrt: invalid argument"),
+            ("fn f(x) = x * x\nlet y = f(1e308)", "result must be finite"),
+            ("fn f() = 1e999", "result must be finite"),
+            ("let x = f(1)\nfn f(x) = x", "unknown function: f"),
+        )
+        for source, message in cases:
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, message):
+                evaluate(source, "text", FakeBrep())
+
+    def test_calculation_evaluation_budget_and_continuation(self):
+        # A function-only environment must survive use even when there are no let bindings.
+        objects, _, _ = evaluate("fn size(x) = x * 2\npart p\n"
+                                 "box body 0 0 0 ${size(3)} 1 1\nend\nuse p", "text", FakeBrep())
+        self.assertEqual(list(objects), ["p_1__body"])
+        source = "fn f0(x) = x\n" + "\n".join(
+            f"fn f{i}(x) = f{i-1}(x) + f{i-1}(x)" for i in range(1, 14))
+        with self.assertRaisesRegex(ValueError, "evaluation limit exceeded"):
+            evaluate(source + "\nlet x = f13(1)", "text", FakeBrep())
+        source = "fn f0(x) = x\n" + "\n".join(
+            f"fn f{i}(x) = f{i-1}(x)" for i in range(1, 35))
+        with self.assertRaisesRegex(ValueError, "too deeply nested"):
+            evaluate(source + "\nlet x = f34(1)", "text", FakeBrep())
+        with self.assertRaisesRegex(ValueError, "Line 1: unknown variable"):
+            evaluate("fn f(x) = x + \\\nmissing", "text", FakeBrep())
+
     def test_if_expands_only_nonzero_branch(self):
         source = ("let enabled = -2\n"
                   "box body 0 0 0 10 10 4\n"

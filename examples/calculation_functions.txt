@@ -1,0 +1,20 @@
+# Calculation functions: definition-time radius, composition, and two arguments.
+let radius = 30
+fn angle(i, count) = i * 360 / count
+fn circle_x(deg) = radius * cos(radians(deg))
+fn circle_y(deg) = radius * sin(radians(deg))
+fn ball_radius(i) = 2 + i / 4
+fn count() = 8
+part peg
+  sphere body 0 0 0 ${ball_radius(i)}
+end
+group ring
+  for i in range(count())
+    let deg = angle(i, count())
+    group station_${i}
+      position ${circle_x(deg)} ${circle_y(deg)} 0
+      use peg peg_${i}
+    end
+  end
+  material ring 0.2 0.55 0.85 0.5 0.3
+end

@@ -165,6 +165,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `faces` | `形状名`（現在の面番号と各面の座標範囲をログへ表示） |
 | `material` | `形状名またはグループ名 baseColorのR G B metallic roughness`。グループ指定は個別指定のない形状に適用 |
 | `part` / `end` | ルート階層で `part 部品名` から `end` までを再利用可能な定義にする |
+| `fn` | `fn 名前(引数, ...) = 式` で数値を返す計算関数を定義 |
 | `use` | `use 部品名 [配置名]` で部品を新しく生成する |
 | `group` / `end` | `group 名前` から `end` までをローカル座標のグループにする。入れ子可 |
 | `scale` | グループ内で `scale sx sy sz`（各軸の正の倍率） |
@@ -212,6 +213,21 @@ for i in range(count)
 end
 ```
 
+`fn 名前(引数, ...) = 式` で、数値を1つ返す計算関数を定義できます。`end` は不要で、引数なしの `fn count() = 6` も使えます。引数は識別子のみで、呼び出しは位置引数を使います。関数は定義した行以降で、`let` の右辺、`${...}`、`if`、`range(...)` の式から呼び出せます。複数引数の関数を `range` 内に入れることもできます。
+
+```text
+let radius = 30
+fn angle(i, count) = i * 360 / count
+fn circle_x(deg) = radius * cos(radians(deg))
+fn circle_y(deg) = radius * sin(radians(deg))
+for i in range(6)
+  let deg = angle(i, 6)
+  sphere ball_${i} ${circle_x(deg)} ${circle_y(deg)} 0 2
+end
+```
+
+関数は定義時点の変数と定義済み関数を保持し、引数は関数本文内だけで有効です。呼び出し側の同名変数・関数によって参照先は変わりません。`group`・`for`・`if`・`part` 内でも定義でき、その外には漏れません。`part` は `use` 時点で見える関数を利用できます。同じスコープ内での同名定義、組み込み数学関数・定数名の関数定義、前方参照・再帰呼び出し、既定値・キーワード引数は使えません。関数本文は既存の数値式と同じ構文に制限され、未使用の定義も構文・名前・引数数を検査します。定義域やゼロ除算は呼び出し時に検査し、エラーには呼び出し行と関数定義行が付いています。式と関数呼び出しを合わせた深さは最大32段、1つの式の評価は最大10,000ノードです。
+
 `for 名前 in range(回数)` は `0` から `回数 - 1` まで繰り返します。`range(開始, 終了)` と `range(開始, 終了, 刻み)` も使え、終了値は含みません。引数は整数、刻みは 0 以外です。ループは入れ子にでき、`end` で閉じます。ループ変数とループ内の `let` はその反復内だけで有効です。グループ内の `let` はそのグループ内だけで有効です。`part` 本文は `use` ごとに評価され、その時点で見える変数を参照できます。部品内の変数は外に出ません。部品定義は従来どおりルート階層だけに置きます。
 
 `if 式` は式の値が0以外なら `end` までを1回展開し、0なら飛ばします。式は `let` の右辺と同じ数値式で、`${}` は付けません。負の値も0以外なので真です。`for` や `group`、`part` の本文に入れ子にできます。`if` 内の `let` は外へ出ませんが、作成した形状は通常の命令と同じスコープに残ります。
@@ -225,7 +241,7 @@ if add_boss
 end
 ```
 
-1つのループは最大512回、`for` と `if` の入れ子は最大32段、展開後は空行を含め最大20,000行です。未定義変数、ゼロ除算、有限でない結果、許可していない式は行番号付きのエラーになります。変数・ループ・条件分岐はテキスト命令専用で、Python モードには影響しません。
+1つのループは最大512回、`for` と `if` の入れ子は最大32段、展開後は空行を含め最大20,000行です。未定義変数、ゼロ除算、有限でない結果、許可していない式は行番号付きのエラーになります。変数・計算関数・ループ・条件分岐はテキスト命令専用で、Python モードには影響しません。
 
 ### 押し出しと回転体
 
@@ -433,6 +449,8 @@ materials = {"result": {"baseColor": [0.85, 0.24, 0.12], "metallic": 0.65, "roug
 画面上部で「全プリミティブ」を選び「読込」を押すと、`examples/all_primitives_materials.txt` がテキスト命令として読み込まれます。15種類を5列×3行に並べ、各形状に固有の `baseColor`、`metallic`、`roughness` を割り当てています。平面と平面円も含みます。生成済み GLB は `outputs/primitive_gallery/all_primitives_materials.glb`、材質・三角形数の対応は同じフォルダーの `manifest.json` にあります。
 
 4気筒エンジンブロック風の CSG サンプルは `examples/inline_four_engine_block.json` にあります。テキスト命令でシリンダー穴、クランク軸トンネル、ボルト穴、側面ポートなどを構成し、生成済みの `outputs/inline_four_engine_block.glb` と再生成手順を `outputs/inline_four_engine_block.README.md` に置いています。
+
+計算関数のサンプルは `examples/calculation_functions.txt` と `examples/calculation_functions.json` です。画面の「計算関数の円形配置」から読み込めます。角度・円周座標・半径を関数で計算して8個の球を配置します。生成済み GLB は `examples/calculation_functions.glb` です。`make glb MODEL=examples/calculation_functions.json` で再生成できます。
 
 `part`、`group`、`let`、`for` を使う円形配置のサンプルは `examples/circular_csg_array.txt` と、画面へ読み込める `examples/circular_csg_array.json` にあります。1 個のクランプ定義を `for i in range(count)` で6回 `use` し、子グループの半径方向への移動と親グループの `i * 360 / count` 度の回転で円周上に並べます。6色の材質指定はループ後に個別に書いています。各クランプは結合・穴あけ・スリット切り抜きの CSG です。中央のカラーも CSG です。画面の「円形 CSG 配置」→「読込」でも開けます。生成済みの `outputs/circular_csg_array.glb` と構成の説明は `outputs/circular_csg_array.README.md` にあります。GLB の再生成には `make glb MODEL=examples/circular_csg_array.json GLB=outputs/circular_csg_array.glb` を使います。
 

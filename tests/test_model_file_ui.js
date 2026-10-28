@@ -65,10 +65,11 @@ assert.equal(context.gridPoints([1e9, 0, 0], [1e9 + 1, 1, 0]).length, 0);
 let previewCalls = 0;
 const actualPreview = context.preview;
 context.preview = async () => {previewCalls++;};
-vm.runInContext('examples = {circular: "group ring\\nend", sweeps: "profile p\\npolygon 0 0 1 0 0 1\\nend"}', context);
+vm.runInContext('examples = {circular: "group ring\\nend", sweeps: "profile p\\npolygon 0 0 1 0 0 1\\nend", functions: "fn size(x) = x * 2\\nbox body 0 0 0 ${size(2)} 1 1"}', context);
 for (const [sample, source] of [
   ['circular', 'group ring\nend'],
-  ['sweeps', 'profile p\npolygon 0 0 1 0 0 1\nend']
+  ['sweeps', 'profile p\npolygon 0 0 1 0 0 1\nend'],
+  ['functions', 'fn size(x) = x * 2\nbox body 0 0 0 ${size(2)} 1 1']
 ]) {
   elements.mode.value = 'python';
   elements.sample.value = sample;
@@ -76,7 +77,7 @@ for (const [sample, source] of [
   assert.equal(elements.mode.value, 'text');
   assert.equal(elements.source.value, source);
 }
-assert.equal(previewCalls, 2, 'loading each sample automatically previews');
+assert.equal(previewCalls, 3, 'loading each sample automatically previews');
 elements.source.value = values.source;
 elements.sample.value = 'default';
 previewCalls = 0;
