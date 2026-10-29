@@ -8,10 +8,23 @@ from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from server import Handler, ModelError, ModelHTTPServer, PreviewStore, allowed_host, allowed_origin, run_model_request
+from server import Handler, ModelError, ModelHTTPServer, PreviewStore, allowed_host, allowed_origin, run_model_request, load_examples
 
 
 class LanAccessTests(unittest.TestCase):
+    def test_sample_variants_include_python_groups_and_optional_python_files(self):
+        from pathlib import Path
+        import tempfile
+        examples = load_examples()
+        self.assertIn("Group(", examples["variants"]["groups"]["python"])
+        self.assertEqual(examples["gallery"], examples["variants"]["gallery"]["text"])
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'examples').mkdir()
+            (root / 'examples' / 'all_primitives_materials.py').write_text('python gallery')
+            with patch('server.ROOT', root):
+                self.assertEqual(load_examples()['variants']['gallery'], {'python': 'python gallery'})
+
     def test_only_certificate_rejection_logs_are_suppressed(self):
         server = object.__new__(ModelHTTPServer)
         with patch.object(ThreadingHTTPServer, "handle_error") as parent:

@@ -22,6 +22,23 @@ from codex_bridge import ChatBridge, CodexError
 ROOT = Path(__file__).resolve().parent
 
 
+def load_examples():
+    examples = {"python": EXAMPLE_SCRIPT, "text": EXAMPLE_TEXT}
+    variants = {"default": {"python": EXAMPLE_SCRIPT, "text": EXAMPLE_TEXT}}
+    for key, stem in {"gallery": "all_primitives_materials", "sweeps": "extrude_revolve",
+                      "offsets": "offset_shell", "functions": "calculation_functions",
+                      "circular": "circular_csg_array", "groups": "python_groups"}.items():
+        variants[key] = {}
+        for mode, suffix in (("text", ".txt"), ("python", ".py")):
+            path = ROOT / "examples" / (stem + suffix)
+            if path.is_file():
+                variants[key][mode] = path.read_text(encoding="utf-8")
+        if "text" in variants[key]:
+            examples[key] = variants[key]["text"]
+    examples["variants"] = variants
+    return examples
+
+
 class ModelError(Exception):
     def __init__(self, error: str, details: str = ""):
         super().__init__(error)
@@ -137,12 +154,7 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._reply(200, data, "model/vnd.usdz+zip")
         elif self.path in ("/examples", "/examples/"):
-            self._json(200, {"python": EXAMPLE_SCRIPT, "text": EXAMPLE_TEXT,
-                             "gallery": (ROOT / "examples" / "all_primitives_materials.txt").read_text(),
-                             "sweeps": (ROOT / "examples" / "extrude_revolve.txt").read_text(),
-                             "offsets": (ROOT / "examples" / "offset_shell.txt").read_text(),
-                             "functions": (ROOT / "examples" / "calculation_functions.txt").read_text(),
-                             "circular": (ROOT / "examples" / "circular_csg_array.txt").read_text()})
+            self._json(200, load_examples())
         else:
             self.send_error(404)
 

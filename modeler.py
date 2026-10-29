@@ -430,6 +430,95 @@ class SolidObjects(dict):
         self.top_groups = {}
 
 
+class Group:
+    """Python model group. Children are a name -> Brep/Group dictionary.
+
+    Transforms apply to completed solids, child first, during evaluate().
+    Material inheritance replaces whole PBR materials, just like text groups.
+    """
+
+    def __init__(self, objects, *, material=None, scale=(1, 1, 1),
+                 euler=(0, 0, 0), position=(0, 0, 0)):
+        self.objects = objects
+        self.material = material
+        self.scale = scale
+        self.euler = euler
+        self.position = position
+
+
+def _python_objects(roots, materials, sm):
+    """Validate the entire tree before applying any native transforms."""
+    objects = SolidObjects()
+    names, solid_ids, active = set(), set(), set()
+    groups, leaves, transforms = {}, [], []
+    if not isinstance(materials, dict):
+        raise ValueError("materials must be a dictionary keyed by solid or group name")
+    overrides = {name: normalize_material(value) for name, value in materials.items()}
+
+    def vector(value, field):
+        if (not isinstance(value, (tuple, list)) or len(value) != 3 or
+                any(isinstance(x, bool) or not isinstance(x, (int, float)) or
+                    not math.isfinite(x) for x in value)):
+            raise ValueError(f"group {field} must contain three finite numbers")
+        if field == "scale" and any(x <= 0 for x in value):
+            raise ValueError("group scale factors must be positive")
+        return tuple(float(x) for x in value)
+
+    def visit(children, ancestry):
+        if not isinstance(children, dict):
+            raise ValueError("objects must be a dictionary keyed by solid or group name")
+        for name, value in children.items():
+            if not isinstance(name, str) or not _IDENTIFIER.fullmatch(name):
+                raise ValueError("solid and group names must be valid identifiers")
+            if name in names:
+                raise ValueError(f"duplicate solid or group name: {name}")
+            names.add(name)
+            if isinstance(value, Group):
+                if id(value) in active:
+                    raise ValueError(f"cyclic group: {name}")
+                transform = tuple(vector(getattr(value, field), field)
+                                  for field in ("scale", "euler", "position"))
+                groups[name] = (overrides.get(name) if name in overrides else
+                                normalize_material(value.material) if value.material is not None else None)
+                active.add(id(value))
+                members = visit(value.objects, (*ancestry, name))
+                active.remove(id(value))
+                transforms.append((name, members, transform))
+            elif isinstance(value, sm.Brep):
+                if id(value) in solid_ids:
+                    raise ValueError(f"Brep reused by multiple objects: {name}; create a fresh Brep")
+                solid_ids.add(id(value))
+                objects[name] = value
+                leaves.append((name, ancestry))
+                if ancestry:
+                    objects.top_groups[name] = ancestry[0]
+            else:
+                raise ValueError(f"{name}: expected Brep or Group")
+        return [name for name, path in leaves if path[:len(ancestry)] == ancestry]
+
+    visit(roots, ())
+    unknown = set(overrides) - names
+    if unknown:
+        raise ValueError(f"material references unknown solid or group: {', '.join(sorted(map(str, unknown)))}")
+    if not objects:
+        raise ValueError("No solid was created")
+    resolved = {}
+    for name, ancestry in leaves:
+        material = overrides.get(name)
+        if material is None:
+            material = next((groups[group] for group in reversed(ancestry)
+                             if groups[group] is not None), None)
+        if material is not None:
+            resolved[name] = material
+    for group, members, transform in transforms:
+        for name in members:
+            try:
+                sm.transform_brep(objects[name], *transform)
+            except (ValueError, RuntimeError) as exc:
+                raise ValueError(f"group {group}, solid {name}: {exc}") from exc
+    return objects, resolved
+
+
 def _command_records(source, line_offset):
     """Join backslash-continued physical lines and retain the first line number."""
     records = []
@@ -756,10 +845,15 @@ def evaluate(source: str, mode: str, sm):
     if mode != "python":
         raise ValueError("mode must be text or python")
     # This is a local code editor. Python input has full local process access.
-    namespace = {"sm": sm, "__builtins__": __builtins__}
+    namespace = {"sm": sm, "Group": Group, "__builtins__": __builtins__}
     output = io.StringIO()
     with redirect_stdout(output):
         exec(compile(source, "<model>", "exec"), namespace)
+    if "objects" in namespace or isinstance(namespace.get("result"), Group):
+        roots = namespace["objects"] if "objects" in namespace else {"result": namespace["result"]}
+        with redirect_stdout(output):
+            objects, materials = _python_objects(roots, namespace.get("materials", {}), sm)
+        return objects, materials, output.getvalue()
     candidates = {name: value for name, value in namespace.items()
                   if name != "sm" and isinstance(value, sm.Brep)}
     if "result" in candidates:

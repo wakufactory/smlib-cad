@@ -311,6 +311,29 @@ result = sm.boolean_difference(body, hole)
 materials = {"result": {"baseColor": [0.85, 0.24, 0.12], "metallic": 0.65, "roughness": 0.3}}
 ```
 
+複数の完成形状は `objects` 辞書で明示します。値には BRep または `Group` を指定できます。`Group` はエディタ内で自動提供される Python 側の補助クラスです。通常の Python ファイルからは `from modeler import Group` で利用できます。カーネルの `sm` API とは別に、表示・保存用の構成を定義します。
+
+```python
+objects = {
+    "assembly": Group({
+        "base": sm.create_box((0, 0, 0), 10, 8, 2),
+        "detail": Group({
+            "post": sm.create_cylinder((5, 4, 2), 1, 6),
+        }, material={"baseColor": [0.8, 0.8, 0.8], "metallic": 0.8}),
+    }, material={"baseColor": [0.2, 0.5, 0.8]},
+       scale=(1, 1, 1), euler=(0, 0, 30), position=(10, 0, 0)),
+}
+materials = {"post": {"baseColor": [1, 0.3, 0.1]}}
+```
+
+`Group(objects, *, material=None, scale=(1,1,1), euler=(0,0,0), position=(0,0,0))` は入れ子にできます。子の変換後、親の変換を適用し、各段は scale → X/Y/Z Euler回転（度）→ position の順です。scale は各成分が正の有限数、euler・position は有限数3個です。変換は評価時に完成 BRep へ適用します。Boolean はグループ化の前に BRep 同士で実行してください。`Group` 自体は Boolean の引数にはできません。
+
+材質の優先順は形状への `materials` 指定 → 最も近い子グループ → 親グループです。`materials` には形状名とグループ名の両方を指定でき、同じグループの `material=` を置き換えます。辞書の記述順には依存しません。材質はプロパティ単位ではなく材質全体を置き換え、省略プロパティは既定値になります。プレビュー、GLB、USDZ に共通で反映されます。
+
+形状名・グループ名は全体で一意な英数字・アンダースコアの識別子（先頭は英字またはアンダースコア）です。辞書のキーを名前に使い、変数名は使いません。同じ BRep を複数箇所に登録せず、配置ごとに新しい BRep を作ってください。`objects` を定義するとそれを出力として優先し、作業用変数は表示しません。`result = Group({...})` も使用でき、その最上位グループ名は `result` になります。`objects` がなく `result` が BRep の従来コードはそのまま動作し、`result` もなければ最後の BRep 変数を使います。
+
+GLB・USDZ は最上位グループごとに1メッシュへまとめ、異なる材質を保持します。グループ外の BRep は個別メッシュです。Pythonサンプルは `examples/python_groups.py` と読み込み用の `examples/python_groups.json` です。`make glb MODEL=examples/python_groups.json` と `make usdz MODEL=examples/python_groups.json` で再生成できます。
+
 追加プリミティブの Python 名は各テキスト命令に `create_` を付けたものです。例えば `sm.create_ellipsoid((0, 0, 0), 8, 5, 3)`、`sm.create_cone((0, 0, 0), 4, 0, 7)`、`sm.create_partial_torus((0, 0, 0), 6, 1, 0, 180)` と書けます。
 
 ## 材質
