@@ -422,12 +422,14 @@ def _extract_parts(lines, parts, in_part):
 
 
 class SolidObjects(dict):
-    """Named BReps with per-solid meshing settings and export group names."""
+    """Named BReps with meshing settings and recursive export group transforms."""
 
     def __init__(self):
         super().__init__()
         self.tessellation = {}
         self.top_groups = {}
+        # Paths are relative to the current evaluation scope, outermost first.
+        self.group_paths = {}
 
 
 class Group:
@@ -451,6 +453,7 @@ def _python_objects(roots, materials, sm):
     objects = SolidObjects()
     names, solid_ids, active = set(), set(), set()
     groups, leaves, transforms = {}, [], []
+    group_transforms = {}
     if not isinstance(materials, dict):
         raise ValueError("materials must be a dictionary keyed by solid or group name")
     overrides = {name: normalize_material(value) for name, value in materials.items()}
@@ -478,6 +481,8 @@ def _python_objects(roots, materials, sm):
                     raise ValueError(f"cyclic group: {name}")
                 transform = tuple(vector(getattr(value, field), field)
                                   for field in ("scale", "euler", "position"))
+                group_transforms[name] = dict(name=name, scale=transform[0],
+                                              euler=transform[1], position=transform[2])
                 groups[name] = (overrides.get(name) if name in overrides else
                                 normalize_material(value.material) if value.material is not None else None)
                 active.add(id(value))
@@ -504,6 +509,7 @@ def _python_objects(roots, materials, sm):
         raise ValueError("No solid was created")
     resolved = {}
     for name, ancestry in leaves:
+        objects.group_paths[name] = [group_transforms[group] for group in ancestry]
         material = overrides.get(name)
         if material is None:
             material = next((groups[group] for group in reversed(ancestry)
@@ -660,6 +666,10 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                                             for name, settings in members.tessellation.items())
                 objects.top_groups.update((names[name], f"{instance_name}__{group_name}")
                                           for name, group_name in members.top_groups.items())
+                objects.group_paths.update(
+                    (names[name], [dict(group, name=f"{instance_name}__{group['name']}")
+                                   for group in path])
+                    for name, path in members.group_paths.items())
                 materials.update((names[name], material) for name, material in member_materials.items())
                 frame["material_priority"].update((names[name], float("inf")) for name in member_materials)
             elif op == "group":
@@ -696,6 +706,9 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 frames.pop()
                 parent["objects"].update(objects)
                 parent["objects"].tessellation.update(objects.tessellation)
+                transform = {key: frame[key] for key in ("name", "scale", "euler", "position")}
+                parent["objects"].group_paths.update(
+                    (name, [transform, *objects.group_paths.get(name, [])]) for name in objects)
                 parent["objects"].top_groups.update(objects.top_groups)
                 if len(frames) == 1:
                     parent["objects"].top_groups.update((name, frame["name"]) for name in objects)
@@ -742,7 +755,15 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 if operands[0] & operands[1]:
                     raise ValueError("Boolean operands must not share group members")
                 consumed = operands[0] | operands[1]
-                source_top_groups = {objects.top_groups.get(name) for name in consumed}
+                paths = [objects.group_paths.get(name, []) for name in consumed]
+                common_path = []
+                for entries in zip(*paths):
+                    if any(entry != entries[0] for entry in entries[1:]):
+                        break
+                    # A group explicitly used as an operand is consumed.
+                    if entries[0]["name"] in args[1:]:
+                        break
+                    common_path.append(entries[0])
                 if args[0] in groups and args[0] not in args[1:]:
                     raise ValueError(f"output name already used by group: {args[0]}")
                 if args[0] in objects and args[0] not in consumed:
@@ -761,6 +782,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     frame["material_priority"].pop(name, None)
                     objects.tessellation.pop(name, None)
                     objects.top_groups.pop(name, None)
+                    objects.group_paths.pop(name, None)
                 for name, members in list(groups.items()):
                     if name in args[1:]:
                         del groups[name]
@@ -770,8 +792,9 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                         if contained:
                             members.add(args[0])
                 objects[args[0]] = fn(left, right)
-                if len(source_top_groups) == 1 and None not in source_top_groups:
-                    objects.top_groups[args[0]] = source_top_groups.pop()
+                objects.group_paths[args[0]] = common_path
+                if common_path:
+                    objects.top_groups[args[0]] = common_path[0]["name"]
             elif op == "faces":
                 if len(args) != 1 or args[0] not in objects:
                     raise ValueError("faces: existing solid name required")
@@ -1073,7 +1096,8 @@ def tessellate(objects, sm, chord: float = 0.08, angle: float = 20, materials=No
             raise ValueError("Mesh exceeds the 1 million vertex preview limit")
         output.append({"name": name, "positions": positions, "normals": normals,
                        "material": materials.get(name, normalize_material({})),
-                       "group": getattr(objects, "top_groups", {}).get(name, name)})
+                       "group": getattr(objects, "top_groups", {}).get(name, name),
+                       "groupPath": getattr(objects, "group_paths", {}).get(name, [])})
     return output
 
 
@@ -1092,9 +1116,58 @@ def _scaled_positions(positions, scale):
     return scaled
 
 
+def _group_quaternion(group):
+    """Native order: scale, rotate X, rotate Y, rotate Z, translate."""
+    x, y, z = [math.radians(v) / 2 for v in group["euler"]]
+    sx, sy, sz = math.sin(x), math.sin(y), math.sin(z)
+    cx, cy, cz = math.cos(x), math.cos(y), math.cos(z)
+    return (sx*cy*cz - cx*sy*sz, cx*sy*cz + sx*cy*sz,
+            cx*cy*sz - sx*sy*cz, cx*cy*cz + sx*sy*sz)
+
+
+def _group_rotation(group):
+    x, y, z, w = _group_quaternion(group)
+    return ((1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w)),
+            (2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w)),
+            (2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)))
+
+
+def _export_meshes(meshes):
+    """Keep preview/native geometry baked; recover local vertices only for export.
+
+    Inverting each ancestor separately preserves nested nonuniform scale and
+    rotation (including the shear their composition can produce). Normals use
+    the transpose of the forward linear map, then are normalized.
+    Legacy callers without groupPath retain their explicit mesh aggregation.
+    """
+    output = []
+    for mesh in meshes:
+        if "groupPath" not in mesh:
+            output.append(mesh)
+            continue
+        positions, normals = list(mesh["positions"]), list(mesh["normals"])
+        for group in mesh["groupPath"]:
+            rotation = _group_rotation(group)
+            factors, offset = group["scale"], group["position"]
+            for i in range(0, len(positions), 3):
+                point = [positions[i+j] - offset[j] for j in range(3)]
+                normal = normals[i:i+3]
+                positions[i:i+3] = [sum(rotation[k][j]*point[k] for k in range(3)) / factors[j]
+                                    for j in range(3)]
+                normals[i:i+3] = [sum(rotation[k][j]*normal[k] for k in range(3)) * factors[j]
+                                  for j in range(3)]
+        for i in range(0, len(normals), 3):
+            length = math.hypot(*normals[i:i+3])
+            if length:
+                normals[i:i+3] = [value / length for value in normals[i:i+3]]
+        output.append(dict(mesh, positions=positions, normals=normals, group=mesh["name"]))
+    return output
+
+
 def to_glb(meshes, scale=1):
-    """Encode one glTF mesh per top-level group, with material primitives."""
+    """Encode recursive group TRS and individually selectable solid meshes."""
     scale = _export_scale(scale)
+    meshes = _export_meshes(meshes)
     blob = bytearray()
     doc = {"asset": {"version": "2.0", "generator": "USD BRep Modeler"},
            "scene": 0, "scenes": [{"nodes": []}], "nodes": [], "meshes": [],
@@ -1130,7 +1203,7 @@ def to_glb(meshes, scale=1):
                 "roughnessFactor": material["roughness"]}, "doubleSided": True})
         group_name = mesh.get("group", mesh["name"])
         if group_name not in groups:
-            groups[group_name] = {"materials": {}, "names": []}
+            groups[group_name] = {"materials": {}, "names": [], "path": mesh.get("groupPath", [])}
         group = groups[group_name]
         group["materials"].setdefault(material_key, []).append(mesh)
         group["names"].append(mesh["name"])
@@ -1140,7 +1213,29 @@ def to_glb(meshes, scale=1):
         return [item for i in range(0, len(v), 3)
                 for item in (v[i], v[i+2], -v[i+1])]
 
+    group_nodes = {}
+
+    def parent_children(path):
+        children = doc["scenes"][0]["nodes"]
+        prefix = ()
+        for entry in path:
+            prefix += (entry["name"],)
+            if prefix not in group_nodes:
+                x, y, z, w = _group_quaternion(entry)
+                factors = entry["scale"]
+                node = {"name": entry["name"], "children": [],
+                        "translation": y_up(_scaled_positions(entry["position"], scale)),
+                        "rotation": [x, z, -y, w],
+                        "scale": [factors[0], factors[2], factors[1]]}
+                index = len(doc["nodes"])
+                group_nodes[prefix] = index
+                children.append(index)
+                doc["nodes"].append(node)
+            children = doc["nodes"][group_nodes[prefix]]["children"]
+        return children
+
     for group_name, group in groups.items():
+        children = parent_children(group["path"])
         primitives = []
         for material_key, members in group["materials"].items():
             positions, normals = [], []
@@ -1156,8 +1251,8 @@ def to_glb(meshes, scale=1):
         node = {"name": group_name, "mesh": index}
         if len(group["names"]) > 1:
             node["extras"] = {"sourceSolids": group["names"]}
+        children.append(len(doc["nodes"]))
         doc["nodes"].append(node)
-        doc["scenes"][0]["nodes"].append(index)
     doc["buffers"].append({"byteLength": len(blob)})
     js = json.dumps(doc, separators=(",", ":")).encode()
     js += b" " * (-len(js) % 4)
@@ -1169,8 +1264,9 @@ def to_glb(meshes, scale=1):
 
 
 def to_usdz(meshes, scale=1):
-    """Package preview triangles and PBR materials as a Z-up USD stage."""
+    """Package recursive Xforms and solid meshes as a Z-up USD stage."""
     scale = _export_scale(scale)
+    meshes = _export_meshes(meshes)
     def triples(values):
         if len(values) % 3 or not all(math.isfinite(float(v)) for v in values):
             raise ValueError("Mesh vectors must contain finite triples")
@@ -1209,7 +1305,9 @@ def to_usdz(meshes, scale=1):
         key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
         group_name = mesh.get("group", mesh["name"])
         if group_name not in groups:
-            groups[group_name] = {"positions": [], "normals": [], "names": [], "faces": {}}
+            groups[group_name] = {"positions": [], "normals": [], "names": [], "faces": {},
+                                  "path": mesh.get("groupPath", []),
+                                  "hierarchical": "groupPath" in mesh}
         group = groups[group_name]
         first_face = len(group["positions"]) // 9
         group["positions"].extend(_scaled_positions(positions, scale))
@@ -1217,14 +1315,17 @@ def to_usdz(meshes, scale=1):
         group["names"].append(mesh["name"])
         group["faces"].setdefault(key, []).extend(range(first_face, first_face + len(positions) // 9))
 
+    geometry_lines = lines
+    tree = {}
     for index, (group_name, group) in enumerate(groups.items()):
+        lines = []
         positions, normals = group["positions"], group["normals"]
         count = len(positions) // 3
         bounds = [(min(positions[i::3]), max(positions[i::3])) for i in range(3)]
         extent = triples([bounds[i][j] for j in range(2) for i in range(3)])
         names = group["names"]
         lines.extend([
-            f'        def Mesh "Mesh_{index}" (',
+            f'        def Mesh "{group_name if group["hierarchical"] else f"Mesh_{index}"}" (',
             '            prepend apiSchemas = ["MaterialBindingAPI"]',
             "        )", "        {",
             f'            custom string sourceName = {json.dumps(group_name, ensure_ascii=False)}',
@@ -1256,6 +1357,42 @@ def to_usdz(meshes, scale=1):
                     '            }',
                 ])
         lines.append("        }")
+        branch = tree
+        for entry in group["path"]:
+            branch = branch.setdefault(("group", entry["name"]), {"transform": entry, "children": {}})["children"]
+        branch[("mesh", group_name)] = {"lines": lines}
+
+    def emit_tree(branch, indent):
+        reserved = {name for _, name in branch}
+        for (_, name), item in branch.items():
+            if "lines" in item:
+                block = item["lines"]
+                # Part-internal groups are not exposed as text-language names;
+                # a legal sibling solid can therefore have the same name.
+                if ("group", name) in branch:
+                    prim_name = name + "__mesh"
+                    while prim_name in reserved:
+                        prim_name += "_"
+                    reserved.add(prim_name)
+                    block = [block[0].replace(f'"{name}"', f'"{prim_name}"', 1),
+                             f'            displayName = {json.dumps(name)}', *block[1:]]
+                geometry_lines.extend(indent + line[8:] for line in block)
+                continue
+            entry = item["transform"]
+            def vector(values):
+                return "(" + ", ".join(format(v, ".17g") for v in values) + ")"
+            geometry_lines.extend([
+                f'{indent}def Xform "{name}"', indent + "{",
+                f'{indent}    double3 xformOp:translate = {vector(_scaled_positions(entry["position"], scale))}',
+                f'{indent}    double3 xformOp:rotateXYZ = {vector(entry["euler"])}',
+                f'{indent}    double3 xformOp:scale = {vector(entry["scale"])}',
+                f'{indent}    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]',
+            ])
+            emit_tree(item["children"], indent + "    ")
+            geometry_lines.append(indent + "}")
+
+    emit_tree(tree, "        ")
+    lines = geometry_lines
     lines.extend(["    }", "}", ""])
     stage = "\n".join(lines).encode("utf-8")
     buffer = io.BytesIO()

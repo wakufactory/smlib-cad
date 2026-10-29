@@ -68,14 +68,17 @@ materials = {'assembly': {'baseColor': [1,0,0], 'metallic': 0.5}}
         data = to_glb(meshes)
         length = struct.unpack_from('<I', data, 12)[0]
         doc = json.loads(data[20:20 + length])
-        self.assertEqual([mesh['name'] for mesh in doc['meshes']], ['assembly', 'plain'])
-        self.assertEqual(len(doc['meshes'][0]['primitives']), 2)
-        self.assertEqual(doc['nodes'][0]['extras']['sourceSolids'], ['body', 'bolt'])
+        self.assertEqual([mesh['name'] for mesh in doc['meshes']], ['body', 'bolt', 'plain'])
+        nodes = {node['name']: node for node in doc['nodes']}
+        self.assertEqual(nodes['assembly']['translation'], [10, 0, 0])
+        self.assertEqual(nodes['assembly']['scale'], [2, 1, 1])
+        self.assertEqual(nodes['detail']['translation'], [0, 2, 0])
         with zipfile.ZipFile(io.BytesIO(to_usdz(meshes))) as archive:
             stage = archive.read('model.usda').decode()
-        self.assertEqual(stage.count('def Mesh '), 2)
-        self.assertEqual(stage.count('def GeomSubset '), 2)
-        self.assertIn('sourceName = "assembly"', stage)
+        self.assertEqual(stage.count('def Mesh '), 3)
+        self.assertEqual(stage.count('def GeomSubset '), 0)
+        self.assertIn('def Xform "assembly"', stage)
+        self.assertIn('def Xform "detail"', stage)
 
     def test_overrides_are_independent_of_dictionary_order(self):
         for overrides in (

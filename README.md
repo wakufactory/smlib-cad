@@ -106,7 +106,7 @@ make usdz
 make usdz MODEL=design.json USDZ=outputs/design.usdz
 ```
 
-USDZ はプレビュー・GLB と同じテッセレーション結果を Z-up の USD Mesh として保存します。GLB と同様に最上位の `group` ごとに 1 つのメッシュを作り、グループ内に複数の色・metallic・roughness がある場合は面の `GeomSubset` ごとに UsdPreviewSurface 材質を割り当てます。元の BRep や編集用のモデル定義は含まれません。USDZ は非圧縮で、テキスト形式の `model.usda` を格納するため、大きなモデルでは GLB よりファイルサイズが増えます。座標値には指定した保存時の倍率を掛け、USD上の単位は 1 = 1 m として記録します。
+USDZ はプレビュー・GLB と同じテッセレーション結果を Z-up の USD Mesh として保存します。入れ子の `Xform` で group 階層とローカル TRS を保持し、各 solid の個別メッシュに UsdPreviewSurface 材質を割り当てます。元の BRep や編集用のモデル定義は含まれません。USDZ は非圧縮で、テキスト形式の `model.usda` を格納するため、大きなモデルでは GLB よりファイルサイズが増えます。座標値には指定した保存時の倍率を掛け、USD上の単位は 1 = 1 m として記録します。
 
 門型トラスの統合例は `examples/truss_material_merged.json`、生成済みファイルは `outputs/truss_material_merged.glb` と `outputs/truss_material_merged.usdz` です。再生成は `make glb MODEL=examples/truss_material_merged.json GLB=outputs/truss_material_merged.glb` または `make usdz MODEL=examples/truss_material_merged.json USDZ=outputs/truss_material_merged.usdz` で行います。
 
@@ -120,7 +120,7 @@ USDZ はプレビュー・GLB と同じテッセレーション結果を Z-up �
 }
 ```
 
-GLB は保存時にも同じソースから再計算するため、プレビュー後に編集した場合は最新の内容が保存されます。GLB は glTF 標準の Y-up 座標へ変換します。GLB 保存時には最上位の `group` ごとに 1 つのメッシュを作り、その中の同じマテリアル（色・metallic・roughness）の部材の三角形を連結します。異なるマテリアルは同じメッシュ内の別プリミティブになります。最上位グループに属さない部材は個別メッシュのままです。GLB・USDZ ともメッシュデータの連結であり、Boolean の `union` は実行しません。部材間の境界面や重なった面は残り、保存後は個々の部材を別メッシュとして選択できません。元の部材名は GLB ノードの `extras.sourceSolids` と USDZ メッシュの `sourceSolids` に記録します。画面プレビューのメッシュ分割は変わりません。
+GLB は保存時にも同じソースから再計算するため、プレビュー後に編集した場合は最新の内容が保存されます。GLB・USDZ は入れ子の `group` 階層と各 group のローカル `scale`・`euler`・`position` を保持します。GLB では子ノードと TRS（回転は quaternion）、USDZ では入れ子の `Xform` として出力します。GLB は glTF 標準の Y-up 座標へ変換します。各 solid は所属 group のローカル座標の独立したメッシュとなり、名前と材質を保持します。export の単位倍率はメッシュ頂点と group の移動量の両方へ適用します。既存の形状計算・プレビュー・テッセレーションは変えず、書き出し時だけ group の変換を頂点・法線から取り除くため、階層の変換を適用した最終形状は従来と同じです。export のための Boolean union は実行しません。
 
 ### 編集内容の自動保存
 
@@ -381,7 +381,7 @@ cylinder hole 15 5 -1 2 12
 subtract result moved hole
 ```
 
-複数形状を含むグループは、参照時に中の形状をすべて結合して1つの BRep にしてから演算します。離れた形状も含められます。子グループや `use` で生成した形状も対象です。演算前の表示では個々の形状と材質を保持しますが、演算後は入力を消費して出力名の1形状になり、材質は `material result ...` で指定し直します。入力に指定したグループ名は消費されます。出力名にそのグループ名を指定した場合は、以後は形状名として扱います。
+複数形状を含むグループは、参照時に中の形状をすべて結合して1つの BRep にしてから演算します。離れた形状も含められます。子グループや `use` で生成した形状も対象です。演算前の表示では個々の形状と材質を保持しますが、演算後は入力を消費して出力名の1形状になり、材質は `material result ...` で指定し直します。Boolean の結果は、全入力 solid に共通する最も近い、消費されずに残る親 group に所属します。共通の group がなければルートに配置します。入力側の枝の変換は結果形状に焼き込み、共通の親とそれより上の TRS は保持します。結果自身の TRS は単位変換です。無関係な兄弟 solid は残り、空になった group は export から除かれます。元の枝への追従関係はなく、ソース再評価時に再計算します。入力に指定したグループ名は消費されます。出力名にそのグループ名を指定した場合は、以後は形状名として扱います。
 
 閉じた子グループ名も親スコープに公開されます。形状名とグループ名の衝突はエラーです。同じ形状を共有する左右の入力（親グループとその子、グループとそのメンバーなど）や、空のグループは指定できません。`part` 内のグループ名はその部品の評価内で使えます。`use` が外側に公開する名前は従来どおり完成形状の `配置名__形状名` です。
 
@@ -451,7 +451,7 @@ materials = {"post": {"baseColor": [1, 0.3, 0.1]}}
 
 形状名・グループ名は全体で一意な英数字・アンダースコアの識別子（先頭は英字またはアンダースコア）です。辞書のキーを名前に使い、変数名は使いません。同じ BRep を複数箇所に登録せず、配置ごとに新しい BRep を作ってください。`objects` を定義するとそれを出力として優先し、作業用変数は表示しません。`result = Group({...})` も使用でき、その最上位グループ名は `result` になります。`objects` がなく `result` が BRep の従来コードはそのまま動作し、`result` もなければ最後の BRep 変数を使います。
 
-GLB・USDZ は最上位グループごとに1メッシュへまとめ、異なる材質を保持します。グループ外の BRep は個別メッシュです。Pythonサンプルは `examples/python_groups.py` と読み込み用の `examples/python_groups.json` です。`make glb MODEL=examples/python_groups.json` と `make usdz MODEL=examples/python_groups.json` で再生成できます。
+GLB・USDZ は group 階層と各 group のローカル TRS を再帰的に保持します。各 BRep は個別メッシュとして所属 group の下に配置し、名前と材質を保持します。Pythonサンプルは `examples/python_groups.py` と読み込み用の `examples/python_groups.json` です。`make glb MODEL=examples/python_groups.json` と `make usdz MODEL=examples/python_groups.json` で再生成できます。
 
 追加プリミティブの Python 名は各テキスト命令に `create_` を付けたものです。例えば `sm.create_ellipsoid((0, 0, 0), 8, 5, 3)`、`sm.create_cone((0, 0, 0), 4, 0, 7)`、`sm.create_partial_torus((0, 0, 0), 6, 1, 0, 180)` と書けます。
 

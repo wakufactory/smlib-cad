@@ -654,7 +654,8 @@ class ModelerTests(unittest.TestCase):
         glb = to_glb(meshes)
         json_length = struct.unpack_from("<I", glb, 12)[0]
         doc = json.loads(glb[20:20 + json_length])
-        self.assertEqual(len(doc["meshes"][0]["primitives"]), 2)
+        self.assertEqual(len(doc["meshes"]), 4)
+        self.assertEqual(len(doc["materials"]), 2)
 
     def test_group_material_after_end_and_nested_priority(self):
         source = ("group outer\nbox plain 0 0 0 1 1 1\n"
@@ -675,7 +676,7 @@ class ModelerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Line 2: material: existing solid or group"):
             evaluate("box plain 0 0 0 1 1 1\nmaterial missing 1 0 0 0 0.5", "text", FakeBrep())
 
-    def test_glb_combines_top_level_group_without_boolean(self):
+    def test_glb_preserves_nested_groups_without_boolean(self):
         sm = FakeBrep()
         source = ("group assembly\n"
                   "box left 0 0 0 2 2 2\n"
@@ -690,12 +691,14 @@ class ModelerTests(unittest.TestCase):
         self.assertEqual(sm.booleans, [])
         self.assertEqual(len(meshes), 2)
         self.assertEqual([mesh["group"] for mesh in meshes], ["assembly", "assembly"])
-        self.assertEqual(len(doc["meshes"]), 1)
+        self.assertEqual(len(doc["meshes"]), 2)
         self.assertEqual(len(doc["materials"]), 1)
-        self.assertEqual(doc["nodes"][0]["name"], "assembly")
-        self.assertEqual(doc["nodes"][0]["extras"]["sourceSolids"], ["left", "right"])
-        position = doc["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
-        self.assertEqual(doc["accessors"][position]["count"],
+        nodes = {node["name"]: node for node in doc["nodes"]}
+        self.assertEqual([doc["nodes"][i]["name"] for i in nodes["assembly"]["children"]],
+                         ["left", "nested"])
+        self.assertEqual([doc["nodes"][i]["name"] for i in nodes["nested"]["children"]], ["right"])
+        self.assertEqual(sum(doc["accessors"][m["primitives"][0]["attributes"]["POSITION"]]["count"]
+                             for m in doc["meshes"]),
                          sum(len(mesh["positions"]) // 3 for mesh in meshes))
 
     def test_glb_keeps_top_level_groups_separate_with_shared_material(self):
@@ -706,11 +709,11 @@ class ModelerTests(unittest.TestCase):
         data = to_glb(tessellate(objects, FakeBrep(), materials=materials))
         json_length = struct.unpack_from("<I", data, 12)[0]
         doc = json.loads(data[20:20 + json_length])
-        self.assertEqual([node["name"] for node in doc["nodes"]], ["left", "right", "loose"])
+        self.assertEqual([node["name"] for node in doc["nodes"]], ["left", "a", "right", "b", "loose"])
         self.assertEqual(len(doc["meshes"]), 3)
         self.assertEqual(len(doc["materials"]), 1)
 
-    def test_glb_uses_material_primitives_inside_one_group(self):
+    def test_glb_keeps_solid_materials_inside_one_group(self):
         source = ("group assembly\nbox red 0 0 0 2 2 2\n"
                   "box blue 10 0 0 2 2 2\n"
                   "material red 1 0 0 0 0.5\n"
@@ -719,8 +722,8 @@ class ModelerTests(unittest.TestCase):
         data = to_glb(tessellate(objects, FakeBrep(), materials=materials))
         json_length = struct.unpack_from("<I", data, 12)[0]
         doc = json.loads(data[20:20 + json_length])
-        self.assertEqual(len(doc["meshes"]), 1)
-        self.assertEqual(len(doc["meshes"][0]["primitives"]), 2)
+        self.assertEqual(len(doc["meshes"]), 2)
+        self.assertEqual([m["primitives"][0]["material"] for m in doc["meshes"]], [0, 1])
         self.assertEqual(len(doc["materials"]), 2)
 
     def test_whole_solid_chamfer_and_fillet_commands(self):
