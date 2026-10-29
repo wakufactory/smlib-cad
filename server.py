@@ -5,14 +5,17 @@ from __future__ import annotations
 import argparse
 from collections import OrderedDict
 import ipaddress
+import io
 import json
 import secrets
 import ssl
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import traceback
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -65,7 +68,7 @@ class PreviewStore:
             return self.assets.get(token)
 
 
-def run_model_request(request: dict, path: str) -> bytes:
+def run_model_request(request: dict, path: str, metadata: dict | None = None) -> bytes:
     """Keep native kernel faults in a disposable process for each request."""
     with tempfile.TemporaryDirectory(prefix="cad-model-") as directory:
         work = Path(directory)
@@ -84,7 +87,20 @@ def run_model_request(request: dict, path: str) -> bytes:
         if completed.returncode or not output_path.exists():
             hint = "全体加工の幅/半径を小さくして再試行してください。" if request.get("finish") != "none" else "入力形状を確認してください。"
             raise ModelError(f"形状計算が異常終了しました。{hint}")
+        if metadata is not None:
+            metadata.update(json.loads(Path(str(output_path) + ".json").read_text(encoding="utf-8")))
         return output_path.read_bytes()
+
+
+def export_counts(data: bytes, usdz: bool) -> tuple[int, int]:
+    """Count meshes and materials in the file actually sent to the browser."""
+    if usdz:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            stage = archive.read("model.usda")
+        return stage.count(b'def Mesh "'), stage.count(b'def Material "')
+    json_length = struct.unpack_from("<I", data, 12)[0]
+    document = json.loads(data[20:20 + json_length])
+    return len(document.get("meshes", [])), len(document.get("materials", []))
 
 
 def allowed_host(host_header: str, bind_host: str, port: int) -> bool:
@@ -190,15 +206,21 @@ class Handler(BaseHTTPRequestHandler):
             source = request["source"]
             if not isinstance(source, str):
                 raise ValueError("source must be text")
-            data = run_model_request(request, self.path)
             if self.path == "/preview/usdz":
-                self._json(200, {"url": self.server.preview_store.put(data)})
-            elif self.path in ("/export", "/export/usdz"):
+                metadata = {}
+                data = run_model_request(request, self.path, metadata=metadata)
+                self._json(200, {"url": self.server.preview_store.put(data), **metadata})
+                return
+            data = run_model_request(request, self.path)
+            if self.path in ("/export", "/export/usdz"):
                 usdz = self.path == "/export/usdz"
+                mesh_count, material_count = export_counts(data, usdz)
                 self.send_response(200)
                 self.send_header("Content-Type", "model/vnd.usdz+zip" if usdz else "model/gltf-binary")
                 self.send_header("Content-Disposition", 'attachment; filename="model.usdz"' if usdz else 'attachment; filename="model.glb"')
                 self.send_header("Content-Length", str(len(data)))
+                self.send_header("X-Mesh-Count", str(mesh_count))
+                self.send_header("X-Material-Count", str(material_count))
                 self.end_headers()
                 self.wfile.write(data)
             else:

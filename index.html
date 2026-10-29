@@ -59,6 +59,10 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 #view-controls label,#grid-settings .grid-toggle{display:flex;align-items:center;gap:5px}
 #view-controls input[type="checkbox"],#grid-settings input[type="checkbox"]{margin:0;padding:0;accent-color:#57b7d9}
 #grid-settings [aria-invalid="true"]{border-color:#ff9b93}
+#object-tree-panel{border:1px solid #36516a;border-radius:6px;background:#101f2e;font-size:12px}
+#object-tree-panel summary{padding:8px 10px;cursor:pointer;font-weight:600}
+#object-tree{margin:0;padding:0 10px 10px;max-height:240px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;-webkit-user-select:text;user-select:text}
+#export-stats{font-size:12px;line-height:1.7;font-variant-numeric:tabular-nums;white-space:pre-line;color:#dbe8f0}
 #mesh-stats{flex-shrink:0;padding:8px 10px;border:1px solid #36516a;border-radius:6px;background:#152538;color:#dbe8f0;font-size:12px;line-height:1.7;font-variant-numeric:tabular-nums;white-space:pre-line}
 #hint{position:absolute;bottom:12px;left:12px;right:12px;font-size:11px;color:#a5bdc9;pointer-events:none}
 #usd-model{display:block;width:100%;height:100%;background-color:#0e1a26}
@@ -75,6 +79,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <div id="settings-content">
 <div id="mesh-stats" aria-live="polite">トライアングル数: —
 ソリッド数: —</div>
+<details id="object-tree-panel" open><summary>Object tree</summary><pre id="object-tree" tabindex="0" aria-live="polite" aria-label="プレビューのオブジェクト階層">プレビューで更新されます</pre></details>
 <details id="command-reference">
 <summary>テキストコマンド一覧</summary>
 <div class="command-list" tabindex="0" role="region" aria-label="テキストコマンド一覧">
@@ -137,6 +142,9 @@ subtract result body hole</pre>
 </div>
 <button class="primary" id="preview" disabled>プレビュー</button>
 <div class="row"><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
+<div id="export-stats" aria-live="polite" aria-label="直近の保存結果">直近の保存結果
+<span id="export-stats-glb">GLB: mesh数 — / material数 —</span>
+<span id="export-stats-usdz">USDZ: mesh数 — / material数 —</span></div>
 <div id="grid-settings" class="settings-group">
 <h2>グリッド表示</h2>
 <label class="grid-toggle"><input id="show-grid" type="checkbox" checked>グリッド点を表示</label>

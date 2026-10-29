@@ -176,6 +176,7 @@ assert.equal(elements['usd-model'].src, undefined);
 assert.equal(elements['usd-model'].hidden, true);
 assert.equal(elements['model-status'].hidden, true);
 assert.equal(elements['mesh-stats'].textContent, 'トライアングル数: 0\nソリッド数: 0');
+assert.equal(elements['object-tree'].textContent, 'オブジェクトはありません');
 assert.equal(elements.export.disabled, true);
 assert.equal(elements['export-usdz'].disabled, true);
 assert.equal(vm.runInContext('currentMeshes.length', context), 0);

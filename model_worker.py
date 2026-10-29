@@ -25,6 +25,12 @@ def main(request_path: str, output_path: str, error_path: str) -> None:
             data = to_glb(meshes, scale=request.get("exportScale", 1))
         else:
             data = json.dumps({"meshes": meshes, "log": log}).encode("utf-8")
+        if request["path"] == "/preview/usdz":
+            # Keep the USDZ response binary; pass small UI metadata separately.
+            metadata = {"objects": [
+                {"name": mesh["name"], "groupPath": [{"name": group["name"]}
+                 for group in mesh.get("groupPath", [])]} for mesh in meshes]}
+            Path(output_path + ".json").write_text(json.dumps(metadata), encoding="utf-8")
         Path(output_path).write_bytes(data)
     except Exception as exc:
         Path(error_path).write_text(json.dumps({"error": str(exc),

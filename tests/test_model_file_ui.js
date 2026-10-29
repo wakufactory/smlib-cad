@@ -22,7 +22,7 @@ const values = {
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
   [id, {value, disabled: false, labels: [{textContent: id}], checkValidity: () => true}]));
-for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'view-controls', 'show-axes', 'show-grid', 'usd-model', 'model-status', 'hint', 'example']) {
+for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'object-tree', 'mesh-stats', 'export-stats-glb', 'export-stats-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'view-controls', 'show-axes', 'show-grid', 'usd-model', 'model-status', 'hint', 'example']) {
   elements[id] = elements[id] || {value: '', disabled: false};
 }
 elements['preview-mode'].value = 'webgl';
@@ -48,11 +48,11 @@ const context = vm.createContext({
     if(options)requestBody=JSON.parse(options.body);
     if (allowExport && path === '/preview/usdz') {
       exportPath = path;
-      return {ok: true, json: async () => ({url: '/preview/assets/test.usdz'})};
+      return {ok: true, json: async () => ({url: '/preview/assets/test.usdz', objects: [{name:'body',groupPath:[{name:'assembly'}]}]})};
     }
     if (allowExport && (path === '/export' || path === '/export/usdz')) {
       exportPath = path;
-      return {ok: true, blob: async () => new Blob(['test'])};
+      return {ok: true, headers: new Map([['X-Mesh-Count', '3'], ['X-Material-Count', path === '/export' ? '2' : '1']]), blob: async () => new Blob(['test'])};
     }
     throw Error('No server request expected');
   }
@@ -117,15 +117,20 @@ for (const invalid of [
   assert.equal(exportPath, '/export');
   assert.equal(requestBody.exportScale, 2.5);
   assert.equal(downloadName, 'engine block.glb');
+  assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
+  assert.match(elements.message.textContent, /mesh数 3 \/ material数 2/);
   await elements['export-usdz'].onclick();
   assert.equal(exportPath, '/export/usdz');
   assert.equal(requestBody.exportScale, 2.5);
   assert.equal(downloadName, 'engine block.usdz');
+  assert.equal(elements['export-stats-usdz'].textContent, 'USDZ: mesh数 3 / material数 1');
+  assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   elements['export-scale'].value = '0';
   exportPath = undefined;
   await elements.export.onclick();
   assert.equal(exportPath, undefined);
   assert.match(elements.message.textContent, /座標倍率/);
+  assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   elements['export-scale'].value = '2.5';
   elements['file-name'].value = '  ';
   exportPath = undefined;
@@ -182,6 +187,7 @@ for (const invalid of [
   assert.equal(exportPath, '/preview/usdz', elements.message.textContent);
   assert.equal(requestBody.exportScale, 2.5);
   assert.equal(elements['usd-model'].src, '/preview/assets/test.usdz');
+  assert.equal(elements['object-tree'].textContent, '└─ assembly (group)\n   └─ body');
   assert.equal(elements.canvas.hidden, true);
   assert.equal(elements['usd-model'].hidden, false);
   assert.equal(elements['view-controls'].hidden, true);
@@ -221,5 +227,30 @@ for (const invalid of [
   assert.throws(()=>ModelFile.images([{...image,dataUrl:'https://example.com/image.png'}]));
   assert.throws(()=>ModelFile.images(Array(4).fill(image)));
   assert.throws(()=>ModelFile.chat({version:1,messages:[{role:'assistant',text:'x',images:[image]}]}));
+  // Update only on a successful, current preview; keep names as plain text.
+  context.preview=actualPreview;
+  context.show=()=>{};
+  const treeMeshes=[
+    {name:'body',groupPath:[{name:'assembly'}],positions:[]},
+    {name:'bolt',groupPath:[{name:'assembly'},{name:'detail'}],positions:[]},
+    {name:'loose<solid>',groupPath:[],positions:[]}
+  ];
+  context.request=async()=>({json:async()=>({meshes:treeMeshes})});
+  await actualPreview();
+  const tree='├─ assembly (group)\n│  ├─ body\n│  └─ detail (group)\n│     └─ bolt\n└─ loose<solid>';
+  assert.equal(elements['object-tree'].textContent,tree);
+  elements.source.value='edited but not previewed';
+  assert.equal(elements['object-tree'].textContent,tree);
+  context.request=async()=>{throw Error('calculation failed');};
+  await actualPreview();
+  assert.equal(elements['object-tree'].textContent,tree);
+  let finishOld;
+  context.request=()=>new Promise(resolve=>{finishOld=resolve;});
+  const oldPreview=actualPreview();
+  context.request=async()=>({json:async()=>({meshes:[{name:'newest',positions:[]}]})});
+  await actualPreview();
+  finishOld({json:async()=>({meshes:treeMeshes})});
+  await oldPreview;
+  assert.equal(elements['object-tree'].textContent,'└─ newest');
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

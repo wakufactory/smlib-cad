@@ -96,6 +96,27 @@ class ChatRouteTests(unittest.TestCase):
         handler.end_headers = lambda: None
         return handler
 
+    def test_export_headers_count_meshes_and_deduplicated_materials(self):
+        from modeler import evaluate, tessellate, to_glb, to_usdz
+        from test_modeler import FakeBrep
+        sm = FakeBrep()
+        objects, materials, _ = evaluate(
+            "group outer\ngroup inner\nbox a 0 0 0 1 1 1\nend\n"
+            "box b 2 0 0 1 1 1\nend\n", "text", sm)
+        meshes = tessellate(objects, sm, materials=materials)
+        for path, encode in (("/export", to_glb), ("/export/usdz", to_usdz)):
+            with self.subTest(path=path):
+                data = encode(meshes)
+                handler = self.handler(path, {"source": "test"})
+                headers = {}
+                handler.send_header = headers.__setitem__
+                with patch("server.run_model_request", return_value=data):
+                    handler.do_POST()
+                self.assertEqual(handler.responses, [200])
+                self.assertEqual(headers["X-Mesh-Count"], "2")
+                self.assertEqual(headers["X-Material-Count"], "1")
+                self.assertEqual(handler.wfile.getvalue(), data)
+
     def test_chat_routes_do_not_require_model_source_except_send(self):
         for action, method in (("login", "login_start"), ("send", "send"), ("poll", "poll"),
                                ("cancel", "cancel"), ("reset", "reset")):
@@ -129,13 +150,14 @@ class ChatRouteTests(unittest.TestCase):
 
 
 class ModelProcessTests(unittest.TestCase):
-    def post(self, request):
+    def post(self, request, path="/preview"):
         body = json.dumps(request).encode()
         handler = object.__new__(Handler)
-        handler.path = "/preview"
+        handler.path = path
         handler.headers = {"Host": "127.0.0.1:8765", "Content-Type": "application/json",
                            "Content-Length": str(len(body))}
-        handler.server = SimpleNamespace(server_address=("127.0.0.1", 8765), server_port=8765)
+        handler.server = SimpleNamespace(server_address=("127.0.0.1", 8765), server_port=8765,
+                                         preview_store=PreviewStore())
         handler.rfile = io.BytesIO(body)
         handler.wfile = io.BytesIO()
         responses = []
@@ -144,6 +166,18 @@ class ModelProcessTests(unittest.TestCase):
         handler.end_headers = lambda: None
         handler.do_POST()
         return responses[0], json.loads(handler.wfile.getvalue())
+
+    @unittest.skipUnless(importlib.util.find_spec("_smlib_core"), "native binding unavailable")
+    def test_usdz_preview_returns_names_without_mesh_arrays(self):
+        source = ("group assembly\ngroup detail\nbox body 0 0 0 2 2 2\nend\nend\n"
+                  "box plain 4 0 0 1 1 1")
+        status, result = self.post({"source": source, "mode": "text"}, "/preview/usdz")
+        self.assertEqual(status, 200)
+        self.assertTrue(result["url"].endswith(".usdz"))
+        self.assertEqual(result["objects"], [
+            {"name": "body", "groupPath": [{"name": "assembly"}, {"name": "detail"}]},
+            {"name": "plain", "groupPath": []},
+        ])
 
     def test_worker_crash_becomes_request_error(self):
         with patch("server.subprocess.run") as run:

@@ -334,6 +334,29 @@ async function request(path){
   if(!response.ok){const data=await response.json();throw Error(data.error||'Processing failed');}
   return response;
 }
+function updateObjectTree(objects){
+  const roots=new Map();
+  for(const object of objects){
+    let children=roots;
+    for(const group of object.groupPath||[]){
+      const key='group:'+group.name;
+      if(!children.has(key))children.set(key,{name:group.name,group:true,children:new Map()});
+      children=children.get(key).children;
+    }
+    children.set('solid:'+object.name,{name:object.name,group:false,children:new Map()});
+  }
+  const lines=[];
+  function append(children,prefix){
+    const nodes=[...children.values()];
+    nodes.forEach((node,index)=>{
+      const last=index===nodes.length-1;
+      lines.push(`${prefix}${last?'└─ ':'├─ '}${node.name}${node.group?' (group)':''}`);
+      append(node.children,prefix+(last?'   ':'│  '));
+    });
+  }
+  append(roots,'');
+  $('object-tree').textContent=lines.join('\n')||'オブジェクトはありません';
+}
 async function preview(){
   saveDraft();
   const requestId=++previewRequestId;
@@ -348,12 +371,14 @@ async function preview(){
       usdModel.src=data.url;usdModel.hidden=false;modelStatus.textContent='USDZ を読み込み中…';
       if(usdModel.ready)await usdModel.ready;
       if(requestId!==previewRequestId)return;
+      updateObjectTree(data.objects||[]);
       modelStatus.hidden=true;note('USDZ <model> プレビューを更新しました');
     }else{
       showPreviewMode();
       const data=await(await request('/preview')).json();
       if(requestId!==previewRequestId)return;
       currentMeshes=data.meshes;show(data.meshes);
+      updateObjectTree(data.meshes);
       const triangles=data.meshes.reduce((n,m)=>n+m.positions.length/9,0);
       $('mesh-stats').textContent=`トライアングル数: ${triangles.toLocaleString()}\nソリッド数: ${data.meshes.length.toLocaleString()}`;
       note(data.log || 'プレビューを更新しました');
@@ -372,8 +397,11 @@ function saveFileName(format){
 async function exportFile(format){
   const id=format==='usdz'?'export-usdz':'export';
   $(id).disabled=true;note(`${format.toUpperCase()} を生成中…`);
-  try{const name=saveFileName(format),blob=await(await request(format==='usdz'?'/export/usdz':'/export')).blob(),url=URL.createObjectURL(blob);
-    const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);note(`${name} (${(blob.size/1024).toFixed(1)} KiB) を保存しました`);
+  try{const name=saveFileName(format),response=await request(format==='usdz'?'/export/usdz':'/export'),blob=await response.blob(),url=URL.createObjectURL(blob);
+    const meshCount=response.headers.get('X-Mesh-Count'),materialCount=response.headers.get('X-Material-Count');
+    const counts=`mesh数 ${meshCount===null?'—':Number(meshCount).toLocaleString()} / material数 ${materialCount===null?'—':Number(materialCount).toLocaleString()}`;
+    const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('export-stats-'+format).textContent=`${format.toUpperCase()}: ${counts}`;
+    note(`${name} (${(blob.size/1024).toFixed(1)} KiB) を保存しました · ${counts}`);
   }catch(e){note(e.message,true);}finally{$(id).disabled=false;}
 }
 function modelDocument(){
@@ -448,6 +476,7 @@ function clearModel(){
   usdModel.removeAttribute('src');usdModel.hidden=true;
   modelStatus.textContent='';modelStatus.hidden=true;
   $('mesh-stats').textContent='トライアングル数: 0\nソリッド数: 0';
+  updateObjectTree([]);
   $('export').disabled=true;$('export-usdz').disabled=true;
   $('preview').disabled=!renderer;
   viewPointers.clear();
