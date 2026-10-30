@@ -19,6 +19,12 @@ MODEL = {
 
 
 class JsonToGlbTests(unittest.TestCase):
+    def test_saved_object_tree_is_optional_metadata_for_cli_export(self):
+        with_tree = {**MODEL, "objectTree": [
+            {"type": "group", "name": "previous_preview", "children": [
+                {"type": "solid", "name": "previous_solid"}]}]}
+        self.assertEqual(build_glb(with_tree, FakeBrep()), build_glb(MODEL, FakeBrep()))
+
     def test_document_parameters_reach_kernel_and_glb(self):
         sm = FakeBrep()
         glb = build_glb(MODEL, sm)

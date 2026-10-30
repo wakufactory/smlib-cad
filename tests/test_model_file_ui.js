@@ -252,5 +252,37 @@ for (const invalid of [
   finishOld({json:async()=>({meshes:treeMeshes})});
   await oldPreview;
   assert.equal(elements['object-tree'].textContent,'└─ newest');
+  context.updateObjectTree(treeMeshes);
+  for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
+  const expectedTree=[
+    {type:'group',name:'assembly',children:[
+      {type:'solid',name:'body'},
+      {type:'group',name:'detail',children:[{type:'solid',name:'bolt'}]}
+    ]},
+    {type:'solid',name:'loose<solid>'}
+  ];
+  elements['save-model'].onclick();
+  const treeJson=await savedBlob.text();
+  assert.deepEqual(JSON.parse(treeJson).objectTree,expectedTree);
+  assert.deepEqual(JSON.parse(JSON.stringify(ModelFile.parse(treeJson).objectTree)),expectedTree);
+  assert.equal(JSON.parse(treeJson).source,'edited but not previewed');
+  context.updateObjectTree([]);
+  context.preview=async()=>false; // Restore the saved tree even if recalculation fails.
+  await context.loadModel({size:treeJson.length,text:async()=>treeJson});
+  assert.equal(elements['object-tree'].textContent,tree);
+  const restoredSource=elements.source.value;
+  const invalidTree=JSON.stringify({...JSON.parse(treeJson),source:'do not apply',objectTree:[{type:'group',name:'bad',children:'bad'}]});
+  await context.loadModel({size:invalidTree.length,text:async()=>invalidTree});
+  assert.equal(elements.source.value,restoredSource);
+  assert.equal(elements['object-tree'].textContent,tree);
+  for(const invalid of [null,{},[{type:'unknown',name:'a'}],[{type:'solid',name:'a',children:[]}],[{type:'solid',name:''}]]){
+    assert.throws(()=>ModelFile.parse(JSON.stringify({...document,objectTree:invalid})));
+  }
+  const legacyJson=JSON.stringify(document);
+  await context.loadModel({size:legacyJson.length,text:async()=>legacyJson});
+  assert.equal(elements['object-tree'].textContent,'オブジェクトはありません');
+  for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
+  elements['save-model'].onclick();
+  assert.deepEqual(JSON.parse(await savedBlob.text()).objectTree,[]);
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

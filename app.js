@@ -40,6 +40,16 @@ const ModelFile = (() => {
     return {version:1, messages};
   }
 
+  function objectTree(nodes) {
+    if(!Array.isArray(nodes))throw Error('objectTree は配列にしてください');
+    return nodes.map(node=>{
+      if(!node || typeof node.name!=='string' || !node.name || !['group','solid'].includes(node.type))throw Error('objectTree のノードが不正です');
+      if(node.type==='group')return {type:'group',name:node.name,children:objectTree(node.children)};
+      if(node.children!==undefined)throw Error('solid に children は指定できません');
+      return {type:'solid',name:node.name};
+    });
+  }
+
   function validate(document) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('モデルのJSONオブジェクトが必要です');
     if (document.format !== 'smlib-model' || document.version !== 1 || !['text', 'python'].includes(document.mode)) {
@@ -53,6 +63,7 @@ const ModelFile = (() => {
     return {
       format: 'smlib-model', version: 1, mode: document.mode, source: document.source,
       ...(document.chat === undefined ? {} : {chat:chat(document.chat)}),
+      ...(document.objectTree === undefined ? {} : {objectTree:objectTree(document.objectTree)}),
       parameters: {
         chord: number(p.chord, '曲面精度', 0.001, 2),
         angle: number(p.angle, '角度条件', 1, 90),
@@ -63,7 +74,7 @@ const ModelFile = (() => {
     };
   }
 
-  return { validate, chat, images, exportScale, parse: json => validate(JSON.parse(json)) };
+  return { validate, chat, images, exportScale, objectTree, parse: json => validate(JSON.parse(json)) };
 })();
 
 const $ = id => document.getElementById(id);
@@ -95,6 +106,7 @@ let THREE, renderer, scene, camera, perspectiveCamera, orthographicCamera, camer
 let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
 let previewFailure = null;
+let currentObjectTree = [];
 const cameraLightDirection = [-0.6, 0.8, 0.8]; // left, up, toward viewer
 
 function note(text, error = false) { message.textContent = text; message.style.color = error ? '#ff9b93' : '#9dd9c5'; }
@@ -345,18 +357,27 @@ function updateObjectTree(objects){
     }
     children.set('solid:'+object.name,{name:object.name,group:false,children:new Map()});
   }
+  function nodes(children){
+    return [...children.values()].map(node=>node.group
+      ? {type:'group',name:node.name,children:nodes(node.children)}
+      : {type:'solid',name:node.name});
+  }
+  renderObjectTree(nodes(roots));
+}
+function renderObjectTree(nodes){
+  currentObjectTree=ModelFile.objectTree(nodes);
   const lines=[];
   function append(children,prefix){
-    const nodes=[...children.values()];
-    nodes.forEach((node,index)=>{
-      const last=index===nodes.length-1;
-      lines.push(`${prefix}${last?'└─ ':'├─ '}${node.name}${node.group?' (group)':''}`);
-      append(node.children,prefix+(last?'   ':'│  '));
+    children.forEach((node,index)=>{
+      const last=index===children.length-1;
+      lines.push(`${prefix}${last?'└─ ':'├─ '}${node.name}${node.type==='group'?' (group)':''}`);
+      if(node.type==='group')append(node.children,prefix+(last?'   ':'│  '));
     });
   }
-  append(roots,'');
+  append(currentObjectTree,'');
   $('object-tree').textContent=lines.join('\n')||'オブジェクトはありません';
 }
+
 async function preview(){
   saveDraft();
   const requestId=++previewRequestId;
@@ -410,6 +431,7 @@ function modelDocument(){
   }
   return ModelFile.validate({
     format:'smlib-model',version:1,mode:$('mode').value,source:$('source').value,
+    objectTree:currentObjectTree,
     parameters:{chord:Number($('chord').value),angle:Number($('angle').value),
       finish:$('finish').value,finishSize:Number($('finish-size').value),exportScale:Number($('export-scale').value)}
   });
@@ -441,6 +463,7 @@ async function loadModel(file){
     $('finish-size').disabled=p.finish==='none';$('save-model').disabled=false;
     $('export').disabled=true;$('export-usdz').disabled=true;
     globalThis.ModelChat?.restore(data.chat);
+    renderObjectTree(data.objectTree||[]);
     previewFailure=null;
   }catch(e){note(`JSONを読み込めません: ${e.message}`,true);return;}
   finally{$('model-file').value='';}
