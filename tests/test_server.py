@@ -186,12 +186,12 @@ class ModelProcessTests(unittest.TestCase):
                 run_model_request({"source": "box body 0 0 0 10 10 10",
                                    "mode": "text", "finish": "chamfer", "finishSize": 10}, "/preview")
 
-    def test_worker_timeout_returns_error_after_ten_seconds(self):
-        with patch("server.subprocess.run", side_effect=subprocess.TimeoutExpired("worker", 10)) as run:
-            status, failure = self.post({"source": "import time; time.sleep(15)", "mode": "python"})
+    def test_worker_timeout_returns_error_after_sixty_seconds(self):
+        with patch("server.subprocess.run", side_effect=subprocess.TimeoutExpired("worker", 60)) as run:
+            status, failure = self.post({"source": "import time; time.sleep(65)", "mode": "python"})
         self.assertEqual(status, 400)
-        self.assertIn("10秒以内", failure["error"])
-        self.assertEqual(run.call_args.kwargs["timeout"], 10)
+        self.assertIn("60秒以内", failure["error"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 60)
 
     @unittest.skipUnless(importlib.util.find_spec("_smlib_core"), "native binding unavailable")
     def test_bad_finish_does_not_prevent_next_preview(self):

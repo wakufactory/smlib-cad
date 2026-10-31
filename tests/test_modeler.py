@@ -64,6 +64,114 @@ class FakeBrep:
 
 
 class ModelerTests(unittest.TestCase):
+    def test_include_moves_group_and_preserves_settings(self):
+        sm = FakeBrep()
+        objects, materials, _ = evaluate('''group child
+position 3 0 0
+group detail
+box a 0 0 0 1 1 1
+tessellation a 0.01 5
+material detail 1 0 0 0 0.4
+end
+box b 0 0 0 1 1 1
+end
+group parent
+position 10 0 0
+include child
+material parent 0 1 0 0 0.5
+end
+material child 0 0 1 0 0.6
+''', 'text', sm)
+        self.assertEqual(set(objects), {'a', 'b'})
+        self.assertEqual([g['name'] for g in objects.group_paths['a']], ['parent', 'child', 'detail'])
+        self.assertEqual(objects.top_groups, {'a': 'parent', 'b': 'parent'})
+        self.assertEqual(objects.tessellation['a'], (0.01, 5))
+        self.assertEqual(materials['a']['baseColor'], [1, 0, 0])
+        self.assertEqual(materials['b']['baseColor'], [0, 0, 1])
+        self.assertEqual(sum(t[0] is objects['a'] for t in sm.transforms), 3)
+
+    def test_include_can_move_again_and_use_group_boolean(self):
+        source = '''group a
+box body 0 0 0 2 2 2
+group empty
+end
+end
+group b
+include a
+end
+group c
+include b
+sphere cutter 0 0 0 1
+subtract result a cutter
+end
+'''
+        objects, _, _ = evaluate(source, 'text', FakeBrep())
+        self.assertEqual(set(objects), {'result'})
+        self.assertEqual([g['name'] for g in objects.group_paths['result']], ['c'])
+
+    def test_include_from_open_ancestor_matches_inline_nesting(self):
+        inline = '''group outer
+position 5 0 0
+group middle
+position 2 0 0
+group child
+position 1 0 0
+box body 0 0 0 1 1 1
+end
+end
+end'''
+        referenced = '''group outer
+position 5 0 0
+group child
+position 1 0 0
+box body 0 0 0 1 1 1
+end
+group middle
+position 2 0 0
+include child
+end
+end'''
+        results = []
+        for source in (inline, referenced):
+            sm = FakeBrep()
+            objects, _, _ = evaluate(source, 'text', sm)
+            results.append((objects.group_paths, objects.top_groups,
+                            [transform[1:] for transform in sm.transforms]))
+        self.assertEqual(results[0], results[1])
+
+    def test_include_in_parts_loops_and_hidden_groups(self):
+        source = '''part p
+group child
+invisible
+box body 0 0 0 1 1 1
+end
+group parent
+include child
+end
+end
+for i in range(2)
+use p item_${i}
+end
+'''
+        objects, _, _ = evaluate(source, 'text', FakeBrep())
+        self.assertEqual(set(objects), {'item_0__body', 'item_1__body'})
+        self.assertEqual(tessellate(objects, FakeBrep()), [])
+
+    def test_include_rejects_invalid_references_with_line_numbers(self):
+        cases = [
+            ('include a', 'inside a group required'),
+            ('group a\ninclude a\nend', 'cannot include an open group'),
+            ('group a\ngroup b\ninclude a\nend\nend', 'cannot include an open group'),
+            ('group a\ninclude missing\nend', 'unknown group'),
+            ('group a\nbox s 0 0 0 1 1 1\ninclude s\nend', 'unknown group'),
+            ('group a\nend\ngroup b\ninclude a\ninclude a\nend', 'already belongs'),
+            ('group a\ngroup b\nend\nend\ngroup c\ninclude b\nend', 'directly inside an open scope'),
+            ('group a\nbox s 0 0 0 1 1 1\nend\ngroup b\nbox s 0 0 0 1 1 1\ninclude a\nend', 'duplicate'),
+        ]
+        for source, message in cases:
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, f'Line [0-9]+: .*{message}'):
+                evaluate(source, 'text', FakeBrep())
+
     def test_invisible_group_computes_solids_but_skips_meshes(self):
         from unittest.mock import patch
 

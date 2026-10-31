@@ -205,7 +205,22 @@ box b 0 0 0 4 4 4
 end
 end
 subtract result a b'''
-        cases = [(source, 'none'), (source, 'fillet')]
+        # Defining detail separately and moving it must preserve the same
+        # nested transforms through both exporters, including nonuniform scale.
+        referenced = '''group detail
+scale 0.8 1.7 1.2
+euler -31 11 42
+position -2 4 6
+box body 1 2 3 4 5 6
+end
+group assembly
+scale 2 0.7 1.5
+euler 23 37 -19
+position 10 -7 3
+include detail
+sphere ball 0 0 0 1
+end'''
+        cases = [(source, 'none'), (source, 'fillet'), (referenced, 'none')]
         for op in ('union', 'subtract', 'intersect'):
             closed = boolean_source.replace('subtract result a b', f'{op} result left right')
             opened = closed.replace(f'end\n{op} result', f'{op} result') + '\nend'

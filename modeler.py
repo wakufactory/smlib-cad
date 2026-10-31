@@ -561,7 +561,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
     commands = _expand_commands(_extract_parts(records, parts, bool(_stack)),
                                 {} if _variables is None else _variables, counter)
     frames = [{"name": None, "line": 0, "objects": SolidObjects(), "materials": {}, "material_priority": {},
-               "profiles": {}, "groups": {}, "group_depths": {}, "depth": 0,
+               "profiles": {}, "groups": {}, "group_depths": {}, "group_parents": {}, "depth": 0,
                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
                "position": (0.0, 0.0, 0.0)}]
     profile_block = None
@@ -677,13 +677,60 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     for name, path in members.group_paths.items())
                 materials.update((names[name], material) for name, material in member_materials.items())
                 frame["material_priority"].update((names[name], float("inf")) for name in member_materials)
+            elif op == "include":
+                if len(frames) == 1 or len(args) != 1 or not _IDENTIFIER.fullmatch(args[0]):
+                    raise ValueError("include: one existing group name inside a group required")
+                name = args[0]
+                if any(scope["name"] == name for scope in frames):
+                    raise ValueError(f"include: cannot include an open group: {name}")
+                if name in groups:
+                    raise ValueError(f"include: group already belongs to this group: {name}")
+                owner = next((scope for scope in reversed(frames[:-1]) if name in scope["groups"]), None)
+                if owner is None:
+                    raise ValueError(f"include: unknown group: {name}")
+                if owner["group_parents"].get(name) is not None:
+                    raise ValueError(f"include: group must be directly inside an open scope: {name}")
+                # Move the completed subtree. Its local transforms are already
+                # baked into the BReps; the new parent's transform runs at end.
+                moved_groups = {name}
+                for candidate in owner["groups"]:
+                    ancestor = owner["group_parents"].get(candidate)
+                    while ancestor is not None:
+                        if ancestor == name:
+                            moved_groups.add(candidate)
+                            break
+                        ancestor = owner["group_parents"].get(ancestor)
+                members = owner["groups"][name]
+                occupied = set(objects) | set(groups) | {scope["name"] for scope in frames[1:]}
+                collisions = (members | moved_groups) & occupied
+                if collisions:
+                    raise ValueError(f"include: duplicate solid or group name: {', '.join(sorted(collisions))}")
+                depth_delta = frame["depth"] - owner["depth"]
+                source_objects = owner["objects"]
+                for member in list(source_objects):
+                    if member not in members:
+                        continue
+                    objects[member] = source_objects.pop(member)
+                    for field in ("tessellation", "group_paths"):
+                        source_values = getattr(source_objects, field)
+                        if member in source_values:
+                            getattr(objects, field)[member] = source_values.pop(member)
+                    source_objects.top_groups.pop(member, None)
+                    if member in owner["materials"]:
+                        materials[member] = owner["materials"].pop(member)
+                    if member in owner["material_priority"]:
+                        frame["material_priority"][member] = owner["material_priority"].pop(member) + depth_delta
+                for group in moved_groups:
+                    groups[group] = owner["groups"].pop(group)
+                    frame["group_depths"][group] = owner["group_depths"].pop(group) + depth_delta
+                    frame["group_parents"][group] = owner["group_parents"].pop(group)
             elif op == "group":
                 if len(args) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
                     raise ValueError("group: one valid group name required")
                 if args[0] in objects or args[0] in groups:
                     raise ValueError(f"duplicate group name: {args[0]}")
                 frames.append({"name": args[0], "line": line_number, "objects": SolidObjects(), "materials": {},
-                               "material_priority": {}, "profiles": {}, "groups": {}, "group_depths": {},
+                               "material_priority": {}, "profiles": {}, "groups": {}, "group_depths": {}, "group_parents": {},
                                "depth": len(frames), "group_material": None,
                                "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
                                "position": (0.0, 0.0, 0.0)})
@@ -725,6 +772,10 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 parent["groups"][frame["name"]] = set(objects)
                 parent["group_depths"].update(frame["group_depths"])
                 parent["group_depths"][frame["name"]] = frame["depth"]
+                parent["group_parents"].update(
+                    (name, ancestor if ancestor is not None else frame["name"])
+                    for name, ancestor in frame["group_parents"].items() if name in groups)
+                parent["group_parents"][frame["name"]] = None
             elif op == "invisible":
                 if len(frames) == 1 or args:
                     raise ValueError("invisible: no arguments inside a group required")
