@@ -64,6 +64,60 @@ class FakeBrep:
 
 
 class ModelerTests(unittest.TestCase):
+    def test_invisible_group_computes_solids_but_skips_meshes(self):
+        from unittest.mock import patch
+
+        sm = FakeBrep()
+        source = ("group hidden\nposition 4 0 0\n"
+                  "box a 0 0 0 2 2 2\nbox b 1 0 0 2 2 2\n"
+                  "union combined a b\n"
+                  "group child\nbox nested 0 0 0 1 1 1\nend\n"
+                  "invisible\nend\nbox shown 0 0 0 1 1 1")
+        objects, materials, _ = evaluate(source, "text", sm)
+        self.assertEqual(set(objects), {"combined", "nested", "shown"})
+        self.assertEqual(len(sm.booleans), 1)
+        self.assertIn((objects["combined"], (1, 1, 1), (0, 0, 0), (4, 0, 0)), sm.transforms)
+        with patch.object(sm, "circular_fillet", wraps=sm.circular_fillet) as finish:
+            apply_finish(objects, sm, "fillet", 0.1)
+        self.assertEqual([call.args[0] for call in finish.call_args_list], list(objects.values()))
+        with patch.object(sm, "tessellate", wraps=sm.tessellate) as render:
+            meshes = tessellate(objects, sm, materials=materials)
+        self.assertEqual([mesh["name"] for mesh in meshes], ["shown"])
+        render.assert_called_once()
+        self.assertIs(render.call_args.args[0], objects["shown"])
+        data = to_glb(meshes)
+        length = struct.unpack_from("<I", data, 12)[0]
+        self.assertEqual([m["name"] for m in json.loads(data[20:20 + length])["meshes"]], ["shown"])
+
+    def test_invisible_nested_group_and_part_instances(self):
+        source = ("part p\ngroup helper\nbox a 0 0 0 1 1 1\ninvisible\nend\nend\n"
+                  "group parent\nuse p first\nuse p second\n"
+                  "box shown 0 0 0 1 1 1\nend")
+        objects, _, _ = evaluate(source, "text", FakeBrep())
+        self.assertEqual(set(objects), {"first__a", "second__a", "shown"})
+        self.assertEqual([m["name"] for m in tessellate(objects, FakeBrep())], ["shown"])
+
+    def test_invisible_boolean_result_uses_surviving_parent_visibility(self):
+        for operand in ("helper", "tool"):
+            source = ("group helper\ninvisible\nbox tool 0 0 0 1 1 1\nend\n"
+                      f"box body 0 0 0 2 2 2\nsubtract result body {operand}")
+            sm = FakeBrep()
+            objects, _, _ = evaluate(source, "text", sm)
+            self.assertEqual(len(sm.booleans), 1)
+            self.assertEqual([m["name"] for m in tessellate(objects, sm)], ["result"])
+        source = ("group hidden\ninvisible\n"
+                  "group a\nbox left 0 0 0 1 1 1\nend\n"
+                  "group b\nbox right 0 0 0 1 1 1\nend\nend\n"
+                  "union result a b")
+        objects, _, _ = evaluate(source, "text", FakeBrep())
+        self.assertIn("result", objects)
+        self.assertEqual(tessellate(objects, FakeBrep()), [])
+
+    def test_invisible_requires_group_and_no_arguments(self):
+        for source in ("invisible", "group g\ninvisible true\nend"):
+            with self.assertRaisesRegex(ValueError, "invisible: no arguments inside a group required"):
+                evaluate(source, "text", FakeBrep())
+
     def test_text_line_continuation(self):
         slash = "\\"
         sm = FakeBrep()

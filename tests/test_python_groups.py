@@ -28,6 +28,54 @@ objects = {'assembly': Group({
 
 
 class PythonGroupTests(unittest.TestCase):
+    def test_invisible_groups_keep_computed_solids_and_filter_both_exports(self):
+        for source in (SOURCE.replace("position=(0, 0, 2)", "position=(0, 0, 2), invisible=True"),
+                       SOURCE.replace("position=(10, 0, 0)", "position=(10, 0, 0), invisible=True")):
+            sm = FakeBrep()
+            objects, materials, _ = evaluate(source, 'python', sm)
+            self.assertEqual(set(objects), {'body', 'bolt', 'plain'})
+            self.assertEqual(len(sm.transforms), 3)
+            meshes = tessellate(objects, sm, materials=materials)
+            names = [m['name'] for m in meshes]
+            self.assertNotIn('bolt', names)
+            self.assertIn('plain', names)
+            data = to_glb(meshes)
+            length = struct.unpack_from('<I', data, 12)[0]
+            self.assertEqual([m['name'] for m in json.loads(data[20:20 + length])['meshes']], names)
+            with zipfile.ZipFile(io.BytesIO(to_usdz(meshes))) as archive:
+                stage = archive.read('model.usda').decode()
+            self.assertEqual(stage.count('def Mesh '), len(names))
+            self.assertNotIn('def Mesh "bolt"', stage)
+
+    def test_all_invisible_is_an_empty_render(self):
+        source = "objects = {'g': Group({'a': sm.create_box((0,0,0),1,1,1)}, invisible=True)}"
+        objects, _, _ = evaluate(source, 'python', FakeBrep())
+        self.assertIn('a', objects)
+        meshes = tessellate(objects, FakeBrep())
+        self.assertEqual(meshes, [])
+        data = to_glb(meshes)
+        self.assertEqual(data[:4], b'glTF')
+        self.assertEqual(struct.unpack_from('<I', data, 8)[0], len(data))
+        length = struct.unpack_from('<I', data, 12)[0]
+        doc = json.loads(data[20:20 + length])
+        self.assertNotIn('buffers', doc)
+        self.assertEqual(doc['scenes'], [{}])
+        with zipfile.ZipFile(io.BytesIO(to_usdz(meshes))) as archive:
+            self.assertNotIn('def Mesh ', archive.read('model.usda').decode())
+
+    @unittest.skipIf(native_sm is None, '_smlib_core has not been built for this Python')
+    def test_native_invisible_boolean_and_hidden_tool(self):
+        source = ('group helper\ninvisible\nposition 1 0 0\n'
+                  'box a 0 0 0 2 2 2\nbox b 1 0 0 2 2 2\n'
+                  'union tool a b\nend\nbox body 0 0 0 5 5 5\n')
+        objects, _, _ = evaluate(source, 'text', native_sm)
+        self.assertEqual(set(objects), {'tool', 'body'})
+        self.assertTrue(native_sm.face_info(objects['tool']))
+        self.assertEqual([m['name'] for m in tessellate(objects, native_sm)], ['body'])
+        objects, _, _ = evaluate(source + 'subtract result body helper', 'text', native_sm)
+        self.assertEqual(set(objects), {'result'})
+        self.assertEqual([m['name'] for m in tessellate(objects, native_sm)], ['result'])
+
     @unittest.skipIf(native_sm is None, '_smlib_core has not been built for this Python')
     def test_native_nested_groups_match_text_geometry(self):
         python = """
@@ -104,6 +152,7 @@ materials = {'assembly': {'baseColor': [1,0,0], 'metallic': 0.5}}
             "objects = {'a': a, 'b': a}", "objects = {'g': Group({'x': 3})}",
             "objects = {'g': Group({'g': a})}",
             "objects = {'g': Group({'a': a}, scale=(0,1,1))}",
+            "objects = {'g': Group({'a': a}, invisible='true')}",
             "objects = {'g': Group({'a': a}, position=(0,0,float('nan')))}",
             "objects = {'g': Group({'a': a}, material={'metallic': 2})}",
             "objects = {'g': Group({'a': a})}\nmaterials = {'missing': {}}",

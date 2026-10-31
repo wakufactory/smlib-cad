@@ -52,6 +52,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `fn` | `fn 名前(引数, ...) = 式` で数値を返す計算関数を定義 |
 | `use` | `use 部品名 [配置名]` で部品を新しく生成する |
 | `group` / `end` | `group 名前` から `end` までをローカル座標のグループにする。入れ子可 |
+| `invisible` | group 内に引数なしで指定し、子グループを含めて非表示にする。ソリッド計算は実行する |
 | `scale` | グループ内で `scale sx sy sz`（各軸の正の倍率） |
 | `euler` | グループ内で `euler rx ry rz`（度数） |
 | `position` | グループ内で `position x y z`（親座標での移動） |
@@ -212,6 +213,19 @@ Python の詳細設定は `extended_offset=True`（凸部の隣接面を延長�
 
 `group 名前` から `end` までの形状と Boolean 結果をまとめて変換できます。グループの原点はローカル座標 `(0, 0, 0)` です。`scale`、`euler`、`position` はグループの設定値であり、記述位置にかかわらずそのグループ内の完成形状すべてに適用します。同じ項目を複数回書いた場合は最後の値を使います。省略値はそれぞれ `1 1 1`、`0 0 0`、`0 0 0` です。
 
+グループ内に引数なしの `invisible` を書くと、記述位置にかかわらずグループ全体（子グループを含む）を非表示にします。BRep の作成・変換・Boolean・仕上げは通常どおり計算し、非表示の形状も演算の入力に使えます。テッセレーションは省略し、WebGL／USDZ プレビューと GLB／USDZ 書き出しには含めません。Boolean の結果は所属する親 group の表示設定に従い、非表示の入力を使っても、結果がその group の外に配置されれば表示されます。
+
+```text
+group helper
+  invisible
+  box tool 0 0 0 2 2 2
+end
+box body 0 0 0 5 5 5
+subtract result body helper
+```
+
+この例では `helper` のソリッドを計算して切り抜きに使い、ルートにできた `result` を表示します。
+
 ```text
 group assembly
   position 20 0 0
@@ -326,7 +340,7 @@ objects = {
 materials = {"post": {"baseColor": [1, 0.3, 0.1]}}
 ```
 
-`Group(objects, *, material=None, scale=(1,1,1), euler=(0,0,0), position=(0,0,0))` は入れ子にできます。子の変換後、親の変換を適用し、各段は scale → X/Y/Z Euler回転（度）→ position の順です。scale は各成分が正の有限数、euler・position は有限数3個です。変換は評価時に完成 BRep へ適用します。Boolean はグループ化の前に BRep 同士で実行してください。`Group` 自体は Boolean の引数にはできません。
+`Group(objects, *, material=None, scale=(1,1,1), euler=(0,0,0), position=(0,0,0), invisible=False)` は入れ子にできます。子の変換後、親の変換を適用し、各段は scale → X/Y/Z Euler回転（度）→ position の順です。scale は各成分が正の有限数、euler・position は有限数3個です。変換は評価時に完成 BRep へ適用します。Boolean はグループ化の前に BRep 同士で実行してください。`Group` 自体は Boolean の引数にはできません。`invisible=True` を指定すると、子グループを含むソリッドの計算を行いつつ、プレビューと GLB／USDZ の描画出力から除外します。値は bool で指定します。
 
 材質の優先順は形状への `materials` 指定 → 最も近い子グループ → 親グループです。`materials` には形状名とグループ名の両方を指定でき、同じグループの `material=` を置き換えます。辞書の記述順には依存しません。材質はプロパティ単位ではなく材質全体を置き換え、省略プロパティは既定値になります。プレビュー、GLB、USDZ に共通で反映されます。
 

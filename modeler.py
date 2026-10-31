@@ -440,12 +440,13 @@ class Group:
     """
 
     def __init__(self, objects, *, material=None, scale=(1, 1, 1),
-                 euler=(0, 0, 0), position=(0, 0, 0)):
+                 euler=(0, 0, 0), position=(0, 0, 0), invisible=False):
         self.objects = objects
         self.material = material
         self.scale = scale
         self.euler = euler
         self.position = position
+        self.invisible = invisible
 
 
 def _python_objects(roots, materials, sm):
@@ -483,6 +484,10 @@ def _python_objects(roots, materials, sm):
                                   for field in ("scale", "euler", "position"))
                 group_transforms[name] = dict(name=name, scale=transform[0],
                                               euler=transform[1], position=transform[2])
+                if not isinstance(value.invisible, bool):
+                    raise ValueError("group invisible must be a boolean")
+                if value.invisible:
+                    group_transforms[name]["invisible"] = True
                 groups[name] = (overrides.get(name) if name in overrides else
                                 normalize_material(value.material) if value.material is not None else None)
                 active.add(id(value))
@@ -707,6 +712,8 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 parent["objects"].update(objects)
                 parent["objects"].tessellation.update(objects.tessellation)
                 transform = {key: frame[key] for key in ("name", "scale", "euler", "position")}
+                if frame.get("invisible", False):
+                    transform["invisible"] = True
                 parent["objects"].group_paths.update(
                     (name, [transform, *objects.group_paths.get(name, [])]) for name in objects)
                 parent["objects"].top_groups.update(objects.top_groups)
@@ -718,6 +725,10 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 parent["groups"][frame["name"]] = set(objects)
                 parent["group_depths"].update(frame["group_depths"])
                 parent["group_depths"][frame["name"]] = frame["depth"]
+            elif op == "invisible":
+                if len(frames) == 1 or args:
+                    raise ValueError("invisible: no arguments inside a group required")
+                frame["invisible"] = True
             elif op in ("scale", "euler", "position"):
                 if len(frames) == 1 or len(args) != 3:
                     raise ValueError(f"{op}: three numbers inside a group required")
@@ -1076,6 +1087,9 @@ def tessellate(objects, sm, chord: float = 0.08, angle: float = 20, materials=No
     materials = normalize_materials({} if materials is None else materials, objects)
     output = []
     for name, solid in objects.items():
+        if any(group.get("invisible", False)
+               for group in getattr(objects, "group_paths", {}).get(name, [])):
+            continue
         local_chord, local_angle = getattr(objects, "tessellation", {}).get(name, (None, None))
         effective_chord = chord if local_chord is None else local_chord
         effective_angle = angle if local_angle is None else local_angle
@@ -1168,6 +1182,13 @@ def to_glb(meshes, scale=1):
     """Encode recursive group TRS and individually selectable solid meshes."""
     scale = _export_scale(scale)
     meshes = _export_meshes(meshes)
+    if not meshes:
+        doc = {"asset": {"version": "2.0", "generator": "USD BRep Modeler"},
+               "scene": 0, "scenes": [{}]}
+        js = json.dumps(doc, separators=(",", ":")).encode()
+        js += b" " * (-len(js) % 4)
+        return (struct.pack("<4sII", b"glTF", 2, 20 + len(js)) +
+                struct.pack("<I4s", len(js), b"JSON") + js)
     blob = bytearray()
     doc = {"asset": {"version": "2.0", "generator": "USD BRep Modeler"},
            "scene": 0, "scenes": [{"nodes": []}], "nodes": [], "meshes": [],
