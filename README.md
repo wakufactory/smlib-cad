@@ -169,6 +169,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `use` | `use 部品名 [配置名]` で部品を新しく生成する |
 | `group` / `end` | `group 名前` から `end` までをローカル座標のグループにする。入れ子可 |
 | `include` | group 内で `include 既存group名` と書き、定義済みgroupを子として移す |
+| `property key value` | group の GLB カスタムプロパティを設定。value は JSON 形式（文字列は二重引用符） |
 | `invisible` | group 内に引数なしで指定し、子グループを含めて非表示にする。ソリッド計算は実行する |
 | `scale` | グループ内で `scale sx sy sz`（各軸の正の倍率） |
 | `euler` | グループ内で `euler rx ry rz`（度数） |
@@ -345,6 +346,19 @@ end
 ```
 
 この例の階層は `assembly → detail → cap` です。参照できるのは、現在または外側の開いているスコープに直接属する定義済み group です。閉じた別の group の中から子だけを取り出す操作、前方参照、自分自身・開いている祖先の参照、同じ親への重複追加はエラーです。移動後は新しい親のスコープで group 名を Boolean や `material` に使えます。複数箇所への独立した配置には `part` / `use` を使います。
+
+`property key value` を group 内に書くと、GLB 保存時にその group のノードの `extras`（カスタムプロパティ）へキーと値を出力します。値は JSON 形式で、文字列は二重引用符で囲みます。数値・真偽値・null・配列・オブジェクトも指定できます。NaN／Infinity は指定できません。キーは空白を含まない文字列です。同じキーは最後の値で上書きし、子 group や配下のソリッドには継承しません。記述位置にかかわらず group 全体に設定され、`include` や `part` / `use` でも保持されます。出力される形状を持たない group（非表示を含む）は GLB に含まれません。USDZ には出力しません。
+
+```text
+group assembly
+  property partNumber "BRACKET-001"
+  property label "取付部品 #1"
+  property mass 1.25
+  property enabled true
+  property tags ["steel", "mount"]
+  box body 0 0 0 20 10 5
+end
+```
 
 グループ内に引数なしの `invisible` を書くと、記述位置にかかわらずグループ全体（子グループを含む）を非表示にします。BRep の作成・変換・Boolean・仕上げは通常どおり計算し、非表示の形状も演算の入力に使えます。テッセレーションは省略し、WebGL／USDZ プレビューと GLB／USDZ 書き出しには含めません。Boolean の結果は所属する親 group の表示設定に従い、非表示の入力を使っても、結果がその group の外に配置されれば表示されます。
 

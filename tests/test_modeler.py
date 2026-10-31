@@ -64,6 +64,66 @@ class FakeBrep:
 
 
 class ModelerTests(unittest.TestCase):
+    def test_group_properties_reach_glb_extras(self):
+        source = '''group assembly
+property label "部品 #1 with \\"quotes\\"" # trailing comment
+property count 2
+property count 3
+property active true
+property optional null
+property metadata {"tags": ["steel", 12, false], "offset": 0.25}
+group child
+property label "child"
+box body 0 0 0 1 1 1
+end
+end'''
+        sm = FakeBrep()
+        objects, materials, _ = evaluate(source, "text", sm)
+        data = to_glb(tessellate(objects, sm, materials=materials))
+        length = struct.unpack_from("<I", data, 12)[0]
+        nodes = {node["name"]: node for node in json.loads(data[20:20 + length])["nodes"]}
+        self.assertEqual(nodes["assembly"]["extras"], {
+            "label": '部品 #1 with "quotes"', "count": 3, "active": True,
+            "optional": None, "metadata": {"tags": ["steel", 12, False], "offset": 0.25}})
+        self.assertEqual(nodes["child"]["extras"], {"label": "child"})
+        self.assertNotIn("extras", nodes["body"])
+
+    def test_properties_survive_part_instances_and_include(self):
+        source = '''part p
+group detail
+property id "part#${i}"
+box body 0 0 0 1 1 1
+end
+end
+for i in range(2)
+group wrapper_${i}
+use p instance_${i}
+end
+end
+group assembly
+property id "assembly"
+include wrapper_0
+include wrapper_1
+end'''
+        sm = FakeBrep()
+        objects, materials, _ = evaluate(source, "text", sm)
+        data = to_glb(tessellate(objects, sm, materials=materials))
+        length = struct.unpack_from("<I", data, 12)[0]
+        nodes = {node["name"]: node for node in json.loads(data[20:20 + length])["nodes"]}
+        self.assertEqual(nodes["assembly"]["extras"], {"id": "assembly"})
+        for i in range(2):
+            self.assertEqual(nodes[f"instance_{i}__detail"]["extras"], {"id": f"part#{i}"})
+
+    def test_property_requires_group_key_and_valid_json(self):
+        for command in ('property', 'property key', 'property key bare text',
+                        'property key "unclosed', 'property key NaN',
+                        'property key Infinity', 'property key {"n": 1e999}',
+                        'property key [1,]', 'property key true false'):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Line 2: property:"):
+                evaluate(f"group g\n{command}\nend", "text", FakeBrep())
+        with self.assertRaisesRegex(ValueError, "inside a group required"):
+            evaluate('property key "value"', "text", FakeBrep())
+
     def test_include_moves_group_and_preserves_settings(self):
         sm = FakeBrep()
         objects, materials, _ = evaluate('''group child

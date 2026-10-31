@@ -114,6 +114,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <div class="command-entry"><dt><code>use</code></dt><dd><code>use 部品名 [配置名]</code> で部品を新しく生成する</dd></div>
 <div class="command-entry"><dt><code>group</code> / <code>end</code></dt><dd><code>group 名前</code> から <code>end</code> までをローカル座標のグループにする。入れ子可</dd></div>
 <div class="command-entry"><dt><code>include</code></dt><dd>group 内で <code>include 既存group名</code> と書き、定義済みgroupを子として移す</dd></div>
+<div class="command-entry"><dt><code>property key value</code></dt><dd>group の GLB カスタムプロパティ（extras）を設定。value は JSON 形式（文字列は二重引用符）、同じキーは上書き</dd></div>
 <div class="command-entry"><dt><code>invisible</code></dt><dd>group 内に引数なしで指定し、子グループを含めて非表示にする。ソリッド計算は実行する</dd></div>
 <div class="command-entry"><dt><code>scale</code></dt><dd>グループ内で <code>scale sx sy sz</code>（各軸の正の倍率）</dd></div>
 <div class="command-entry"><dt><code>euler</code></dt><dd>グループ内で <code>euler rx ry rz</code>（度数）</dd></div>

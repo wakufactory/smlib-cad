@@ -252,15 +252,32 @@ def _range_expressions(source):
     return [ast.unparse(argument) for argument in call.args]
 
 
+def _split_comment(line):
+    """Keep # inside quoted property strings, including escaped quotes."""
+    quote, escaped = None, False
+    for index, char in enumerate(line):
+        if escaped:
+            escaped = False
+        elif quote and char == "\\":
+            escaped = True
+        elif char == quote:
+            quote = None
+        elif not quote and char in ('"', "'"):
+            quote = char
+        elif not quote and char == "#":
+            return line[:index], line[index:]
+    return line, ""
+
+
 def _expand_text(line, variables):
     def replace(match):
         value = _number_expression(match.group(1), variables)
         return str(int(value)) if isinstance(value, int) or value.is_integer() else format(value, ".15g")
-    code, separator, comment = line.partition("#")
+    code, comment = _split_comment(line)
     result = _INTERPOLATION.sub(replace, code)
     if "${" in result:
         raise ValueError("unclosed or nested ${expression}")
-    return result + separator + comment
+    return result + comment
 
 
 def _block_end(records, start, opener):
@@ -291,7 +308,7 @@ def _expand_commands(records, inherited, counter, depth=0):
     index = 0
     while index < len(records):
         line_number, raw = records[index]
-        line = raw.partition("#")[0].strip()
+        line = _split_comment(raw)[0].strip()
         words = line.split(None, 1)
         op = words[0].lower() if words else ""
         try:
@@ -539,7 +556,7 @@ def _command_records(source, line_offset):
         if start_line is None:
             start_line = line_number
         stripped = raw.rstrip()
-        continued = "#" not in stripped and stripped.endswith("\\")
+        continued = not _split_comment(stripped)[1] and stripped.endswith("\\")
         fragments.append(stripped[:-1].rstrip() if continued else raw)
         if continued:
             continue
@@ -567,7 +584,7 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
     profile_block = None
     inherited_profiles = {} if _profiles is None else _profiles
     for line_number, raw, variables in commands:
-        line = raw.partition("#")[0].strip()
+        line = _split_comment(raw)[0].strip()
         if not line:
             continue
         words = line.split()
@@ -761,6 +778,8 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 transform = {key: frame[key] for key in ("name", "scale", "euler", "position")}
                 if frame.get("invisible", False):
                     transform["invisible"] = True
+                if frame.get("properties"):
+                    transform["properties"] = dict(frame["properties"])
                 parent["objects"].group_paths.update(
                     (name, [transform, *objects.group_paths.get(name, [])]) for name in objects)
                 parent["objects"].top_groups.update(objects.top_groups)
@@ -776,6 +795,17 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     (name, ancestor if ancestor is not None else frame["name"])
                     for name, ancestor in frame["group_parents"].items() if name in groups)
                 parent["group_parents"][frame["name"]] = None
+            elif op == "property":
+                fields = line.split(None, 2)
+                if len(frames) == 1 or len(fields) != 3:
+                    raise ValueError("property: key and JSON value inside a group required")
+                try:
+                    value = json.loads(fields[2])
+                    # json.loads accepts NaN/Infinity, but glTF requires JSON numbers.
+                    json.dumps(value, allow_nan=False)
+                except (ValueError, OverflowError) as exc:
+                    raise ValueError("property: value must be valid JSON with finite numbers") from exc
+                frame.setdefault("properties", {})[fields[1]] = value
             elif op == "invisible":
                 if len(frames) == 1 or args:
                     raise ValueError("invisible: no arguments inside a group required")
@@ -1299,6 +1329,8 @@ def to_glb(meshes, scale=1):
                         "translation": y_up(_scaled_positions(entry["position"], scale)),
                         "rotation": [x, z, -y, w],
                         "scale": [factors[0], factors[2], factors[1]]}
+                if entry.get("properties"):
+                    node["extras"] = dict(entry["properties"])
                 index = len(doc["nodes"])
                 group_nodes[prefix] = index
                 children.append(index)
