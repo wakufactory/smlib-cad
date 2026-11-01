@@ -119,6 +119,22 @@ const coupled=A.parse(rotationClip(0,360).replace('0 0 360','360 360 0')).tracks
 assert(A.sampleTimes(coupled,4).length>=241);
 assert.deepEqual(plain(A.sampleTimes(A.parse(rotationClip(0,0)).tracks[0],4)),[0,4]);
 
+const forSource=`animation loop 4
+track rotor
+for i in range(5)
+key i euler 0 0 ${'${i * 360}'}
+end
+end
+end`;
+assert.throws(()=>A.parse(forSource),error=>error.modelReference===true);
+assert.doesNotThrow(()=>A.validate(forSource));
+assert.doesNotThrow(()=>A.validate(forSource.replace('range(5)','range(count)')));
+assert.doesNotThrow(()=>A.validate(forSource.replace('for i in range(5)','for j in range(1)\nfor i in range(5)')+'\nend'));
+for(const bad of [forSource.replace('track rotor\n',''),forSource+'\nend',
+  forSource.replace('for i in range(5)','for i in range(5)\ncycle euler 4'),
+  forSource.replace('for i in range(5)','for i range(5)'),
+  forSource.replace('range(5)','range(5 +)'),forSource.replace('key i','key (i +)')])assert.throws(()=>A.validate(bad));
+
 // A tiny symbolic matrix harness records transform order. Applying the recorded
 // operations to points gives independent numeric checks without a WebGL context.
 class Vector {set(...v){this.v=v;return this;}}

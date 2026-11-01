@@ -151,6 +151,35 @@ class AnimationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'samples'):
             parse_animation(source.replace('loop 4','loop 1000').replace('0 0 360','0 0 360000'))
 
+    def test_track_for_loops(self):
+        source = ('animation loop 4\ntrack rotor\nfor i in range(5)\n'
+                  'key i euler 0 0 ${i * 360}\nend\nend\nend')
+        expected = clip(middle='key 1 euler 0 0 360\nkey 2 euler 0 0 720\nkey 3 euler 0 0 1080', last='0 0 1440')
+        self.assertEqual(parse_animation(source),parse_animation(expected))
+        self.assertEqual(to_glb([mesh()],animation_source=source),to_glb([mesh()],animation_source=expected))
+        resolved = resolve_animation_source(source.replace('range(5)', 'range(count)').replace('i * 360', 'turn(i)'),
+                                            'let count = 5\nfn turn(i) = i * 360\n')
+        self.assertEqual(parse_animation(resolved),parse_animation(expected))
+        nested = source.replace('for i in range(5)', 'for j in range(1)\nfor i in range(0, 5, 1)').replace('end\nend\nend', 'end\nend\nend\nend')
+        self.assertEqual(parse_animation(nested),parse_animation(expected))
+        periodic = source.replace('animation loop 4', 'animation loop 120').replace('track rotor', 'track rotor\ncycle euler 4')
+        self.assertEqual(len(parse_animation(periodic)['tracks'][0]['channels']['euler']),5)
+        with self.assertRaisesRegex(ValueError, 'expansion limit'):
+            parse_animation('animation loop 4\ntrack rotor\nfor i in range(4096)\nfor j in range(4096)\nend\nend\nend\nend')
+        deep = 'animation loop 4\ntrack rotor\n' + ''.join(f'for i{n} in range(1)\n' for n in range(33)) + 'end\n'*35
+        with self.assertRaisesRegex(ValueError, 'nesting limit'):
+            parse_animation(deep)
+        for bad in [source.replace('range(5)', 'range(0,5,0)'),
+                    source.replace('range(5)', 'range(5000)'),
+                    source.replace('range(5)', 'range(1.5)'),
+                    source.replace('key i', 'key 0'),
+                    source.replace('for i in range(5)', 'for i in range(5)\ncycle euler 4'),
+                    source.replace('track rotor\n', ''),
+                    source.replace('key i euler 0 0 ${i * 360}', 'key i euler 0 0 ${missing}'),
+                    source + '\nkey i euler 0 0 0']:
+            with self.subTest(source=bad),self.assertRaises(ValueError):
+                parse_animation(bad)
+
     def test_empty_and_comments(self):
         self.assertIsNone(parse_animation('# none\n'))
         self.assertNotIn('animations', decode_glb(to_glb([mesh()]))[0])

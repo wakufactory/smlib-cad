@@ -98,6 +98,102 @@ def _animation_words(line, n):
     return words
 
 
+def _expand_animation_loops(lines, scope):
+    """Expand bounded key-generating loops, retaining original line numbers."""
+    from modeler import _ExpressionScope, _number_expression, _range_expressions
+    budget = 0
+
+    def fail(n, message):
+        raise ValueError(f"Animation line {n}: {message}")
+
+    def expand(records, inherited, depth=0, origin=1):
+        nonlocal budget
+        if depth > 32:
+            fail(origin, "loop nesting limit exceeded (32)")
+        output, index = [], 0
+        while index < len(records):
+            n, words = records[index]
+            budget += 1
+            if budget > 20000:
+                fail(n, "loop expansion limit exceeded (20000)")
+            if words[0] == "for":
+                match = re.fullmatch(r"for\s+([A-Za-z_][A-Za-z_0-9]*)\s+in\s+range\((.*)\)", " ".join(words))
+                if not match:
+                    fail(n, "expected for <name> in range(count) or range(start, stop[, step])")
+                name = match[1]
+                if name in inherited:
+                    fail(n, f"loop variable already defined: {name}")
+                try:
+                    values = [_number_expression(arg, inherited) for arg in _range_expressions(match[2])]
+                    if not 1 <= len(values) <= 3 or any(not float(v).is_integer() for v in values):
+                        fail(n, "range arguments must be one to three integers")
+                    iteration = range(*map(int, values))
+                    if len(iteration) > 4096:
+                        fail(n, "loop iteration limit exceeded (4096)")
+                except (ValueError, OverflowError) as exc:
+                    fail(n, str(exc))
+                end, nesting = index + 1, 1
+                while end < len(records):
+                    op = records[end][1][0]
+                    if op == "for":
+                        nesting += 1
+                    elif records[end][1] == ["end"]:
+                        nesting -= 1
+                        if nesting == 0:
+                            break
+                    elif op != "key":
+                        fail(records[end][0], "for body allows only key and nested for blocks")
+                    end += 1
+                if nesting:
+                    fail(n, "for has no end")
+                body = records[index+1:end]
+                for value in iteration:
+                    budget += 1
+                    if budget > 20000:
+                        fail(n, "loop expansion limit exceeded (20000)")
+                    nested = _ExpressionScope(inherited)
+                    nested[name] = value
+                    output.extend(expand(body, nested, depth+1, n))
+                index = end
+            elif depth:
+                if len(words) != 6 or words[0] != "key" or words[2] not in DEFAULTS:
+                    fail(n, "for body allows only key and nested for blocks")
+                try:
+                    def numeric(word):
+                        expression = word[2:-1] if word.startswith("${") and word.endswith("}") else word
+                        return format(float(_number_expression(expression, inherited)), ".17g")
+                    output.append((n, ["key", numeric(words[1]), words[2], *map(numeric, words[3:])]))
+                except (ValueError, OverflowError) as exc:
+                    fail(n, str(exc))
+            else:
+                output.append((n, words))
+            index += 1
+        return output
+
+    # Only track bodies may contain control blocks.
+    output, index = [], 0
+    while index < len(lines):
+        n, words = lines[index]
+        if words[0] == "for":
+            fail(n, "for is only allowed inside a track")
+        output.append((n, words))
+        if words[0] == "track":
+            end, nesting = index+1, 0
+            while end < len(lines):
+                op = lines[end][1][0]
+                if op == "for":
+                    nesting += 1
+                elif lines[end][1] == ["end"]:
+                    if nesting == 0:
+                        break
+                    nesting -= 1
+                end += 1
+            output.extend(expand(lines[index+1:end], _ExpressionScope(scope or ())))
+            index = end-1
+        index += 1
+    return output
+
+
 def parse_animation(source="", *, scope=None):
     if not isinstance(source, str) or len(source) > 100_000:
         raise ValueError("animationSource must be text (at most 100000 characters)")
@@ -105,6 +201,8 @@ def parse_animation(source="", *, scope=None):
     lines = [(n, words) for n, words in lines if words]
     if not lines:
         return None
+    if any(words[0] == "for" for _, words in lines):
+        lines = _expand_animation_loops(lines, scope)
 
     def fail(n, message):
         raise ValueError(f"Animation line {n}: {message}")

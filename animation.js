@@ -105,8 +105,32 @@
   }
   function parse(source='',syntaxOnly=false) {
     if(typeof source!=='string' || source.length>100000)throw Error('animationSource must be text (at most 100000 characters)');
-    const lines=source.split(/\r?\n/).map((line,i)=>[i+1,animationWords(line.split('#')[0],i+1)]).filter(([,w])=>w.length);
+    let lines=source.split(/\r?\n/).map((line,i)=>[i+1,animationWords(line.split('#')[0],i+1)]).filter(([,w])=>w.length);
     if(!lines.length)return null;
+    if(lines.some(([,w])=>w[0]==='for')){
+      if(!syntaxOnly){const error=Error('animation loops require server resolution');error.modelReference=true;throw error;}
+      const filtered=[],stack=[];
+      for(const [n,w] of lines){
+        const inside=stack.includes('for');
+        if(w[0]==='for'){
+          if(!stack.includes('track'))throw Error(`Animation line ${n}: for is only allowed inside a track`);
+          const match=w.join(' ').match(/^for\s+([A-Za-z_][A-Za-z_0-9]*)\s+in\s+range\((.*)\)$/);
+          if(!match)throw Error(`Animation line ${n}: expected for <name> in range(...)`);
+          angleExpression(`range(${match[2]})`,true);
+          stack.push('for');
+          if(stack.filter(v=>v==='for').length>32)throw Error(`Animation line ${n}: loop nesting limit exceeded (32)`);
+        }else if(w.length===1 && w[0]==='end'){
+          const block=stack.pop();
+          if(block!=='for')filtered.push([n,w]);
+        }else{
+          if(inside && w[0]!=='key')throw Error(`Animation line ${n}: for body allows only key and nested for blocks`);
+          if(w[0]==='animation' || w[0]==='track')stack.push(w[0]);
+          filtered.push([n,w]);
+        }
+      }
+      if(stack.length)throw Error('close all blocks with end');
+      lines=filtered;
+    }
     function fail(n,text){throw Error(`Animation line ${n}: ${text}`);}
     function number(word,n,angle=false){
       if(angle || syntaxOnly || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(word)){
