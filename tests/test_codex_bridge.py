@@ -53,20 +53,27 @@ for line in sys.stdin:
         turn = tid + "-turn-" + str(threads[tid])
         active[tid] = turn
         payload = json.loads(p["input"][0]["text"])
-        assert p["outputSchema"]["required"] == ["message", "source"]
+        assert p["outputSchema"]["required"] == ["message", "source", "animationSource"]
         assert "sandboxPolicy" not in p and "permissionProfile" not in p
         result = {"turn": {"id": turn}}
         emit({"id": m["id"], "result": result})
         if payload["message"] == "wait": continue
         notice("item/agentMessage/delta", {"threadId": tid, "turnId": turn, "delta": "..."})
         output = {"message": tid + ":" + str(threads[tid]),
-                  "source": None if payload["message"] == "question" else payload["source"] + "\n# edited"}
+                  "source": None if payload["message"] in ("question", "animation", "clear animation") else payload["source"] + "\n# edited",
+                  "animationSource": None}
         if payload["message"] == "restored": output["message"] = payload["restoredHistory"][0]["text"]
         if payload["message"] == "images":
             paths=[item['path'] for item in p['input'] if item['type']=='localImage']
             assert all(Path(path).read_bytes().startswith(b'\x89PNG\r\n\x1a\n') for path in paths)
             assert 'data:image' not in p['input'][0]['text']
             output['message']='images:'+str(len(paths))
+        if payload["message"] in ("animation", "both"):
+            output["animationSource"] = payload["animationSource"] + "\n# animation edited"
+        if payload["message"] == "clear animation": output["animationSource"] = ""
+        if payload["message"] == "missing animation": del output["animationSource"]
+        if payload["message"] == "invalid animation": output["animationSource"] = 42
+        if payload["message"] == "large animation": output["animationSource"] = "x"*100001
         text = "not JSON" if payload["message"] == "malformed" else json.dumps(output)
         notice("item/completed", {"threadId": tid, "turnId": turn,
               "item": {"type": "agentMessage", "phase": "final_answer", "text": text}})
@@ -123,6 +130,28 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(result["message"], "thread-0:2")
         self.send(message="question", session=session)
         self.assertIsNone(self.finish(session)["result"]["source"])
+
+    def test_animation_roundtrip_and_partial_edits(self):
+        animation = 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend'
+        for message in ('animation', 'both', 'clear animation', 'question', 'edit'):
+            request = dict(message=message, mode='text', source='current model', animationSource=animation)
+            result = self.finish(self.bridge.send(request)['sessionId'])['result']
+            self.assertEqual(result['animationSource'], animation+'\n# animation edited' if message in ('animation','both') else '' if message=='clear animation' else None)
+            self.assertEqual(result['source'], None if message in ('animation','clear animation','question') else 'current model\n# edited')
+
+    def test_animation_request_validation_and_unfinished_source(self):
+        for value in (None, 42, {}, 'x'*100001):
+            with self.subTest(value=str(value)[:30]), self.assertRaises(ValueError):
+                self.bridge.send(dict(message='edit', mode='text', source='current model', animationSource=value))
+        result=self.finish(self.bridge.send(dict(message='animation', mode='text', source='current model', animationSource='unfinished settings'))['sessionId'])
+        self.assertEqual(result['state'],'completed')
+        self.assertEqual(result['result']['animationSource'],'unfinished settings\n# animation edited')
+
+    def test_invalid_animation_responses_do_not_apply_either_edit(self):
+        for message in ('missing animation','invalid animation','large animation'):
+            result=self.finish(self.send(message=message))
+            self.assertEqual(result['state'],'failed')
+            self.assertIsNone(result['result'])
 
     def test_browser_conversations_are_separate(self):
         first, second = self.send(), self.send()
@@ -304,6 +333,9 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("create_box", text)
         self.assertIn("group", text)
         self.assertIn("source is null", text)
+        self.assertIn('animationSource',text)
+        self.assertIn('animation loop 4',text)
+        self.assertIn('null preserves it',text)
 
     def log_records(self, output, count=1):
         deadline=time.monotonic()+2

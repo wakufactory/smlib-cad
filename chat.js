@@ -117,31 +117,47 @@
     controls();
   }
   function changed() { editorRevision++; }
-  for (const [id, event] of [['source', 'input'], ['mode', 'change'], ['example', 'click'], ['model-file', 'change']]) {
+  for (const [id, event] of [['source', 'input'], ['animation-source', 'input'], ['mode', 'change'], ['example', 'click'], ['model-file', 'change']]) {
     $(id).addEventListener(event, changed);
   }
-  async function apply(source, mode, preserveUndo = false) {
-    if(!preserveUndo)undo = {source: $('source').value, mode: $('mode').value};
-    $('source').value = source; $('mode').value = mode; $('sample').value = 'default';
+  function animationText(){return $('animation-source').value || '';}
+  async function apply(source, mode, animationSource = null, preserveUndo = false) {
+    const before={source:$('source').value, mode:$('mode').value, animationSource:animationText()};
+    if(!preserveUndo)undo=before;
+    if(source===null){source=before.source;mode=before.mode;}
+    if(animationSource===null)animationSource=before.animationSource;
+    const modelChanged=source!==before.source || mode!==before.mode;
+    const animationChanged=animationSource!==before.animationSource;
+    const animationOnly=!modelChanged && (animationChanged || previewFailure?.kind==='animation');
+    $('source').value=source;$('mode').value=mode;$('animation-source').value=animationSource;$('sample').value='default';
     globalThis.refreshSourceLines?.();
-    changed(); proposal = null; controls();
+    globalThis.saveDraft?.();
+    changed();proposal=null;controls();
     const revision=editorRevision;
-    $('export').disabled = true; $('export-usdz').disabled = true;
-    const ok = await preview();
-    if (ok === false) {
-      const error=previewFailure?.error || message.textContent;
-      entry('system', `プレビューでエラーが出ました。\n${error}`, true);
-      return {source,mode,revision,error};
+    $('export').disabled=true;$('export-usdz').disabled=true;
+    let error;
+    try{
+      const ok=await (animationOnly && globalThis.updateAnimationPreview ? globalThis.updateAnimationPreview() : preview());
+      if(ok===false)error=previewFailure?.error || message.textContent;
+      else if(animationOnly){$('export').disabled=false;$('export-usdz').disabled=false;}
+    }catch(failure){
+      error=failure.message;
+      previewFailure={source,mode,animationSource,error,kind:animationOnly?'animation':'model'};
+    }
+    if(error){
+      entry('system',`プレビューでエラーが出ました。\n${error}`,true);
+      return {source,mode,animationSource,revision,error};
     }
     return null;
   }
   async function exchange(text, images = [], preserveUndo = false) {
-    const document=modelDocument(), revision=editorRevision;
+    const document=modelDocument(false), revision=editorRevision;
     const {source, mode, parameters} = document;
-    const previewError = previewFailure?.source === source && previewFailure?.mode === mode ? previewFailure.error : null;
+    const animationSource=document.animationSource || '';
+    const previewError = previewFailure?.source === source && previewFailure?.mode === mode && (previewFailure.animationSource===undefined || previewFailure.animationSource===animationSource) ? previewFailure.error : null;
     entry('user', text, false, true, images);
     $('chat-status').textContent = '送信中…';
-    const sent = await api('/chat/send', {sessionId, message: text, source, mode, parameters, previewError,
+    const sent = await api('/chat/send', {sessionId, message: text, source, mode, animationSource, parameters, previewError,
       ...(images.length ? {images} : {}),
       ...(restoredContext ? {restoredHistory:restoredContext} : {})});
     sessionId = sent.sessionId; restoredContext=null; attachments=[];showAttachments();controls();
@@ -161,12 +177,14 @@
       throw Error(state.error || 'Codex の処理に失敗しました');
     } else if (state.state === 'completed') {
       entry('assistant', state.result.message);
-      if (state.result.source !== null && (state.result.source !== source || previewError)) {
-        if (revision !== editorRevision || $('source').value !== source || $('mode').value !== mode) {
-          proposal = {source: state.result.source, mode};
-          entry('system', '応答待ちの間にソースが変更されたため、変更案を保留しました。');
+      const nextSource=state.result.source ?? null,nextAnimation=state.result.animationSource ?? null;
+      if ((nextSource!==null && nextSource!==source) || (nextAnimation!==null && nextAnimation!==animationSource) ||
+          (previewError && (nextSource!==null || nextAnimation!==null))) {
+        if (revision!==editorRevision || $('source').value!==source || $('mode').value!==mode || animationText()!==animationSource) {
+          proposal={source:nextSource,mode,animationSource:nextAnimation};
+          entry('system','応答待ちの間にモデルまたはアニメーション設定が変更されたため、変更案を保留しました。');
         } else {
-          return await apply(state.result.source, mode, preserveUndo);
+          return await apply(nextSource,mode,nextAnimation,preserveUndo);
         }
       }
     } else throw Error('チャットの状態を読み取れませんでした');
@@ -175,18 +193,18 @@
   async function repair(failure) {
     for(let retry=1;failure && retry<=2;retry++){
       if(stopRequested)return;
-      if(failure.revision!==editorRevision || failure.source!==$('source').value || failure.mode!==$('mode').value){
-        entry('system','プレビュー中にソースが変更されたため、自動修正を止めました。');
+      if(failure.revision!==editorRevision || failure.source!==$('source').value || failure.mode!==$('mode').value || failure.animationSource!==animationText()){
+        entry('system','プレビュー中にモデルまたはアニメーション設定が変更されたため、自動修正を止めました。');
         return;
       }
       entry('system',`エラーを添えて自動修正を依頼します（${retry}/2）。`);
-      failure=await exchange(`モデルのプレビューに失敗しました。以下のエラーを修正し、現在のソース全文を返してください。\n\n${String(failure.error).slice(0,7000)}`,[],true);
+      failure=await exchange(`モデルのプレビューに失敗しました。以下のエラーを修正し、変更するモデルまたはアニメーション設定の全文を返してください。\n\n${String(failure.error).slice(0,7000)}`,[],true);
     }
     if(failure && !stopRequested)entry('system','自動修正を2回試しましたが、プレビューに失敗しました。ソースとエラーを確認してください。',true);
   }
   async function send() {
     if (busy || readingImages || !ready || (!$('chat-input').value.trim() && !attachments.length)) return;
-    try { modelDocument(); }
+    try { modelDocument(false); }
     catch(error){entry('system',error.message,true);return;}
     const text=$('chat-input').value.trim() || '添付画像を参考にモデルを編集してください。';
     const images=attachments.map(item=>({...item}));
@@ -238,16 +256,13 @@
   $('chat-undo').onclick = async () => {
     if (!undo || busy) return;
     const previous = undo; undo = null; proposal = null;
-    $('source').value = previous.source; $('mode').value = previous.mode;
-    globalThis.refreshSourceLines?.();
-    $('sample').value = 'default'; changed(); controls();
-    entry('system', 'チャットによる変更の直前のソースに戻しました。');
-    await preview();
+    entry('system','チャットによる変更の直前のモデルとアニメーション設定に戻しました。');
+    await apply(previous.source,previous.mode,previous.animationSource,true);
   };
   $('chat-apply').onclick = async () => {
     if (!proposal || busy) return;
     busy = true; stopRequested=false;controls();
-    try { await repair(await apply(proposal.source, proposal.mode));$('chat-status').textContent='ChatGPT 接続済み'; }
+    try { await repair(await apply(proposal.source, proposal.mode, proposal.animationSource));$('chat-status').textContent='ChatGPT 接続済み'; }
     catch(error){failed(error);}
     finally { busy = false; controls(); }
   };
@@ -266,6 +281,6 @@
       if(previous)api('/chat/reset',{sessionId:previous}).catch(()=>{});
     }
   };
-  entry('system', 'モデルの変更を指示してください。現在のソースを送信し、編集結果を反映してプレビューします。', false, false);
+  entry('system', 'モデルやアニメーションの変更を指示してください。現在のモデルとアニメーション設定を送信し、編集結果を反映します。', false, false);
   connect();
 })();

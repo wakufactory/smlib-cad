@@ -22,6 +22,7 @@ aside{border-right:1px solid #2c4154;overflow:hidden}
 #source-line-numbers{flex:none;overflow:hidden;border-right:1px solid #36516a;color:#7794a8;background:#122435;text-align:right;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;user-select:none;-webkit-user-select:none}
 #source-line-numbers-inner{padding:12px 8px 12px 4px;will-change:transform}
 #source{flex:1;min-width:0;height:100%;border:0;border-radius:0;white-space:pre;overflow-wrap:normal}
+.editor-tabs{display:flex;gap:6px}.editor-tabs button{flex:1}.editor-tabs [aria-selected="true"]{background:#1784ab;border-color:#32a5ca;color:white}.editor-panel{display:flex;flex:1;min-height:0;flex-direction:column;gap:10px}.editor-panel[hidden]{display:none}#animation-controls button{white-space:nowrap;font-size:11px;padding:7px 5px}#animation-controls input[type="range"]{flex:1;min-width:0}#animation-time{font-size:11px;white-space:nowrap}
 .chat-pane{display:flex;flex:1 1 45%;min-height:350px;flex-direction:column;gap:8px;border-top:1px solid #36516a;padding-top:10px;overflow-y:auto}
 .chat-images{display:flex;gap:6px;flex:none;overflow-x:auto;max-height:90px}.chat-image{display:flex;align-items:center;gap:4px;max-width:180px;font-size:10px;overflow-wrap:anywhere}.chat-image img,.chat-entry img{max-width:100%;width:auto;height:60px;object-fit:contain;border-radius:4px}.chat-entry img{height:auto;max-height:140px;display:block;margin-top:6px}.chat-image button{padding:3px 6px}.chat-images[hidden]{display:none}
 .chat-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.chat-heading{flex-wrap:wrap;gap:4px 8px}.chat-tools{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}.chat-tools button{flex:none;font-size:11px;line-height:1.3;padding:4px 6px;white-space:nowrap}.chat-connection{display:flex;align-items:center;gap:6px}.chat-connection #chat-status{flex:1;min-width:0}.chat-connection button{flex:none;font-size:11px;padding:4px 6px}
@@ -79,6 +80,11 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <div id="settings-content">
 <div id="mesh-stats" aria-live="polite">トライアングル数: —
 ソリッド数: —</div>
+<section id="animation-controls" class="settings-group" aria-label="アニメーションコントロール">
+<h2>アニメーション</h2>
+<div class="row"><button id="animation-apply">設定を適用</button><button id="animation-play">再生</button><button id="animation-reset">先頭へ</button></div>
+<div class="row"><input id="animation-seek" aria-label="アニメーション時刻" type="range" min="0" max="1" step="0.001" value="0"><span id="animation-time">0.00 / 0.00 s</span></div>
+</section>
 <details id="object-tree-panel" open><summary>Object tree</summary><pre id="object-tree" tabindex="0" aria-live="polite" aria-label="プレビューのオブジェクト階層">プレビューで更新されます</pre></details>
 <details id="command-reference">
 <summary>テキストコマンド一覧</summary>
@@ -156,20 +162,30 @@ subtract result body hole</pre>
 <div class="controls"><label for="grid-offset">法線軸座標</label><input id="grid-offset" type="number" step="any" value="0" inputmode="decimal" aria-describedby="grid-offset-help"><span id="grid-offset-help" class="help">XY→Z · YZ→X · ZX→Y · WebGL のみ</span></div>
 </div>
 </div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><div id="preview-options"><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="projection-mode" aria-label="WebGL 投影方式"><option value="orthographic">平行投影</option><option value="perspective">透視投影</option></select></div><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="functions">計算関数の円形配置</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option><option value="groups">Python グループ・材質</option></select><button id="example">読込</button></div>
+</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><div id="preview-options"><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="projection-mode" aria-label="WebGL 投影方式"><option value="orthographic">平行投影</option><option value="perspective">透視投影</option></select></div><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="functions">計算関数の円形配置</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option><option value="groups">Python グループ・材質</option><option value="animation">TRS ループアニメーション</option></select><button id="example">読込</button></div>
+<div class="editor-tabs" role="tablist" aria-label="編集対象">
+<button id="tab-model" type="button" role="tab" aria-selected="true" aria-controls="model-panel">モデル</button>
+<button id="tab-animation" type="button" role="tab" aria-selected="false" aria-controls="animation-panel" tabindex="-1">アニメーション</button>
+</div>
+<section id="model-panel" class="editor-panel" role="tabpanel" aria-labelledby="tab-model">
 <div class="source-heading"><label for="source">モデル定義</label><span>Ctrl/⌘ + Enter でプレビュー</span></div>
-<div class="source-code"><div id="source-line-numbers" aria-hidden="true"><div id="source-line-numbers-inner">1</div></div><textarea id="source" wrap="off" spellcheck="false"></textarea></div></div>
+<div class="source-code"><div id="source-line-numbers" aria-hidden="true"><div id="source-line-numbers-inner">1</div></div><textarea id="source" wrap="off" spellcheck="false"></textarea></div></section>
+<section id="animation-panel" class="editor-panel" role="tabpanel" aria-labelledby="tab-animation" hidden>
+<div class="source-heading"><label for="animation-source">アニメーション · TRS キーフレーム</label><span>秒 / 度 / ローカル座標</span></div>
+<textarea id="animation-source" spellcheck="false" wrap="off" aria-label="アニメーション定義" placeholder="animation loop 4&#10;  track rotor&#10;    key 0 euler 0 0 0&#10;    key 4 euler 0 0 360&#10;  end&#10;end"></textarea>
+
+</section></div>
 <section class="chat-pane" aria-label="モデル編集チャット">
 <div class="chat-heading"><h2>モデル編集チャット</h2><div class="chat-tools"><button id="chat-connect" type="button">接続確認</button><button id="chat-attach" type="button" title="PNG / JPEG / WebP · 3枚まで · 各2 MiB">画像を添付</button><button id="chat-reset" type="button">新しい会話</button></div></div>
 <div class="chat-connection"><div id="chat-status" role="status">Codex の接続を確認中…</div><button id="chat-login" type="button" hidden>ChatGPT にログイン</button></div>
 <a id="chat-login-link" target="_blank" rel="noopener noreferrer" hidden>ログインを開く（サーバーのMacで操作）</a>
 <div id="chat-history" role="log" aria-label="会話履歴" aria-live="polite"></div>
-<div id="chat-proposal" hidden>手動編集があったため、自動反映を止めました。反映すると現在のソースを置き換えます。<button id="chat-apply" type="button">変更案を反映</button></div>
-<label for="chat-input" class="help">現在のソースと一緒に送信 · Ctrl/⌘ + Enter で送信</label>
+<div id="chat-proposal" hidden>手動編集があったため、自動反映を止めました。反映すると変更対象のモデル・アニメーション設定を置き換えます。<button id="chat-apply" type="button">変更案を反映</button></div>
+<label for="chat-input" class="help">現在のモデル・アニメーション設定と一緒に送信 · Ctrl/⌘ + Enter で送信</label>
 <textarea id="chat-input" maxlength="8000" placeholder="例：中央に直径10の貫通穴を開けて" spellcheck="false"></textarea>
 <input id="chat-files" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden>
 <div id="chat-images" class="chat-images" aria-label="送信する画像" hidden></div>
 <div class="chat-controls"><button id="chat-send" class="primary" disabled>送信</button><button id="chat-stop" disabled>停止</button><button id="chat-undo" disabled>変更を戻す</button></div>
 </section>
 </section></main>
-<script src="/app.js"></script><script src="/chat.js"></script></body></html>
+<script src="/animation.js"></script><script src="/app.js"></script><script src="/chat.js"></script></body></html>

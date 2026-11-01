@@ -1,0 +1,17 @@
+# Four seconds: one revolution, one slide, one pulse.
+animation loop 4
+  track rotor
+    key 0 euler 0 0 0
+    key 4 euler 0 0 360
+  end
+  track slider
+    key 0 position 0 0 0
+    key 2 position 12 0 0
+    key 4 position 0 0 0
+  end
+  track indicator
+    key 0 scale 1 1 1
+    key 2 scale 1.6 1.6 1.6
+    key 4 scale 1 1 1
+  end
+end

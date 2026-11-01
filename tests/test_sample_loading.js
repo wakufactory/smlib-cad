@@ -23,9 +23,10 @@ vm.runInContext(`
   examples = {text:'basic text', python:'basic python', gallery:'gallery text', variants:{
     default:{text:'basic text',python:'basic python'},
     gallery:{text:'gallery text',python:'gallery python\\nsecond line'},
+    animation:{text:'animation geometry'},
     groups:{python:'groups python'},
     offsets:{text:'offsets text'}
-  }};
+  }, animations:{animation:'animation loop text'}};
 `, context);
 function load(sample, mode, expectedMode, source) {
   elements.sample.value = sample;
@@ -36,7 +37,10 @@ function load(sample, mode, expectedMode, source) {
   assert.equal(elements['source-line-numbers-inner'].textContent,
     source.split('\n').map((_, i) => i + 1).join('\n'));
 }
+load('animation', 'python', 'text', 'animation geometry');
+assert.equal(elements['animation-source'].value,'animation loop text');
 load('gallery', 'python', 'python', 'gallery python\nsecond line');
+assert.equal(elements['animation-source'].value,'');
 load('gallery', 'text', 'text', 'gallery text');
 load('groups', 'text', 'python', 'groups python');
 load('groups', 'python', 'python', 'groups python');

@@ -30,7 +30,7 @@ def load_examples():
     variants = {"default": {"python": EXAMPLE_SCRIPT, "text": EXAMPLE_TEXT}}
     for key, stem in {"gallery": "all_primitives_materials", "sweeps": "extrude_revolve",
                       "offsets": "offset_shell", "functions": "calculation_functions",
-                      "circular": "circular_csg_array", "groups": "python_groups"}.items():
+                      "circular": "circular_csg_array", "groups": "python_groups", "animation": "animation_loop"}.items():
         variants[key] = {}
         for mode, suffix in (("text", ".txt"), ("python", ".py")):
             path = ROOT / "examples" / (stem + suffix)
@@ -38,6 +38,8 @@ def load_examples():
                 variants[key][mode] = path.read_text(encoding="utf-8")
         if "text" in variants[key]:
             examples[key] = variants[key]["text"]
+    animation_path = ROOT / "examples" / "animation_loop.anim"
+    examples["animations"] = {"animation": animation_path.read_text(encoding="utf-8")} if animation_path.is_file() else {}
     examples["variants"] = variants
     return examples
 
@@ -146,6 +148,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
             self._reply(200, (ROOT / "index.html").read_bytes(), "text/html; charset=utf-8")
+        elif self.path == "/animation.js":
+            self._reply(200, (ROOT / "animation.js").read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/app.js":
             self._reply(200, (ROOT / "app.js").read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/chat.js":

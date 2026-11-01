@@ -6,7 +6,7 @@ const key = 'smlib-modeler.draft.v1';
 const storage = new Map();
 function page() {
   const events = {};
-  const values = {source:'', mode:'text', sample:'default', chord:'0.08', angle:'20', finish:'none',
+  const values = {'animation-source':'', source:'', mode:'text', sample:'default', chord:'0.08', angle:'20', finish:'none',
     'finish-size':'1', 'export-scale':'1', 'file-name':'model', 'shading-mode':'shading', 'preview-mode':'webgl',
     'grid-spacing':'1', 'grid-plane':'xy', 'grid-offset':'0', 'projection-mode':'orthographic'};
   const elements = Object.fromEntries(Object.entries(values).map(([id,value])=>[id,{value,addEventListener(){}}]));
@@ -20,6 +20,7 @@ function page() {
 }
 const first = page();
 first.elements.source.value = 'box unfinished';
+first.elements['animation-source'].value = 'animation loop unfinished';
 first.elements.chord.value = ''; // Preserve incomplete input too.
 first.elements['file-name'].value = 'draft';
 first.elements['show-grid'].checked = false;
@@ -31,6 +32,7 @@ first.events.input({target:{id:'source'}});
 assert(storage.has(key));
 const reloaded = page();
 assert.equal(reloaded.elements.source.value, 'box unfinished');
+assert.equal(reloaded.elements['animation-source'].value,'animation loop unfinished');
 assert.equal(reloaded.elements.chord.value, '');
 assert.equal(reloaded.elements['file-name'].value, 'draft');
 assert.equal(reloaded.elements['show-grid'].checked, false);
@@ -49,6 +51,7 @@ assert.equal(migrated.elements['projection-mode'].value, 'orthographic');
 reloaded.context.clearModel();
 const cleared = page();
 assert.equal(cleared.elements.source.value, '');
+assert.equal(cleared.elements['animation-source'].value,'');
 assert.equal(vm.runInContext('restoredDraft',cleared.context),true);
 cleared.elements.source.value = 'latest edit';
 cleared.events.pagehide();

@@ -1,0 +1,112 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const vm=require('node:vm');
+let next=0,frames=new Map(),draws=0,requests=0;
+const context=vm.createContext({
+  requestAnimationFrame:fn=>{frames.set(++next,fn);return next;},
+  cancelAnimationFrame:id=>frames.delete(id),
+  fetch:()=>{requests++;throw Error('Playback must never request geometry');}
+});
+vm.runInContext(fs.readFileSync(require.resolve('../animation.js'),'utf8'),context);
+const A=context.ModelAnimation;
+const source=fs.readFileSync(require.resolve('../examples/animation_loop.anim'),'utf8');
+const plain=value=>JSON.parse(JSON.stringify(value));
+assert.equal(A.parse('# empty'),null);
+const clip=A.parse(source);
+assert.equal(clip.duration,4);
+assert.equal(clip.tracks.length,3);
+assert.deepEqual(plain(A.sample(clip.tracks[0],1).euler),[0,0,90]);
+assert.deepEqual(plain(A.sample(clip.tracks[1],1).position),[6,0,0]);
+assert.deepEqual(plain(A.sample(clip.tracks[2],2).scale),[1.6,1.6,1.6]);
+const rotationClip=(first,last,channel='euler')=>`animation loop 4\ntrack rotor\nkey 0 ${channel} 0 0 ${first}\nkey 4 ${channel} 0 0 ${last}\nend\nend`;
+for(const base of [1e12,-1e12]){
+  const track=A.parse(rotationClip(base,base+360)).tracks[0];
+  assert.deepEqual(plain(A.sample(track,2).euler),[0,0,base+180]);
+}
+for(const value of ['1e999','-1e999','NaN'])assert.throws(()=>A.parse(rotationClip(value,value)),/finite/);
+for(const channel of ['position','scale'])assert.throws(()=>A.parse(rotationClip('1e12','1e12',channel)),/within ±1e9/);
+for(const [expression,expected] of [['360*10',3600],['(360 * (2 + 3))',1800],
+  ['${360 * (2 + 3)}',1800],['-360*2',-720],['((1e3 - 280) / 2)',360],
+  ['360/2/2*4',360],['((.5 + .5) * 360)',360]]){
+  const track=A.parse(rotationClip(0,expression)).tracks[0];
+  assert.deepEqual(plain(track.channels.euler.at(-1)[1]),[0,0,expected]);
+  assert.deepEqual(plain(A.sample(track,2).euler),[0,0,expected/2]);
+}
+for(const expression of ['1/0','1e308*10','360**2','0x168','Math.sin(0)',
+  '__import__("os")','turns*360','(360','${360','360)','(360 +)','()',
+  '('.repeat(34)+'360'+')'.repeat(34),'('+Array(257).fill('0').join('+')+')']){
+  assert.throws(()=>A.parse(rotationClip(0,expression)),/Animation line 4:/);
+}
+for(const bad of [source.replace('loop 4','loop 0'),source.replace('0 0 360','0 0 180'),
+  source.replace('key 4 euler','key 3 euler'),source.replace('1.6 1.6 1.6','0 1 1'),
+  source.replace('key 2 position','key 0 position'),source+'\nend',source.replace('loop 4','loop 0x4'),
+  source.replace('0 0 360','0 0 360000000')])assert.throws(()=>A.parse(bad));
+
+// A tiny symbolic matrix harness records transform order. Applying the recorded
+// operations to points gives independent numeric checks without a WebGL context.
+class Vector {set(...v){this.v=v;return this;}}
+class Quaternion extends Vector {}
+function rotate(p,q){
+  const [x,y,z,w]=q,[a,b,c]=p;
+  const t=[2*(y*c-z*b),2*(z*a-x*c),2*(x*b-y*a)];
+  return [a+w*t[0]+y*t[2]-z*t[1],b+w*t[1]+z*t[0]-x*t[2],c+w*t[2]+x*t[1]-y*t[0]];
+}
+class Matrix {
+  constructor(){this.identity();}
+  identity(){this.ops=[];return this;}
+  compose(p,q,s){this.ops=[{p:[...p.v],q:[...q.v],s:[...s.v]}];return this;}
+  multiply(m){this.ops.push(...m.ops.map(o=>({...o})));return this;}
+  invert(){this.ops.reverse();this.ops=this.ops.map(o=>({...o,inverse:!o.inverse}));return this;}
+  copy(m){this.ops=m.ops.map(o=>({...o}));return this;}
+  point(p){
+    for(const o of [...this.ops].reverse()){
+      if(o.inverse){
+        p=p.map((v,i)=>v-o.p[i]);p=rotate(p,[-o.q[0],-o.q[1],-o.q[2],o.q[3]]);p=p.map((v,i)=>v/o.s[i]);
+      }else{p=rotate(p.map((v,i)=>v*o.s[i]),o.q).map((v,i)=>v+o.p[i]);}
+    }
+    return p;
+  }
+}
+const THREE={Vector3:Vector,Quaternion,Matrix4:Matrix};
+const group=(name,position=[0,0,0],euler=[0,0,0],scale=[1,1,1])=>({name,position,euler,scale});
+const meshes=[{groupPath:[group('parent',[10,20,0],[0,0,90],[2,3,1]),group('child',[1,0,0])]}];
+const objects=()=>({solid:{matrix:new Matrix()},normal:{matrix:new Matrix()},wire:{matrix:new Matrix()}});
+const rendered=[objects()];
+const nested=`animation loop 4
+track parent
+key 0 position 0 0 0
+key 2 position 1 0 0
+key 4 position 0 0 0
+end
+track parent/child
+key 0 position 0 0 0
+key 2 position 0 1 0
+key 4 position 0 0 0
+end
+end`;
+const player=new A.Player(THREE,()=>draws++);
+player.configure(nested,meshes,rendered);
+function close(actual,expected){actual.forEach((v,i)=>assert(Math.abs(v-expected[i])<1e-9,`${actual} != ${expected}`));}
+// Original baked world point for child local origin: parent([1,0,0]) = [10,22,0].
+close(rendered[0].solid.matrix.point([10,22,0]),[10,22,0]);
+player.seek(2);
+// Parent animation [1,0,0] and child animation [0,1,0] both precede parent's static rotation/scale.
+close(rendered[0].solid.matrix.point([10,22,0]),[7,24,0]);
+for(const mode of ['normal','wire'])close(rendered[0][mode].matrix.point([10,22,0]),[7,24,0]);
+player.play();assert(player.running);assert.equal(frames.size,1);
+function frame(now){const [id,fn]=frames.entries().next().value;frames.delete(id);fn(now);}
+frame(100);frame(1100);assert.equal(player.time,3);
+frame(3100);assert.equal(player.time,1,'wraps at the common loop duration');
+player.pause();assert.equal(frames.size,0);
+assert.throws(()=>player.configure(nested.replace('track parent\n','track missing\n'),meshes,rendered));
+assert.equal(player.time,1,'invalid edits preserve the current clip');
+player.reset();assert.equal(player.time,0);
+close(rendered[0].solid.matrix.point([10,22,0]),[10,22,0]);
+player.configure('',meshes,rendered);assert.equal(player.animation,null);
+player.play();assert.equal(frames.size,0);
+assert.equal(requests,0);assert(draws>3);
+assert.throws(()=>A.bind(clip,meshes));
+assert.equal(A.bind(A.parse(nested.replace('track parent\n','track /parent\n')),meshes).size,2);
+const repeated=[{groupPath:[group('a'),group('child')]},{groupPath:[group('b'),group('child')]}];
+assert.throws(()=>A.bind(A.parse(nested.replace('track parent\n','track child\n')),repeated));
+console.log('animation: parser, nested nonuniform transforms, playback, loop, pause, seek, reset, and zero geometry requests passed');

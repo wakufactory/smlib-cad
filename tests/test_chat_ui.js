@@ -13,14 +13,16 @@ class Element {
 }
 const ids = ['chat-history', 'chat-status', 'chat-input', 'chat-send', 'chat-stop', 'chat-reset',
   'chat-undo', 'chat-apply', 'chat-proposal', 'chat-login', 'chat-login-link', 'chat-connect',
-  'source', 'mode', 'example', 'model-file', 'sample', 'export', 'export-usdz', 'chat-attach', 'chat-files', 'chat-images'];
+  'source', 'animation-source', 'mode', 'example', 'model-file', 'sample', 'export', 'export-usdz', 'chat-attach', 'chat-files', 'chat-images'];
 const elements = Object.fromEntries(ids.map(id => [id, new Element()]));
 elements.source.value = 'box body 0 0 0 1 1 1'; elements.mode.value = 'text';
+let responseAnimation=null;
 let responseSource = 'box body 0 0 0 2 2 2', responseState = 'completed', polling;
 let previewCalls = 0, lastSend, cancelled = 0, failPreview = false;
 let lineRefreshes = 0;
 const sentRequests = [];
-let previewSteps = [], replySources = [], replyStates = [];
+let previewSteps = [], replySources = [], replyStates = [], replyAnimations = [], animationSteps = [];
+let animationCalls=0;
 let cancelBlocked = null;
 const context = vm.createContext({
   $, URL, console, Date, setTimeout, clearTimeout, AbortController,
@@ -28,13 +30,21 @@ const context = vm.createContext({
   document: {createElement: () => new Element(), createTextNode: text => ({textContent: text})},
   message: {textContent: 'preview error'}, previewFailure: null,
   refreshSourceLines: () => {lineRefreshes++;},
-  modelDocument: () => ({source: elements.source.value, mode: elements.mode.value, parameters: {angle: 20}}),
+  modelDocument: () => ({animationSource:elements['animation-source'].value,source: elements.source.value, mode: elements.mode.value, parameters: {angle: 20}}),
+  updateAnimationPreview: async () => {
+    animationCalls++;
+    const step=animationSteps.shift();
+    if(step===false)throw Error('invalid animation');
+    if(typeof step==='function')await step();
+    context.previewFailure=null;
+    return true;
+  },
   preview: async () => {
     previewCalls++;
     const source=elements.source.value,mode=elements.mode.value;
     const step=previewSteps.shift();
     const ok=typeof step==='function' ? await step() : (step===undefined ? !failPreview : step);
-    context.previewFailure=ok ? null : {source,mode,error:'bad geometry'};
+    context.previewFailure=ok ? null : {source,mode,animationSource:elements['animation-source'].value,error:'bad geometry'};
     return ok;
   },
   fetch: async (path, options) => {
@@ -43,7 +53,7 @@ const context = vm.createContext({
     if (path === '/chat/send') {lastSend = JSON.parse(options.body);sentRequests.push(lastSend); data = {sessionId: 'session'};}
     if (path === '/chat/poll') {
       if (polling) await polling;
-      data = {state:replyStates.length ? replyStates.shift() : responseState, error: 'usage limit', result: {message: '変更しました', source:replySources.length ? replySources.shift() : responseSource}};
+      data = {state:replyStates.length ? replyStates.shift() : responseState, error: 'usage limit', result: {message: '変更しました', source:replySources.length ? replySources.shift() : responseSource,animationSource:replyAnimations.length ? replyAnimations.shift() : responseAnimation}};
     }
     if (path === '/chat/cancel') { cancelled++; if(cancelBlocked)await cancelBlocked;data = {ok: true}; }
     if (path === '/chat/reset') data = {ok: true};
@@ -267,5 +277,69 @@ vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context)
   resolvePoll();await tick();
   await new Promise(resolve=>setTimeout(resolve,10));
   context.setTimeout=actualTimeout;
+  // Animation context, independent edits, clear-vs-preserve semantics, and undo.
+  context.ModelChat.restore(undefined);
+  const anim='animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend';
+  elements['animation-source'].value=anim;
+  responseSource=null;responseAnimation=anim.replace('360','720');
+  calls=previewCalls;let animStart=animationCalls;
+  const modelBeforeAnimation=elements.source.value;
+  await send('アニメーションを2回転にして');
+  assert.equal(lastSend.animationSource,anim);
+  assert.equal(elements['animation-source'].value,responseAnimation);
+  assert.equal(elements.source.value,modelBeforeAnimation);
+  assert.equal(previewCalls,calls,'animation-only edits do not regenerate the model');
+  assert.equal(animationCalls,animStart+1);
+  await elements['chat-undo'].onclick();
+  assert.equal(elements['animation-source'].value,anim);
+  assert.equal(previewCalls,calls,'animation-only undo also uses cached geometry');
+  responseAnimation='';await send('アニメーションを削除');
+  assert.equal(elements['animation-source'].value,'');
+  responseAnimation=null;await send('説明して');
+  assert.equal(elements['animation-source'].value,'');
+  responseSource='joint model';responseAnimation=anim;
+  const jointBefore=elements.source.value;
+  await send('モデルとアニメーションを変更');
+  assert.equal(elements.source.value,'joint model');
+  assert.equal(elements['animation-source'].value,anim);
+  assert.equal(previewCalls,calls+1,'combined edits generate the model once');
+  await elements['chat-undo'].onclick();
+  assert.equal(elements.source.value,jointBefore);
+  assert.equal(elements['animation-source'].value,'');
+
+  // A null source in a held proposal preserves manual modeling changes.
+  responseSource=null;responseAnimation=anim;
+  polling=new Promise(resolve=>{resolvePoll=resolve;});
+  const animationConflict=send('アニメーションを追加');await tick();
+  elements['animation-source'].value='manual animation';elements['animation-source'].events.input();
+  elements.source.value='manual model during animation reply';elements.source.events.input();
+  resolvePoll();await animationConflict;polling=null;
+  assert.equal(elements['animation-source'].value,'manual animation');
+  assert.equal(elements['chat-proposal'].hidden,false);
+  await elements['chat-apply'].onclick();
+  assert.equal(elements['animation-source'].value,anim);
+  assert.equal(elements.source.value,'manual model during animation reply');
+  await elements['chat-undo'].onclick();
+  assert.equal(elements['animation-source'].value,'manual animation');
+
+  // Invalid animation can be sent and repaired without recompiling geometry.
+  context.ModelChat.restore(undefined);
+  start=sentRequests.length;calls=previewCalls;
+  responseSource=null;replyAnimations=['broken animation',anim];animationSteps=[false,true];
+  await send('設定を修正');
+  assert.equal(sentRequests.length-start,2);
+  assert.equal(sentRequests[start+1].animationSource,'broken animation');
+  assert.equal(sentRequests[start+1].previewError,'invalid animation');
+  assert.equal(elements['animation-source'].value,anim);
+  assert.equal(previewCalls,calls);
+  await elements['chat-undo'].onclick();
+  assert.equal(elements['animation-source'].value,'manual animation','undo covers the complete repair chain');
+
+  // Manual animation edits during a failed model preview prevent stale retries.
+  responseAnimation=null;responseSource='model with failed preview';start=sentRequests.length;
+  previewSteps=[()=>{elements['animation-source'].value='changed during preview';elements['animation-source'].events.input();return false;}];
+  await send('モデルを変更');
+  assert.equal(sentRequests.length-start,1);
+  assert.equal(elements['animation-source'].value,'changed during preview');
   console.log('chat UI tests passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

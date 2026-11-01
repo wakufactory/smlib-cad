@@ -9,7 +9,7 @@ assert(leftMarkup.trimStart().startsWith('<div id="message" role="status"></div>
 assert(!/<details id="command-reference"[^>]*\sopen(?:\s|>)/.test(leftMarkup));
 assert(leftMarkup.lastIndexOf('id="grid-settings"') > leftMarkup.lastIndexOf('id="export-usdz"'));
 assert(leftMarkup.trimEnd().endsWith('</div>'), 'grid settings are the last left-pane element');
-for(const id of ['show-grid','grid-spacing','grid-plane','grid-offset']){
+for(const id of ['animation-controls','animation-apply','animation-play','animation-reset','animation-seek','show-grid','grid-spacing','grid-plane','grid-offset']){
   assert(leftPane.includes(`id="${id}"`), `${id} belongs in the left settings pane`);
   assert(!viewport.includes(`id="${id}"`));
 }
@@ -22,7 +22,7 @@ const values = {
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
   [id, {value, disabled: false, labels: [{textContent: id}], checkValidity: () => true}]));
-for (const id of ['message', 'status', 'preview', 'export', 'export-usdz', 'object-tree', 'mesh-stats', 'export-stats-glb', 'export-stats-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'view-controls', 'show-axes', 'show-grid', 'usd-model', 'model-status', 'hint', 'example']) {
+for (const id of ['animation-source', 'animation-apply', 'animation-play', 'animation-reset', 'animation-seek', 'animation-time', 'message', 'status', 'preview', 'export', 'export-usdz', 'object-tree', 'mesh-stats', 'export-stats-glb', 'export-stats-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'view-controls', 'show-axes', 'show-grid', 'usd-model', 'model-status', 'hint', 'example']) {
   elements[id] = elements[id] || {value: '', disabled: false};
 }
 elements['preview-mode'].value = 'webgl';
@@ -57,6 +57,7 @@ const context = vm.createContext({
     throw Error('No server request expected');
   }
 });
+vm.runInContext(fs.readFileSync(require.resolve('../animation.js'), 'utf8'), context);
 vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
 const ModelFile = vm.runInContext('ModelFile', context);
 assert.equal(context.gridPoints([0, 0, 0], [0, 0, 0]).length / 3, 25);
@@ -101,6 +102,10 @@ for (const invalid of [
   {...document, parameters: {...document.parameters, exportScale: '2'}}
 ]) assert.throws(() => ModelFile.parse(JSON.stringify(invalid)));
 
+const unfinishedAnimation={...document,animationSource:'animation loop unfinished'};
+assert.throws(()=>ModelFile.validate(unfinishedAnimation));
+assert.equal(ModelFile.validate(unfinishedAnimation,false).animationSource,'animation loop unfinished');
+
 (async () => {
   elements.chord.value = '0.02';
   elements.angle.value = '12';
@@ -116,12 +121,14 @@ for (const invalid of [
   await elements.export.onclick();
   assert.equal(exportPath, '/export');
   assert.equal(requestBody.exportScale, 2.5);
+  assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(downloadName, 'engine block.glb');
   assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   assert.match(elements.message.textContent, /mesh数 3 \/ material数 2/);
   await elements['export-usdz'].onclick();
   assert.equal(exportPath, '/export/usdz');
   assert.equal(requestBody.exportScale, 2.5);
+  assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(downloadName, 'engine block.usdz');
   assert.equal(elements['export-stats-usdz'].textContent, 'USDZ: mesh数 3 / material数 1');
   assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
@@ -162,14 +169,17 @@ for (const invalid of [
   elements.mode.onchange();
   assert.equal(elements['save-model'].disabled, false);
   elements.source.value = pythonSource;
+  elements['animation-source'].value = "animation loop 4\ntrack assembly\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend";
   elements['save-model'].onclick();
   const pythonJson = await savedBlob.text();
   assert.equal(JSON.parse(pythonJson).mode, 'python');
+  assert.equal(JSON.parse(pythonJson).animationSource,elements['animation-source'].value);
   elements.mode.value = 'text';
   elements.source.value = 'box changed 0 0 0 1 1 1';
   await context.loadModel({name: 'python.json', size: pythonJson.length, text: async () => pythonJson});
   assert.equal(elements.mode.value, 'python');
   assert.equal(elements.source.value, pythonSource);
+  assert.equal(elements['animation-source'].value,JSON.parse(pythonJson).animationSource);
   assert.equal(previewCalls, 2);
   assert.equal(elements['file-name'].value, 'python');
 
@@ -178,6 +188,11 @@ for (const invalid of [
   await context.loadModel({name: 'bad.json', size: 4, text: async () => '{bad'});
   assert.equal(previewCalls, 2);
   assert.equal(elements.source.value, before);
+  const animationBefore=elements['animation-source'].value;
+  const badAnimation=JSON.stringify({...document,animationSource:'invalid animation'});
+  await context.loadModel({size:badAnimation.length,text:async()=>badAnimation});
+  assert.equal(elements['animation-source'].value,animationBefore);
+  assert.equal(elements.source.value,before);
   assert.equal(elements['file-name'].value, nameBefore);
   assert.match(elements.message.textContent, /JSONを読み込めません/);
   context.preview = actualPreview;
@@ -186,6 +201,7 @@ for (const invalid of [
   await actualPreview();
   assert.equal(exportPath, '/preview/usdz', elements.message.textContent);
   assert.equal(requestBody.exportScale, 2.5);
+  assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(elements['usd-model'].src, '/preview/assets/test.usdz');
   assert.equal(elements['object-tree'].textContent, '└─ assembly (group)\n   └─ body');
   assert.equal(elements.canvas.hidden, true);
@@ -284,5 +300,36 @@ for (const invalid of [
   for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
   elements['save-model'].onclick();
   assert.deepEqual(JSON.parse(await savedBlob.text()).objectTree,[]);
+  // Reuse geometry only when it belongs to the current modeling inputs.
+  let geometryFallbacks=0;
+  context.preview=async()=>{geometryFallbacks++;return true;};
+  elements['preview-mode'].value='webgl';
+  vm.runInContext(`animationPlayer={configure(){}};currentMeshes=[{}];rendered=[];currentMeshKey=modelingKey();`,context);
+  await context.updateAnimationPreview();
+  assert.equal(geometryFallbacks,0);
+  const sourceBeforeCache=elements.source.value;
+  elements.source.value='updated model not yet generated';
+  await context.updateAnimationPreview();
+  assert.equal(geometryFallbacks,1,'a corrected animation must not hide a pending model edit');
+  elements.source.value=sourceBeforeCache;
+  elements.chord.value='0.1';
+  await context.updateAnimationPreview();
+  assert.equal(geometryFallbacks,2,'changed modeling parameters also invalidate cached geometry');
+  // Pausing updates the slider with the old time; preserve the user's target.
+  vm.runInContext(`
+    globalThis.seekedTime=null;
+    animationPlayer={
+      pause(){animationStatus(0.25,4,false);},
+      seek(time){globalThis.seekedTime=time;animationStatus(time,4,false);}
+    };
+  `,context);
+  for(const [event,target] of [['oninput',1.75],['oninput',0],['onchange',4]]){
+    elements['animation-seek'].value=String(target);
+    elements['animation-seek'][event]();
+    assert.equal(context.seekedTime,target);
+    assert.equal(Number(elements['animation-seek'].value),target);
+    assert.equal(elements['animation-time'].textContent,`${target.toFixed(2)} / 4.00 s`);
+  }
+  assert.equal(geometryFallbacks,2,'seeking never regenerates geometry');
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});

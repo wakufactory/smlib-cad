@@ -50,18 +50,22 @@ const ModelFile = (() => {
     });
   }
 
-  function validate(document) {
+  function validate(document, validateAnimation = true) {
     if (!document || typeof document !== 'object' || Array.isArray(document)) throw Error('モデルのJSONオブジェクトが必要です');
     if (document.format !== 'smlib-model' || document.version !== 1 || !['text', 'python'].includes(document.mode)) {
       throw Error('対応していないモデル形式またはバージョンです');
     }
     if (typeof document.source !== 'string') throw Error('source はテキストにしてください');
+    const animationSource = document.animationSource === undefined ? '' : document.animationSource;
+    if(typeof animationSource!=='string')throw Error('animationSource はテキストにしてください');
+    if(validateAnimation)globalThis.ModelAnimation?.parse(animationSource);
     const p = document.parameters;
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw Error('parameters が必要です');
     const finish = p.finish;
     if (!['none', 'chamfer', 'fillet'].includes(finish)) throw Error('全体加工の種類が不正です');
     return {
       format: 'smlib-model', version: 1, mode: document.mode, source: document.source,
+      ...(document.animationSource === undefined ? {} : {animationSource}),
       ...(document.chat === undefined ? {} : {chat:chat(document.chat)}),
       ...(document.objectTree === undefined ? {} : {objectTree:objectTree(document.objectTree)}),
       parameters: {
@@ -78,6 +82,24 @@ const ModelFile = (() => {
 })();
 
 const $ = id => document.getElementById(id);
+function selectEditorTab(name, focus=false){
+  for(const tab of ['model','animation']){
+    const button=$('tab-'+tab),panel=$(tab+'-panel'),selected=tab===name;
+    if(panel)panel.hidden=!selected;
+    button?.setAttribute?.('aria-selected',String(selected));
+    if(button)button.tabIndex=selected?0:-1;
+    if(selected && focus)button?.focus?.();
+  }
+  if(name==='model')refreshSourceLines();
+}
+for(const name of ['model','animation']){
+  $('tab-'+name)?.addEventListener?.('click',()=>selectEditorTab(name));
+  $('tab-'+name)?.addEventListener?.('keydown',event=>{
+    if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
+    event.preventDefault();
+    selectEditorTab(event.key==='Home'?'model':event.key==='End'?'animation':name==='model'?'animation':'model',true);
+  });
+}
 const canvas = $('canvas');
 const message = $('message');
 let sourceLineCount = 0;
@@ -107,6 +129,52 @@ let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
 let previewFailure = null;
 let currentObjectTree = [];
+let currentMeshKey=null;
+function modelingKey(){return JSON.stringify(['source','mode','chord','angle','finish','finish-size'].map(id=>$(id).value));}
+let animationPlayer = null;
+function animationText(){return $('animation-source')?.value || '';}
+function animationStatus(time,duration,running){
+  $('animation-play').textContent=running?'一時停止':'再生';
+  $('animation-seek').max=duration || 1;
+  $('animation-seek').value=time;
+  $('animation-time').textContent=`${time.toFixed(2)} / ${duration.toFixed(2)} s`;
+}
+function applyAnimation(){
+  if(!animationPlayer)throw Error('WebGL プレビューを準備してください');
+  if($('preview-mode').value==='model')throw Error('再生コントロールは WebGL プレビューで使用してください');
+  animationPlayer.configure(animationText(),currentMeshes,rendered);
+  appliedAnimationSource=animationText();
+}
+async function updateAnimationPreview(){
+  if(!animationPlayer || !currentMeshes.length || currentMeshKey!==modelingKey() || $('preview-mode').value==='model')return preview();
+  applyAnimation();
+  saveDraft();
+  previewFailure=null;
+  return true;
+}
+$('animation-apply').onclick=()=>{
+  try{applyAnimation();saveDraft();note('アニメーション設定を適用しました');}catch(error){note(error.message,true);}
+};
+$('animation-play').onclick=()=>{
+  try{
+    if($('preview-mode').value==='model')throw Error('再生コントロールは WebGL プレビューで使用してください');
+    if(animationPlayer?.running){animationPlayer.pause();return;}
+    if(animationText()!==appliedAnimationSource)applyAnimation();
+    if(!animationPlayer?.animation)throw Error('アニメーションを設定して「設定を適用」を押してください');
+    animationPlayer.play();
+  }catch(error){note(error.message,true);}
+};
+let appliedAnimationSource='';
+$('animation-reset').onclick=()=>animationPlayer?.reset();
+function seekAnimation(){
+  // pause() refreshes the controls with the old playback time. Capture the
+  // slider's requested time first so that refresh cannot overwrite the seek.
+  const time=Number($('animation-seek').value);
+  animationPlayer?.pause();
+  animationPlayer?.seek(time);
+}
+$('animation-seek').oninput=seekAnimation;
+$('animation-seek').onchange=seekAnimation;
 const cameraLightDirection = [-0.6, 0.8, 0.8]; // left, up, toward viewer
 
 function note(text, error = false) { message.textContent = text; message.style.color = error ? '#ff9b93' : '#9dd9c5'; }
@@ -120,7 +188,7 @@ function saveDraft(){
     if(!window.localStorage)return;
     const fields=Object.fromEntries(draftFields.map(id=>[id,String($(id).value)]));
     const checks=Object.fromEntries(draftChecks.map(id=>[id,$(id).checked]));
-    window.localStorage.setItem(draftKey,JSON.stringify({version:1,fields,checks}));
+    window.localStorage.setItem(draftKey,JSON.stringify({version:1,fields,checks,animationSource:animationText()}));
 //    note('ブラウザに自動保存済み');
   }catch(error){
     note('自動保存できません。JSONで保存してください',true);
@@ -135,10 +203,12 @@ function restoreDraft(){
        !draftFields.slice(0,-4).every(id=>typeof draft.fields[id]==='string') ||
        !draftFields.slice(-4).every(id=>draft.fields[id]===undefined || typeof draft.fields[id]==='string') ||
        !draftChecks.every(id=>typeof draft.checks[id]==='boolean'))throw Error('Invalid draft');
-    const options={mode:['text','python'],sample:['clear','default','gallery','circular','sweeps','offsets','functions','groups'],
+    const options={mode:['text','python'],sample:['clear','default','gallery','circular','sweeps','offsets','functions','groups','animation'],
       finish:['none','chamfer','fillet'],'shading-mode':['shading','wireframe','normal'],'preview-mode':['webgl','model'],
       'grid-plane':['xy','yz','zx'],'projection-mode':['perspective','orthographic']};
     if(Object.entries(options).some(([id,values])=>draft.fields[id]!==undefined && !values.includes(draft.fields[id])))throw Error('Invalid draft option');
+    if(draft.animationSource!==undefined && typeof draft.animationSource!=='string')throw Error('Invalid animation draft');
+    $('animation-source').value=draft.animationSource || '';
     for(const id of draftFields)if(draft.fields[id]!==undefined)$(id).value=draft.fields[id];
     refreshSourceLines();
     for(const id of draftChecks)$(id).checked=draft.checks[id];
@@ -153,7 +223,7 @@ function restoreDraft(){
 }
 // Store raw input values, including unfinished numbers and invalid model code.
 for(const event of ['input','change'])document.addEventListener?.(event,e=>{
-  if(draftFields.includes(e.target.id) || draftChecks.includes(e.target.id))saveDraft();
+  if(e.target.id==='animation-source' || draftFields.includes(e.target.id) || draftChecks.includes(e.target.id))saveDraft();
 });
 window.addEventListener?.('pagehide',saveDraft);
 function modelModeError(){
@@ -163,6 +233,8 @@ function modelModeError(){
 }
 function showPreviewMode(){
   const native=$('preview-mode').value==='model';
+  if(native)animationPlayer?.pause();
+  for(const id of ['animation-apply','animation-play','animation-reset','animation-seek'])$(id).disabled=native;
   canvas.hidden=native;
   usdModel.hidden=!native;
   modelStatus.hidden=!native;
@@ -179,6 +251,7 @@ function setupRenderer(){
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   scene = new THREE.Scene();
+  if(globalThis.ModelAnimation)animationPlayer=new ModelAnimation.Player(THREE,draw,animationStatus);
   perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
   orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
   for(const view of [perspectiveCamera,orthographicCamera]){
@@ -306,6 +379,7 @@ function faceNormalColors(positions){
   return colors;
 }
 function show(meshes){
+  animationPlayer?.clear();
   for(const mesh of rendered){
     scene.remove(mesh.solid,mesh.normal,mesh.wire);
     mesh.solid.geometry.dispose();mesh.solid.material.dispose();
@@ -335,9 +409,10 @@ function show(meshes){
   if(meshes.length){center=lo.map((x,i)=>(x+hi[i])/2);radius=Math.max(1,Math.hypot(...sub(hi,lo))/2);}
   updateGuides(lo,hi);
   zoom=meshes.length>1?2.25:2.8;draw();
+  if(animationPlayer && meshes.length)applyAnimation();
 }
 async function request(path){
-  const data={mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
+  const data={animationSource:animationText(),mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
   if(path==='/export' || path==='/export/usdz' || path==='/preview/usdz'){
     if(!$('export-scale').checkValidity() || $('export-scale').value.trim()==='')throw Error('保存時の座標倍率は正の数値にしてください');
     data.exportScale=ModelFile.exportScale(Number($('export-scale').value));
@@ -380,8 +455,10 @@ function renderObjectTree(nodes){
 
 async function preview(){
   saveDraft();
+  animationPlayer?.pause();
   const requestId=++previewRequestId;
-  const previewSource=$('source').value,previewMode=$('mode').value;
+  const previewModelKey=modelingKey();
+  const previewSource=$('source').value,previewMode=$('mode').value,previewAnimationSource=animationText();
   $('preview').disabled=true;$('export').disabled=true;$('export-usdz').disabled=true;note('計算中…');
   try{
     if($('preview-mode').value==='model'){
@@ -398,7 +475,7 @@ async function preview(){
       showPreviewMode();
       const data=await(await request('/preview')).json();
       if(requestId!==previewRequestId)return;
-      currentMeshes=data.meshes;show(data.meshes);
+      currentMeshes=data.meshes;currentMeshKey=previewModelKey;show(data.meshes);
       updateObjectTree(data.meshes);
       const triangles=data.meshes.reduce((n,m)=>n+m.positions.length/9,0);
       $('mesh-stats').textContent=`トライアングル数: ${triangles.toLocaleString()}\nソリッド数: ${data.meshes.length.toLocaleString()}`;
@@ -406,7 +483,7 @@ async function preview(){
     }
     $('export').disabled=false;$('export-usdz').disabled=false;
     previewFailure=null;return true;
-  }catch(e){if(requestId!==previewRequestId)return;previewFailure={source:previewSource,mode:previewMode,error:e.message};if($('preview-mode').value==='model'){usdModel.hidden=true;modelStatus.textContent=e.message;modelStatus.hidden=false;}note(e.message,true);return false;}finally{if(requestId===previewRequestId)$('preview').disabled=false;}
+  }catch(e){if(requestId!==previewRequestId)return;previewFailure={source:previewSource,mode:previewMode,animationSource:previewAnimationSource,error:e.message};if($('preview-mode').value==='model'){usdModel.hidden=true;modelStatus.textContent=e.message;modelStatus.hidden=false;}note(e.message,true);return false;}finally{if(requestId===previewRequestId)$('preview').disabled=false;}
 }
 function saveFileName(format){
   const base=$('file-name').value.trim().replace(/\.(glb|usdz|json)$/i,'');
@@ -425,16 +502,16 @@ async function exportFile(format){
     note(`${name} (${(blob.size/1024).toFixed(1)} KiB) を保存しました · ${counts}`);
   }catch(e){note(e.message,true);}finally{$(id).disabled=false;}
 }
-function modelDocument(){
+function modelDocument(validateAnimation=true){
   for(const id of ['chord','angle','finish-size','export-scale']){
     if(!$(id).checkValidity() || $(id).value.trim()==='') throw Error(`${$(id).labels[0]?.textContent || id} の値が不正です`);
   }
   return ModelFile.validate({
-    format:'smlib-model',version:1,mode:$('mode').value,source:$('source').value,
+    format:'smlib-model',version:1,mode:$('mode').value,source:$('source').value,animationSource:animationText(),
     objectTree:currentObjectTree,
     parameters:{chord:Number($('chord').value),angle:Number($('angle').value),
       finish:$('finish').value,finishSize:Number($('finish-size').value),exportScale:Number($('export-scale').value)}
-  });
+  },validateAnimation);
 }
 function saveModel(){
   try{
@@ -455,6 +532,8 @@ async function loadModel(file){
     if(file.size>16_000_000)throw Error('JSONファイルは16 MB以下にしてください');
     const data=ModelFile.parse(await file.text()),p=data.parameters;
     globalThis.ModelChat?.assertIdle();
+    animationPlayer?.clear();
+    $('animation-source').value=data.animationSource || '';
     $('mode').value=data.mode;$('sample').value='default';$('source').value=data.source;
     refreshSourceLines();
     $('chord').value=p.chord;$('angle').value=p.angle;
@@ -487,11 +566,12 @@ $('preview-mode').onchange=()=>{
   showPreviewMode();preview();
 };
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
-$('mode').onchange=()=>{$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
+$('mode').onchange=()=>{animationPlayer?.clear();$('animation-source').value='';$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
 function clearModel(){
   // Invalidate pending previews so an older response cannot restore the model.
   ++previewRequestId;
   previewFailure=null;
+  animationPlayer?.clear();$('animation-source').value='';
   $('source').value='';
   refreshSourceLines();
   currentMeshes=[];
@@ -514,6 +594,7 @@ $('example').onclick=()=>{
   const mode=typeof variants[$('mode').value]==='string' ? $('mode').value
     : ['text','python'].find(mode=>typeof variants[mode]==='string');
   if(!mode){note('このサンプルはまだ読み込めません。',true);return;}
+  animationPlayer?.clear();$('animation-source').value=examples.animations?.[sample] || '';
   $('mode').value=mode;$('source').value=variants[mode];
   refreshSourceLines();
   $('export').disabled=true;$('export-usdz').disabled=true;
