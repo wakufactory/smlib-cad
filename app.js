@@ -58,7 +58,7 @@ const ModelFile = (() => {
     if (typeof document.source !== 'string') throw Error('source はテキストにしてください');
     const animationSource = document.animationSource === undefined ? '' : document.animationSource;
     if(typeof animationSource!=='string')throw Error('animationSource はテキストにしてください');
-    if(validateAnimation)globalThis.ModelAnimation?.parse(animationSource);
+    if(validateAnimation)globalThis.ModelAnimation?.validate(animationSource);
     const p = document.parameters;
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw Error('parameters が必要です');
     const finish = p.finish;
@@ -132,6 +132,9 @@ let currentObjectTree = [];
 let currentMeshKey=null;
 function modelingKey(){return JSON.stringify(['source','mode','chord','angle','finish','finish-size'].map(id=>$(id).value));}
 let animationPlayer = null;
+let resolvedAnimation = null;
+let animationApplyId = 0;
+function animationKey(){return JSON.stringify([$('mode').value,$('source').value,animationText()]);}
 function animationText(){return $('animation-source')?.value || '';}
 function animationStatus(time,duration,running){
   $('animation-play').textContent=running?'一時停止':'再生';
@@ -139,27 +142,42 @@ function animationStatus(time,duration,running){
   $('animation-seek').value=time;
   $('animation-time').textContent=`${time.toFixed(2)} / ${duration.toFixed(2)} s`;
 }
-function applyAnimation(){
+async function applyAnimation(){
   if(!animationPlayer)throw Error('WebGL プレビューを準備してください');
   if($('preview-mode').value==='model')throw Error('再生コントロールは WebGL プレビューで使用してください');
-  animationPlayer.configure(animationText(),currentMeshes,rendered);
-  appliedAnimationSource=animationText();
+  if(currentMeshKey!==modelingKey())throw Error('モデルが変更されています。先にプレビューを更新してください');
+  const key=animationKey(),source=animationText(),id=++animationApplyId;
+  let numericSource=source;
+  if(resolvedAnimation?.key===key)numericSource=resolvedAnimation.source;
+  else{
+    try{ModelAnimation.parse(source);}catch(error){
+      if(!error.modelReference)throw error;
+      const data=await(await request('/animation/resolve')).json();
+      if(id!==animationApplyId || key!==animationKey() || currentMeshKey!==modelingKey())return false;
+      if(typeof data.resolvedAnimationSource!=='string')throw Error('アニメーションの評価結果が不正です');
+      numericSource=data.resolvedAnimationSource;
+      resolvedAnimation={key,source:numericSource};
+    }
+  }
+  animationPlayer.configure(numericSource,currentMeshes,rendered);
+  appliedAnimationSource=source;
+  return true;
 }
 async function updateAnimationPreview(){
   if(!animationPlayer || !currentMeshes.length || currentMeshKey!==modelingKey() || $('preview-mode').value==='model')return preview();
-  applyAnimation();
+  if(!await applyAnimation())return false;
   saveDraft();
   previewFailure=null;
   return true;
 }
-$('animation-apply').onclick=()=>{
-  try{applyAnimation();saveDraft();note('アニメーション設定を適用しました');}catch(error){note(error.message,true);}
+$('animation-apply').onclick=async()=>{
+  try{if(!await applyAnimation())return;saveDraft();note('アニメーション設定を適用しました');}catch(error){note(error.message,true);}
 };
-$('animation-play').onclick=()=>{
+$('animation-play').onclick=async()=>{
   try{
     if($('preview-mode').value==='model')throw Error('再生コントロールは WebGL プレビューで使用してください');
     if(animationPlayer?.running){animationPlayer.pause();return;}
-    if(animationText()!==appliedAnimationSource)applyAnimation();
+    if(animationText()!==appliedAnimationSource || currentMeshKey!==modelingKey())if(!await applyAnimation())return;
     if(!animationPlayer?.animation)throw Error('アニメーションを設定して「設定を適用」を押してください');
     animationPlayer.play();
   }catch(error){note(error.message,true);}
@@ -409,7 +427,6 @@ function show(meshes){
   if(meshes.length){center=lo.map((x,i)=>(x+hi[i])/2);radius=Math.max(1,Math.hypot(...sub(hi,lo))/2);}
   updateGuides(lo,hi);
   zoom=meshes.length>1?2.25:2.8;draw();
-  if(animationPlayer && meshes.length)applyAnimation();
 }
 async function request(path){
   const data={animationSource:animationText(),mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
@@ -475,7 +492,11 @@ async function preview(){
       showPreviewMode();
       const data=await(await request('/preview')).json();
       if(requestId!==previewRequestId)return;
-      currentMeshes=data.meshes;currentMeshKey=previewModelKey;show(data.meshes);
+      currentMeshes=data.meshes;currentMeshKey=previewModelKey;
+      resolvedAnimation=typeof data.resolvedAnimationSource==='string'
+        ? {key:JSON.stringify([previewMode,previewSource,previewAnimationSource]),source:data.resolvedAnimationSource}:null;
+      show(data.meshes);
+      if(animationPlayer && data.meshes.length)await applyAnimation();
       updateObjectTree(data.meshes);
       const triangles=data.meshes.reduce((n,m)=>n+m.positions.length/9,0);
       $('mesh-stats').textContent=`トライアングル数: ${triangles.toLocaleString()}\nソリッド数: ${data.meshes.length.toLocaleString()}`;

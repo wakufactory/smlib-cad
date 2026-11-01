@@ -19,6 +19,15 @@ assert.deepEqual(plain(A.sample(clip.tracks[0],1).euler),[0,0,90]);
 assert.deepEqual(plain(A.sample(clip.tracks[1],1).position),[6,0,0]);
 assert.deepEqual(plain(A.sample(clip.tracks[2],2).scale),[1.6,1.6,1.6]);
 const rotationClip=(first,last,channel='euler')=>`animation loop 4\ntrack rotor\nkey 0 ${channel} 0 0 ${first}\nkey 4 ${channel} 0 0 ${last}\nend\nend`;
+for(const expression of ['${angle(4)}','angle(period)','${angle(2 + 2) + rpm * 0}', 'sin(radians(360))']){
+  const source=rotationClip(0,expression);
+  assert.throws(()=>A.parse(source),error=>error.modelReference===true);
+  assert.doesNotThrow(()=>A.validate(source));
+}
+assert.doesNotThrow(()=>A.validate('animation loop ${period}\ntrack rotor\nkey 0 euler 0 0 0\nkey ${period} euler 0 0 ${angle(period)}\nend\nend'));
+for(const expression of ['${angle(4) +}','Math.sin(0)','${angle(4,)}','${angle(4)}garbage']){
+  assert.throws(()=>A.validate(rotationClip(0,expression)));
+}
 for(const base of [1e12,-1e12]){
   const track=A.parse(rotationClip(base,base+360)).tracks[0];
   assert.deepEqual(plain(A.sample(track,2).euler),[0,0,base+180]);

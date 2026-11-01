@@ -295,7 +295,7 @@ def _block_end(records, start, opener):
     raise ValueError(f"Line {records[start][0]}: {opener} has no end")
 
 
-def _expand_commands(records, inherited, counter, depth=0):
+def _expand_commands(records, inherited, counter, depth=0, final_scope=None):
     """Expand variables, loops, and conditions with source line metadata."""
     if depth > 32:
         raise ValueError("control block nesting limit exceeded (32)")
@@ -387,7 +387,18 @@ def _expand_commands(records, inherited, counter, depth=0):
                 raise
             raise ValueError(f"Line {line_number}: {exc}") from exc
         index += 1
+    if final_scope is not None:
+        final_scope.update(scopes[0])
+        final_scope.functions.update(scopes[0].functions)
     return output
+
+
+def text_calculation_scope(source):
+    """Resolve root let/fn bindings without constructing native geometry."""
+    scope = _ExpressionScope()
+    records = _extract_parts(_command_records(source, 0), {}, False)
+    _expand_commands(records, {}, {"commands": 0}, final_scope=scope)
+    return scope
 
 
 def _extract_parts(lines, parts, in_part):

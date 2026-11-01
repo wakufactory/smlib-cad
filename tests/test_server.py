@@ -12,6 +12,16 @@ from server import Handler, ModelError, ModelHTTPServer, PreviewStore, allowed_h
 
 
 class LanAccessTests(unittest.TestCase):
+    def test_animation_resolution_worker_does_not_execute_geometry(self):
+        request = {'mode': 'text', 'source': 'let rpm = 120\nfn angle(t) = 360*rpm*t/60\nnot_a_geometry_command\n',
+                   'animationSource': 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${angle(4)}\nend\nend'}
+        data = json.loads(run_model_request(request, '/animation/resolve'))
+        self.assertIn('key 4 euler 0 0 2880', data['resolvedAnimationSource'])
+        request['mode'] = 'python'
+        request['source'] = 'raise RuntimeError("Python must not execute")'
+        request['animationSource'] = request['animationSource'].replace('${angle(4)}', '360')
+        self.assertIn('key 4 euler 0 0 360', json.loads(run_model_request(request, '/animation/resolve'))['resolvedAnimationSource'])
+
     def test_sample_variants_include_python_groups_and_optional_python_files(self):
         from pathlib import Path
         import tempfile
@@ -166,6 +176,24 @@ class ModelProcessTests(unittest.TestCase):
         handler.end_headers = lambda: None
         handler.do_POST()
         return responses[0], json.loads(handler.wfile.getvalue())
+
+    def test_animation_resolver_http_route(self):
+        status, data = self.post({'mode': 'text', 'source': 'let turns = 2',
+                                  'animationSource': 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${turns*360}\nend\nend'},
+                                 '/animation/resolve')
+        self.assertEqual(status, 200)
+        self.assertIn('key 4 euler 0 0 720', data['resolvedAnimationSource'])
+
+    @unittest.skipUnless(importlib.util.find_spec("_smlib_core"), "native binding unavailable")
+    def test_animation_model_references_reach_preview_and_exports(self):
+        request = {'mode': 'text', 'source': 'let turns = 2\ngroup rotor\nbox body 0 0 0 1 1 1\nend',
+                   'animationSource': 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${turns*360}\nend\nend'}
+        status, data = self.post(request)
+        self.assertEqual(status, 200)
+        self.assertEqual(len(data['meshes']), 1)
+        self.assertIn('key 4 euler 0 0 720', data['resolvedAnimationSource'])
+        for path in ('/export', '/export/usdz'):
+            self.assertEqual(run_model_request(request, path), run_model_request({**request, 'animationSource': data['resolvedAnimationSource']}, path))
 
     @unittest.skipUnless(importlib.util.find_spec("_smlib_core"), "native binding unavailable")
     def test_usdz_preview_returns_names_without_mesh_arrays(self):

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from json_to_glb import build_glb, validate_document
+from json_to_glb import build_glb, build_usdz, validate_document
 from test_modeler import FakeBrep
 
 
@@ -19,6 +19,16 @@ MODEL = {
 
 
 class JsonToGlbTests(unittest.TestCase):
+    def test_model_calculations_in_animation_export(self):
+        source = ('let rpm = 120\nfn angle(t) = 360 * rpm * t / 60\n'
+                  'group rotor\nbox body 0 0 0 1 1 1\nend\n')
+        animation = ('animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\n'
+                     'key 4 euler 0 0 ${angle(4)}\nend\nend')
+        document = {**MODEL, 'source': source, 'animationSource': animation}
+        numeric = {**document, 'animationSource': animation.replace('${angle(4)}', '2880')}
+        self.assertEqual(build_glb(document, FakeBrep()), build_glb(numeric, FakeBrep()))
+        self.assertEqual(build_usdz(document, FakeBrep()), build_usdz(numeric, FakeBrep()))
+
     def test_saved_object_tree_is_optional_metadata_for_cli_export(self):
         with_tree = {**MODEL, "objectTree": [
             {"type": "group", "name": "previous_preview", "children": [

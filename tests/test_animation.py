@@ -7,7 +7,7 @@ import struct
 import unittest
 import zipfile
 
-from animation import parse_animation, bind_animation, sample_track, sample_times
+from animation import parse_animation, bind_animation, sample_track, sample_times, resolve_animation_source
 from model_export import to_glb, to_usdz
 from json_to_glb import validate_document
 from test_export_hierarchy import glb_world, usd_world
@@ -37,6 +37,48 @@ def decode_glb(data):
 
 
 class AnimationTests(unittest.TestCase):
+    def test_model_root_calculations_resolve_to_numeric_keys(self):
+        model = ('let rpm = 120\nfn angle(seconds) = 360 * rpm * seconds / 60\n'
+                 'group rotor\nlet rpm = 999\nfn angle(t) = t\nend\n'
+                 'let period = 4\n')
+        source = ('animation loop ${period}\ntrack rotor\n'
+                  'key 0 euler 0 0 0\nkey ${period} euler 0 0 ${angle(period)}\nend\nend')
+        numeric = resolve_animation_source(source, model)
+        self.assertNotIn('${', numeric)
+        track = parse_animation(numeric)['tracks'][0]
+        self.assertEqual(sample_track(track, 2)['euler'], [0, 0, 1440])
+        self.assertEqual(parse_animation(resolve_animation_source(source.replace('${angle(period)}', 'angle(period)'), model)),
+                         parse_animation(numeric))
+
+    def test_animation_cannot_access_local_definitions(self):
+        for block in ('group g', 'for i in range(1)', 'if 1', 'part p'):
+            model = f'{block}\nlet local = 360\nfn local_fn() = 360\nend\n'
+            for expression in ('local', 'local_fn()'):
+                with self.subTest(block=block, expression=expression), self.assertRaisesRegex(ValueError, 'unknown'):
+                    resolve_animation_source(clip(last=f'0 0 ${{{expression}}}'), model)
+        with self.assertRaisesRegex(ValueError, 'unknown variable: rpm'):
+            resolve_animation_source(clip(last='0 0 ${rpm}'), 'rpm = 360', 'python')
+
+    def test_animation_expression_errors_and_closures(self):
+        model = ('let base = 360\nfn turn(n) = n * base\nfn twice(n) = turn(n) * 2\n')
+        numeric = resolve_animation_source(clip(last='0 0 ${twice(2)}'), model)
+        self.assertEqual(parse_animation(numeric)['tracks'][0]['channels']['euler'][-1][1], [0, 0, 1440])
+        for expression, message in [('missing', 'unknown variable'), ('turn()', 'expected 1 positional'),
+                                    ('1/0', 'invalid arithmetic'), ('exp(10000)', 'invalid argument'),
+                                    ('1e308*10', 'finite')]:
+            with self.subTest(expression=expression), self.assertRaisesRegex(ValueError, 'Animation line 5:.*' + message):
+                resolve_animation_source(clip(last=f'0 0 ${{{expression}}}'), model)
+
+    def test_model_references_in_position_scale_and_duration(self):
+        model = 'let period = 4\nlet offset = 3\nfn size() = 2\n'
+        source = ('animation loop ${period}\ntrack rotor\n'
+                  'key 0 position offset 0 0\nkey (period / 2) position (offset * 2) 0 0\n'
+                  'key period position offset 0 0\n'
+                  'key 0 scale size() 1 1\nkey period scale size() 1 1\nend\nend')
+        animation = parse_animation(resolve_animation_source(source, model))
+        self.assertEqual(sample_track(animation['tracks'][0], 1)['position'], [4.5, 0, 0])
+        self.assertEqual(sample_track(animation['tracks'][0], 1)['scale'], [2, 1, 1])
+
     def test_empty_and_comments(self):
         self.assertIsNone(parse_animation('# none\n'))
         self.assertNotIn('animations', decode_glb(to_glb([mesh()]))[0])

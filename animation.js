@@ -2,12 +2,13 @@
 (() => {
   'use strict';
   const defaults = {position:[0,0,0], euler:[0,0,0], scale:[1,1,1]};
-  function angleExpression(source){
+  function angleExpression(source,syntaxOnly=false){
     if(source.startsWith('${') && source.endsWith('}'))source=source.slice(2,-1);
-    const tokens=source.match(/(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|\S/g)||[];
+    const tokens=source.match(/(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\S/g)||[];
     if(!tokens.length || tokens.length>512)throw Error('angle expression must contain 1 to 512 tokens');
     let index=0;
     function finite(value){
+      if(syntaxOnly)return 1;
       if(!Number.isFinite(value))throw Error('angle expression result must be finite');
       return value;
     }
@@ -17,7 +18,7 @@
       const operators=product?['*','/']:['+','-'];
       while(index<tokens.length && operators.includes(tokens[index])){
         const op=tokens[index++],right=product?atom(depth):expression(depth,true);
-        if(op==='/' && right===0)throw Error('angle expression: division by zero');
+        if(!syntaxOnly && op==='/' && right===0)throw Error('angle expression: division by zero');
         value=finite(op==='+'?value+right:op==='-'?value-right:op==='*'?value*right:value/right);
       }
       return value;
@@ -31,6 +32,19 @@
         if(tokens[index++]!==')')throw Error('angle expression: expected closing parenthesis');
         return value;
       }
+      if(/^[A-Za-z_][A-Za-z_0-9]*$/.test(token)){
+        if(['NaN','Infinity'].includes(token))throw Error('number must be finite');
+        if(!syntaxOnly){const error=Error('expression requires model definitions');error.modelReference=true;throw error;}
+        if(tokens[index]==='('){
+          index++;
+          if(tokens[index]!==')'){
+            expression(depth+1);
+            while(tokens[index]===','){index++;expression(depth+1);}
+          }
+          if(tokens[index++]!==')')throw Error('angle expression: expected closing parenthesis');
+        }
+        return 1;
+      }
       if(!/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(token))throw Error('angle expression: expected a finite number or parenthesized expression');
       return finite(Number(token));
     }
@@ -40,7 +54,7 @@
   }
   function animationWords(line,n){
     const simple=line.trim().split(/\s+/).filter(Boolean);
-    if(simple[0]!=='key')return simple;
+    if(simple[0]!=='key' && simple[0]!=='animation')return simple;
     const words=[],stack=[];
     let word='';
     for(const char of line){
@@ -75,14 +89,21 @@
     }
     return [...times].sort((a,b)=>a-b);
   }
-  function parse(source='') {
+  function parse(source='',syntaxOnly=false) {
     if(typeof source!=='string' || source.length>100000)throw Error('animationSource must be text (at most 100000 characters)');
     const lines=source.split(/\r?\n/).map((line,i)=>[i+1,animationWords(line.split('#')[0],i+1)]).filter(([,w])=>w.length);
     if(!lines.length)return null;
     function fail(n,text){throw Error(`Animation line ${n}: ${text}`);}
     function number(word,n,angle=false){
-      if(angle){
-        try{return angleExpression(word);}catch(error){fail(n,error.message);}
+      if(angle || syntaxOnly || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(word)){
+        try{
+          const value=angleExpression(word,syntaxOnly);
+          if(!syntaxOnly && !angle && Math.abs(value)>1e9)fail(n,'number must be finite and within ±1e9');
+          return value;
+        }catch(error){
+          if(error.modelReference){error.message=`Animation line ${n}: ${error.message}`;throw error;}
+          fail(n,error.message);
+        }
       }
       // Match Python float's decimal syntax; reject JavaScript-only hex/binary numbers.
       const value=Number(word);
@@ -93,7 +114,7 @@
     const [n,w]=lines[0];
     if(w.length!==3 || w[0]!=='animation' || w[1]!=='loop')fail(n,'expected animation loop <seconds>');
     const duration=number(w[2],n);
-    if(duration<=0 || duration>1000)fail(n,'duration must be greater than 0 and at most 1000 seconds');
+    if(!syntaxOnly && (duration<=0 || duration>1000))fail(n,'duration must be greater than 0 and at most 1000 seconds');
     const tracks=[];
     let track=null,closed=false,keyCount=0;
     for(const [n,w] of lines.slice(1)){
@@ -102,6 +123,7 @@
         if(!track){closed=true;continue;}
         if(!Object.keys(track.channels).length)fail(n,'track needs keys');
         for(const [channel,keys] of Object.entries(track.channels)){
+          if(syntaxOnly)continue;
           if(keys[0][0]!==0 || keys.at(-1)[0]!==duration)fail(n,`${channel} needs keys at 0 and ${duration} seconds`);
           const first=keys[0][1],last=keys.at(-1)[1];
           const equal=channel==='euler'
@@ -116,15 +138,18 @@
       }else if(w.length===6 && w[0]==='key' && track && Object.hasOwn(defaults,w[2])){
         const time=number(w[1],n),value=w.slice(3).map(v=>number(v,n,w[2]==='euler'));
         const keys=track.channels[w[2]] ||= [];
-        if(time<0 || time>duration || (keys.length && time<=keys.at(-1)[0]))fail(n,'channel key times must increase within the loop duration');
-        if(w[2]==='scale' && Math.min(...value)<=0)fail(n,'scale must be positive');
+        if(!syntaxOnly && (time<0 || time>duration || (keys.length && time<=keys.at(-1)[0])))fail(n,'channel key times must increase within the loop duration');
+        if(!syntaxOnly && w[2]==='scale' && Math.min(...value)<=0)fail(n,'scale must be positive');
         keys.push([time,value]);
         if(++keyCount>4096)fail(n,'at most 4096 keys are allowed');
       }else fail(n,'expected track <group>, key <seconds> position|euler|scale x y z, or end');
     }
     if(!closed || track || !tracks.length)fail(lines.at(-1)[0],'close all blocks with end; at least one track is required');
-    if(tracks.reduce((s,t)=>s+sampleTimes(t,duration).length,0)>120000)throw Error('Animation exceeds 120000 generated samples');
+    if(!syntaxOnly && tracks.reduce((s,t)=>s+sampleTimes(t,duration).length,0)>120000)throw Error('Animation exceeds 120000 generated samples');
     return {duration,tracks};
+  }
+  function validate(source){
+    try{parse(source);}catch(error){if(!error.modelReference)throw error;parse(source,true);}
   }
   function bind(animation, meshes){
     const paths=new Map(),bound=new Map();
@@ -209,5 +234,5 @@
     reset(){this.pause();this.seek(0);}
     clear(){this.pause();this.records=[];this.animation=null;this.time=0;this.status?.(0,0,false);}
   }
-  globalThis.ModelAnimation={parse,bind,sample,sampleTimes,quaternion,Player};
+  globalThis.ModelAnimation={parse,validate,bind,sample,sampleTimes,quaternion,Player};
 })();

@@ -9,13 +9,18 @@ from pathlib import Path
 
 from modeler import apply_finish, evaluate, tessellate
 from model_export import to_glb, to_usdz
-from animation import parse_animation, bind_animation
+from animation import parse_animation, bind_animation, resolve_animation_source
 
 
 def main(request_path: str, output_path: str, error_path: str) -> None:
     try:
         request = json.loads(Path(request_path).read_text(encoding="utf-8"))
-        animation = parse_animation(request.get("animationSource", ""))
+        animation_source = resolve_animation_source(request.get("animationSource", ""),
+                                                    request["source"], request.get("mode", "python"))
+        animation = parse_animation(animation_source)
+        if request["path"] == "/animation/resolve":
+            Path(output_path).write_text(json.dumps({"resolvedAnimationSource": animation_source}), encoding="utf-8")
+            return
         import _smlib_core as sm
 
         objects, materials, log = evaluate(request["source"], request.get("mode", "python"), sm)
@@ -24,11 +29,11 @@ def main(request_path: str, output_path: str, error_path: str) -> None:
                             angle=float(request.get("angle", 20)), materials=materials)
         bind_animation(animation, meshes)
         if request["path"] in ("/export/usdz", "/preview/usdz"):
-            data = to_usdz(meshes, scale=request.get("exportScale", 1), animation_source=request.get("animationSource", ""))
+            data = to_usdz(meshes, scale=request.get("exportScale", 1), animation_source=animation_source)
         elif request["path"] == "/export":
-            data = to_glb(meshes, scale=request.get("exportScale", 1), animation_source=request.get("animationSource", ""))
+            data = to_glb(meshes, scale=request.get("exportScale", 1), animation_source=animation_source)
         else:
-            data = json.dumps({"meshes": meshes, "log": log}).encode("utf-8")
+            data = json.dumps({"meshes": meshes, "log": log, "resolvedAnimationSource": animation_source}).encode("utf-8")
         if request["path"] == "/preview/usdz":
             # Keep the USDZ response binary; pass small UI metadata separately.
             metadata = {"objects": [

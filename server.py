@@ -180,7 +180,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         chat_paths = ("/chat/login", "/chat/send", "/chat/poll", "/chat/cancel", "/chat/reset")
-        if self.path not in ("/preview", "/preview/usdz", "/export", "/export/usdz", *chat_paths):
+        if self.path not in ("/preview", "/preview/usdz", "/export", "/export/usdz", "/animation/resolve", *chat_paths):
             self.send_error(404)
             return
         try:

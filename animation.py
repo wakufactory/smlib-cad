@@ -76,7 +76,7 @@ def _angle_expression(source):
 def _animation_words(line, n):
     """Keep whitespace inside parenthesized or ${...} key expressions."""
     words = line.split()
-    if not words or words[0] != "key":
+    if not words or words[0] not in ("key", "animation"):
         return words
     words, word, stack = [], "", []
     for char in line:
@@ -98,7 +98,7 @@ def _animation_words(line, n):
     return words
 
 
-def parse_animation(source=""):
+def parse_animation(source="", *, scope=None):
     if not isinstance(source, str) or len(source) > 100_000:
         raise ValueError("animationSource must be text (at most 100000 characters)")
     lines = [(n, _animation_words(line.split("#", 1)[0], n)) for n, line in enumerate(source.splitlines(), 1)]
@@ -110,6 +110,18 @@ def parse_animation(source=""):
         raise ValueError(f"Animation line {n}: {message}")
 
     def number(word, n, *, angle=False):
+        if scope is not None:
+            from modeler import _number_expression
+            expression = word[2:-1] if word.startswith("${") and word.endswith("}") else word
+            try:
+                value = float(_number_expression(expression, scope))
+            except (ValueError, OverflowError) as exc:
+                fail(n, str(exc))
+            if not math.isfinite(value):
+                fail(n, "number must be finite")
+            if not angle and abs(value) > 1e9:
+                fail(n, "number must be finite and within ±1e9")
+            return value
         if angle:
             try:
                 return _angle_expression(word)
@@ -182,6 +194,30 @@ def parse_animation(source=""):
     if sum(len(sample_times(t, duration)) for t in tracks) > MAX_SAMPLES:
         raise ValueError("Animation exceeds 120000 generated samples")
     return animation
+
+
+def resolve_animation_source(source, model_source="", mode="text"):
+    """Compile expressions to portable numeric keys; never evaluate Python models."""
+    from modeler import _ExpressionScope, text_calculation_scope
+    if mode not in ("text", "python"):
+        raise ValueError("mode must be text or python")
+    if not isinstance(source, str) or len(source) > 100_000:
+        raise ValueError("animationSource must be text (at most 100000 characters)")
+    if not source.strip():
+        return ""
+    scope = text_calculation_scope(model_source) if mode == "text" else _ExpressionScope()
+    animation = parse_animation(source, scope=scope)
+    if animation is None:
+        return ""
+    lines = [f'animation loop {animation["duration"]:.17g}']
+    for track in animation["tracks"]:
+        lines.append(f'track {track["target"]}')
+        for channel, keys in track["channels"].items():
+            for time, values in keys:
+                lines.append(f'key {time:.17g} {channel} ' + ' '.join(f'{v:.17g}' for v in values))
+        lines.append('end')
+    lines.append('end')
+    return '\n'.join(lines)
 
 
 def bind_animation(animation, meshes):

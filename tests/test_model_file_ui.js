@@ -34,6 +34,7 @@ elements.source.addEventListener = () => {};
 elements.canvas = {getContext: () => null, addEventListener() {}};
 let savedBlob, downloadName;
 let exportPath, requestBody, allowExport = false;
+let resolveRequests=0,resolveResponse=null;
 const context = vm.createContext({
   Blob, console, setTimeout: () => {},
   URL: {createObjectURL(blob) {savedBlob = blob; return 'blob:test';}, revokeObjectURL() {}},
@@ -46,6 +47,10 @@ const context = vm.createContext({
   window: {isSecureContext: true, HTMLModelElement: class {}},
   fetch: async (path, options) => {
     if(options)requestBody=JSON.parse(options.body);
+    if(path==='/animation/resolve'){
+      resolveRequests++;
+      return {ok:true,json:async()=>resolveResponse};
+    }
     if (allowExport && path === '/preview/usdz') {
       exportPath = path;
       return {ok: true, json: async () => ({url: '/preview/assets/test.usdz', objects: [{name:'body',groupPath:[{name:'assembly'}]}]})};
@@ -65,6 +70,7 @@ assert.equal(context.gridPoints([0, 0, 0], [1000, 1000, 0]).length / 3, 101 * 10
 assert.equal(context.gridPoints([1e9, 0, 0], [1e9 + 1, 1, 0]).length, 0);
 let previewCalls = 0;
 const actualPreview = context.preview;
+const actualRequest = context.request;
 context.preview = async () => {previewCalls++;};
 vm.runInContext('examples = {circular: "group ring\\nend", sweeps: "profile p\\npolygon 0 0 1 0 0 1\\nend", functions: "fn size(x) = x * 2\\nbox body 0 0 0 ${size(2)} 1 1"}', context);
 for (const [sample, source] of [
@@ -105,6 +111,8 @@ for (const invalid of [
 const unfinishedAnimation={...document,animationSource:'animation loop unfinished'};
 assert.throws(()=>ModelFile.validate(unfinishedAnimation));
 assert.equal(ModelFile.validate(unfinishedAnimation,false).animationSource,'animation loop unfinished');
+const formulaAnimation='animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${angle(4)}\nend\nend';
+assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formulaAnimation})).animationSource,formulaAnimation);
 
 (async () => {
   elements.chord.value = '0.02';
@@ -315,6 +323,41 @@ assert.equal(ModelFile.validate(unfinishedAnimation,false).animationSource,'anim
   elements.chord.value='0.1';
   await context.updateAnimationPreview();
   assert.equal(geometryFallbacks,2,'changed modeling parameters also invalidate cached geometry');
+  // Compile model references once, then play the numeric keys against cached meshes.
+  context.request=actualRequest;
+  const beforeFormula={source:elements.source.value,animation:elements['animation-source'].value,mode:elements.mode.value};
+  elements.mode.value='text';
+  elements.source.value='let rpm = 120\nfn angle(t) = 360*rpm*t/60\n';
+  elements['animation-source'].value=formulaAnimation;
+  resolveResponse={resolvedAnimationSource:formulaAnimation.replace('${angle(4)}','2880')};
+  vm.runInContext(`currentMeshKey=modelingKey();resolvedAnimation=null;
+    animationPlayer={configure(source){globalThis.numericAnimation=source;ModelAnimation.parse(source);}};`,context);
+  assert.equal(await context.updateAnimationPreview(),true);
+  assert.equal(resolveRequests,1);
+  assert.equal(context.numericAnimation,resolveResponse.resolvedAnimationSource);
+  assert.equal(geometryFallbacks,2);
+  assert.equal(elements['animation-source'].value,formulaAnimation);
+  await context.applyAnimation();
+  assert.equal(resolveRequests,1,'unchanged definitions reuse the resolved timeline');
+  elements.source.value+='let other = 1\n';
+  await assert.rejects(context.applyAnimation(),/モデルが変更/);
+  vm.runInContext('currentMeshKey=modelingKey();',context);
+  await context.applyAnimation();
+  assert.equal(resolveRequests,2,'a changed model invalidates the resolved timeline');
+  // A response for an older edit must not replace the current timeline.
+  let finishResolution;
+  context.request=()=>new Promise(resolve=>{finishResolution=resolve;});
+  elements['animation-source'].value=formulaAnimation.replace('angle(4)','angle(2)');
+  const pendingApplication=context.applyAnimation();
+  elements['animation-source'].value=formulaAnimation;
+  const configuredBefore=context.numericAnimation;
+  finishResolution({json:async()=>({resolvedAnimationSource:formulaAnimation.replace('${angle(4)}','1440')})});
+  assert.equal(await pendingApplication,false);
+  assert.equal(context.numericAnimation,configuredBefore);
+  context.request=actualRequest;
+  elements.source.value=beforeFormula.source;
+  elements.mode.value=beforeFormula.mode;
+  elements['animation-source'].value=beforeFormula.animation;
   // Pausing updates the slider with the old time; preserve the user's target.
   vm.runInContext(`
     globalThis.seekedTime=null;

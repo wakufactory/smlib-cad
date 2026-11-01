@@ -10,7 +10,7 @@ from pathlib import Path
 
 from modeler import apply_finish, evaluate, tessellate
 from model_export import to_glb, to_usdz
-from animation import parse_animation
+from animation import resolve_animation_source
 
 
 ROOT = Path(__file__).resolve().parent
@@ -38,10 +38,10 @@ def validate_document(document: object) -> tuple[str, str, dict]:
     if (document.get("format") != "smlib-model" or type(document.get("version")) is not int
             or document["version"] != 1 or document.get("mode") not in ("text", "python")):
         raise ValueError("unsupported model format, version, or mode")
-    parse_animation(document.get("animationSource", ""))
     source = document.get("source")
     if not isinstance(source, str):
         raise ValueError("source must be text")
+    resolve_animation_source(document.get("animationSource", ""), source, document["mode"])
     parameters = document.get("parameters")
     if not isinstance(parameters, dict):
         raise ValueError("parameters must be an object")
@@ -67,12 +67,14 @@ def build_meshes(document: object, sm):
 
 def build_glb(document: object, sm) -> bytes:
     _, _, parameters = validate_document(document)
-    return to_glb(build_meshes(document, sm), scale=parameters["exportScale"], animation_source=document.get("animationSource", ""))
+    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"])
+    return to_glb(build_meshes(document, sm), scale=parameters["exportScale"], animation_source=animation_source)
 
 
 def build_usdz(document: object, sm) -> bytes:
     _, _, parameters = validate_document(document)
-    return to_usdz(build_meshes(document, sm), scale=parameters["exportScale"], animation_source=document.get("animationSource", ""))
+    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"])
+    return to_usdz(build_meshes(document, sm), scale=parameters["exportScale"], animation_source=animation_source)
 
 
 def main(argv: list[str] | None = None, *, format: str = "glb") -> int:
