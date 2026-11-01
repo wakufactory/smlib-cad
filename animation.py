@@ -76,7 +76,7 @@ def _angle_expression(source):
 def _animation_words(line, n):
     """Keep whitespace inside parenthesized or ${...} key expressions."""
     words = line.split()
-    if not words or words[0] not in ("key", "animation"):
+    if not words or words[0] not in ("key", "animation", "cycle"):
         return words
     words, word, stack = [], "", []
     for char in line:
@@ -155,9 +155,13 @@ def parse_animation(source="", *, scope=None):
             else:
                 if not track["channels"]:
                     fail(n, "track needs keys")
+                for channel in track.get("cycles", {}):
+                    if channel not in track["channels"]:
+                        fail(n, f"{channel} cycle needs keys")
                 for channel, keys in track["channels"].items():
-                    if keys[0][0] != 0 or keys[-1][0] != duration:
-                        fail(n, f"{channel} needs keys at 0 and {duration} seconds")
+                    period = track.get("cycles", {}).get(channel, duration)
+                    if keys[0][0] != 0 or keys[-1][0] != period:
+                        fail(n, f"{channel} needs keys at 0 and {period} seconds")
                     first, last = keys[0][1], keys[-1][1]
                     if channel == "euler":
                         # Rotation equivalence, including coupled Euler representations.
@@ -165,6 +169,11 @@ def parse_animation(source="", *, scope=None):
                         equal = abs(sum(x*y for x, y in zip(a, b))) >= 1 - 1e-9
                     else:
                         equal = all(abs(a-b) <= 1e-9 for a, b in zip(first, last))
+                    if channel == "euler" and channel in track.get("cycles", {}):
+                        whole_turns = all(abs((b-a)/360 - round((b-a)/360)) <= 1e-9
+                                          for a, b in zip(first, last))
+                        if not whole_turns:
+                            fail(n, "euler cycle endpoints must differ by whole turns on each axis")
                     if not equal:
                         fail(n, f"{channel} loop endpoints must have the same pose")
                 tracks.append(track)
@@ -173,6 +182,18 @@ def parse_animation(source="", *, scope=None):
             if len(tracks) >= 256 or any(t["target"] == words[1] for t in tracks):
                 fail(n, "duplicate target or more than 256 tracks")
             track = {"target": words[1], "channels": {}}
+        elif len(words) == 3 and words[0] == "cycle" and track is not None and words[1] in DEFAULTS:
+            channel = words[1]
+            cycles = track.setdefault("cycles", {})
+            if channel in cycles:
+                fail(n, "duplicate channel cycle")
+            period = number(words[2], n)
+            if not 0 < period <= duration:
+                fail(n, "cycle period must be greater than 0 and at most the loop duration")
+            count = duration / period
+            if not math.isfinite(count) or count > MAX_SAMPLES or abs(count-round(count)) > 1e-9:
+                fail(n, "loop duration must be a whole number of cycles (at most 120000)")
+            cycles[channel] = period
         elif len(words) == 6 and words[0] == "key" and track is not None and words[2] in DEFAULTS:
             time = number(words[1], n)
             value = [number(word, n, angle=words[2] == "euler") for word in words[3:]]
@@ -186,7 +207,7 @@ def parse_animation(source="", *, scope=None):
             if key_count > 4096:
                 fail(n, "at most 4096 keys are allowed")
         else:
-            fail(n, "expected track <group>, key <seconds> position|euler|scale x y z, or end")
+            fail(n, "expected track <group>, cycle position|euler|scale <seconds>, key <seconds> position|euler|scale x y z, or end")
     if not closed or track is not None or not tracks:
         fail(lines[-1][0], "close all blocks with end; at least one track is required")
     animation = {"duration": duration, "tracks": tracks}
@@ -212,6 +233,8 @@ def resolve_animation_source(source, model_source="", mode="text"):
     lines = [f'animation loop {animation["duration"]:.17g}']
     for track in animation["tracks"]:
         lines.append(f'track {track["target"]}')
+        for channel, period in track.get("cycles", {}).items():
+            lines.append(f'cycle {channel} {period:.17g}')
         for channel, keys in track["channels"].items():
             for time, values in keys:
                 lines.append(f'key {time:.17g} {channel} ' + ' '.join(f'{v:.17g}' for v in values))
@@ -250,29 +273,50 @@ def prepare_animation(source, meshes):
 def sample_track(track, time):
     result = {key: list(value) for key, value in DEFAULTS.items()}
     for channel, keys in track["channels"].items():
-        if time <= keys[0][0]:
-            result[channel] = list(keys[0][1])
-            continue
-        result[channel] = list(keys[-1][1])
-        for (a, av), (b, bv) in zip(keys, keys[1:]):
-            if time <= b:
-                alpha = (time-a)/(b-a)
-                result[channel] = [x+(y-x)*alpha for x, y in zip(av, bv)]
-                break
+        period = track.get("cycles", {}).get(channel)
+        turns = math.floor(time / period) if period else 0
+        # Derive phase from the same quotient: modulo can disagree at decimal seams.
+        local = max(0., min(period, time - turns * period)) if period else time
+        value = list(keys[-1][1])
+        if local <= keys[0][0]:
+            value = list(keys[0][1])
+        else:
+            for (a, av), (b, bv) in zip(keys, keys[1:]):
+                if local <= b:
+                    alpha = (local-a)/(b-a)
+                    value = [x+(y-x)*alpha for x, y in zip(av, bv)]
+                    break
+        if channel == "euler" and period:
+            value = [v + turns * (b-a) for v, a, b in zip(value, keys[0][1], keys[-1][1])]
+        result[channel] = value
     return result
 
 
 def sample_times(track, duration):
-    # 60 Hz plus subdivision of large rotations keeps quaternion steps small.
+    # Expand cycles only for portable export; playback uses modular time.
     times = {0., duration}
-    for keys in track["channels"].values():
-        times.update(time for time, _ in keys)
-    keys = track["channels"].get("euler", [])
-    for (a, av), (b, bv) in zip(keys, keys[1:]):
-        steps = max(1, math.ceil((b-a)*60), math.ceil(sum(abs(y-x) for x, y in zip(av, bv))/45))
-        if steps > MAX_SAMPLES:
+    for channel, keys in track["channels"].items():
+        period = track.get("cycles", {}).get(channel, duration)
+        count = round(duration / period)
+        steps = []
+        for (a, av), (b, bv) in zip(keys, keys[1:]):
+            subdivisions = 1
+            if channel == "euler":
+                changes = [abs(y-x) for x, y in zip(av, bv)]
+                subdivisions = max(1, math.ceil(sum(changes)/45))
+                # A single Euler axis follows one rotation arc: elapsed time
+                # adds no curvature. Keep 60 Hz for coupled Euler rotations.
+                if sum(delta != 0 for delta in changes) > 1:
+                    subdivisions = max(subdivisions, math.ceil((b-a)*60))
+            steps.append(subdivisions)
+        if count * sum(steps) + 1 > MAX_SAMPLES:
             raise ValueError("Animation exceeds 120000 generated samples")
-        times.update(a+(b-a)*i/steps for i in range(1, steps))
+        for cycle in range(count):
+            offset = cycle * period
+            for ((a,_),(b,_)), subdivisions in zip(zip(keys,keys[1:]), steps):
+                times.update(min(duration, offset + a + (b-a)*i/subdivisions) for i in range(subdivisions))
+            if len(times) > MAX_SAMPLES:
+                raise ValueError("Animation exceeds 120000 generated samples")
     return sorted(times)
 
 

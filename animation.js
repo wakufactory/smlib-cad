@@ -54,7 +54,7 @@
   }
   function animationWords(line,n){
     const simple=line.trim().split(/\s+/).filter(Boolean);
-    if(simple[0]!=='key' && simple[0]!=='animation')return simple;
+    if(simple[0]!=='key' && simple[0]!=='animation' && simple[0]!=='cycle')return simple;
     const words=[],stack=[];
     let word='';
     for(const char of line){
@@ -79,13 +79,27 @@
   }
   function sampleTimes(track, duration) {
     const times=new Set([0,duration]);
-    for(const keys of Object.values(track.channels))for(const [time] of keys)times.add(time);
-    const keys=track.channels.euler||[];
-    for(let i=1;i<keys.length;i++){
-      const [a,av]=keys[i-1],[b,bv]=keys[i];
-      const steps=Math.max(1,Math.ceil((b-a)*60),Math.ceil(av.reduce((s,v,j)=>s+Math.abs(bv[j]-v),0)/45));
-      if(steps>120000)throw Error('Animation exceeds 120000 generated samples');
-      for(let j=1;j<steps;j++)times.add(a+(b-a)*j/steps);
+    for(const [channel,keys] of Object.entries(track.channels)){
+      const period=track.cycles?.[channel]??duration,count=Math.round(duration/period),steps=[];
+      for(let i=1;i<keys.length;i++){
+        const [a,av]=keys[i-1],[b,bv]=keys[i];
+        let subdivisions=1;
+        if(channel==='euler'){
+          const changes=av.map((v,j)=>Math.abs(bv[j]-v));
+          subdivisions=Math.max(1,Math.ceil(changes.reduce((s,v)=>s+v,0)/45));
+          // Only coupled Euler rotations need the additional temporal samples.
+          if(changes.filter(delta=>delta!==0).length>1)subdivisions=Math.max(subdivisions,Math.ceil((b-a)*60));
+        }
+        steps.push(subdivisions);
+      }
+      if(count*steps.reduce((s,v)=>s+v,0)+1>120000)throw Error('Animation exceeds 120000 generated samples');
+      for(let cycle=0;cycle<count;cycle++){
+        for(let i=1;i<keys.length;i++){
+          const a=keys[i-1][0],b=keys[i][0],subdivisions=steps[i-1];
+          for(let j=0;j<subdivisions;j++)times.add(Math.min(duration,cycle*period+a+(b-a)*j/subdivisions));
+        }
+        if(times.size>120000)throw Error('Animation exceeds 120000 generated samples');
+      }
     }
     return [...times].sort((a,b)=>a-b);
   }
@@ -122,19 +136,31 @@
       if(w.length===1 && w[0]==='end'){
         if(!track){closed=true;continue;}
         if(!Object.keys(track.channels).length)fail(n,'track needs keys');
+        for(const channel of Object.keys(track.cycles||{})){
+          if(!Object.hasOwn(track.channels,channel))fail(n,`${channel} cycle needs keys`);
+        }
         for(const [channel,keys] of Object.entries(track.channels)){
           if(syntaxOnly)continue;
-          if(keys[0][0]!==0 || keys.at(-1)[0]!==duration)fail(n,`${channel} needs keys at 0 and ${duration} seconds`);
+          const period=track.cycles?.[channel]??duration;
+          if(keys[0][0]!==0 || keys.at(-1)[0]!==period)fail(n,`${channel} needs keys at 0 and ${period} seconds`);
           const first=keys[0][1],last=keys.at(-1)[1];
           const equal=channel==='euler'
             ? Math.abs(quaternion(first).reduce((s,v,i)=>s+v*quaternion(last)[i],0))>=1-1e-9
             : first.every((v,i)=>Math.abs(v-last[i])<=1e-9);
+          if(channel==='euler' && track.cycles?.euler && !first.every((v,i)=>Math.abs((last[i]-v)/360-Math.round((last[i]-v)/360))<=1e-9))fail(n,'euler cycle endpoints must differ by whole turns on each axis');
           if(!equal)fail(n,`${channel} loop endpoints must have the same pose`);
         }
         tracks.push(track);track=null;
       }else if(w.length===2 && w[0]==='track' && !track){
         if(tracks.length>=256 || tracks.some(t=>t.target===w[1]))fail(n,'duplicate target or more than 256 tracks');
         track={target:w[1],channels:{}};
+      }else if(w.length===3 && w[0]==='cycle' && track && Object.hasOwn(defaults,w[1])){
+        const channel=w[1],cycles=track.cycles ||= {};
+        if(Object.hasOwn(cycles,channel))fail(n,'duplicate channel cycle');
+        const period=number(w[2],n),count=duration/period;
+        if(!syntaxOnly && !(period>0 && period<=duration))fail(n,'cycle period must be greater than 0 and at most the loop duration');
+        if(!syntaxOnly && (!Number.isFinite(count) || count>120000 || Math.abs(count-Math.round(count))>1e-9))fail(n,'loop duration must be a whole number of cycles (at most 120000)');
+        cycles[channel]=period;
       }else if(w.length===6 && w[0]==='key' && track && Object.hasOwn(defaults,w[2])){
         const time=number(w[1],n),value=w.slice(3).map(v=>number(v,n,w[2]==='euler'));
         const keys=track.channels[w[2]] ||= [];
@@ -142,7 +168,7 @@
         if(!syntaxOnly && w[2]==='scale' && Math.min(...value)<=0)fail(n,'scale must be positive');
         keys.push([time,value]);
         if(++keyCount>4096)fail(n,'at most 4096 keys are allowed');
-      }else fail(n,'expected track <group>, key <seconds> position|euler|scale x y z, or end');
+      }else fail(n,'expected track <group>, cycle position|euler|scale <seconds>, key <seconds> position|euler|scale x y z, or end');
     }
     if(!closed || track || !tracks.length)fail(lines.at(-1)[0],'close all blocks with end; at least one track is required');
     if(!syntaxOnly && tracks.reduce((s,t)=>s+sampleTimes(t,duration).length,0)>120000)throw Error('Animation exceeds 120000 generated samples');
@@ -169,12 +195,16 @@
   function sample(track,time){
     const pose=Object.fromEntries(Object.entries(defaults).map(([k,v])=>[k,[...v]]));
     for(const [channel,keys] of Object.entries(track.channels)){
-      pose[channel]=[...keys.at(-1)[1]];
-      if(time<=keys[0][0]){pose[channel]=[...keys[0][1]];continue;}
-      for(let i=1;i<keys.length;i++){
+      const period=track.cycles?.[channel],turns=period?Math.floor(time/period):0;
+      const local=period?Math.max(0,Math.min(period,time-turns*period)):time;
+      let value=[...keys.at(-1)[1]];
+      if(local<=keys[0][0])value=[...keys[0][1]];
+      else for(let i=1;i<keys.length;i++){
         const [a,av]=keys[i-1],[b,bv]=keys[i];
-        if(time<=b){const u=(time-a)/(b-a);pose[channel]=av.map((v,j)=>v+(bv[j]-v)*u);break;}
+        if(local<=b){const u=(local-a)/(b-a);value=av.map((v,j)=>v+(bv[j]-v)*u);break;}
       }
+      if(channel==='euler' && period)value=value.map((v,i)=>v+turns*(keys.at(-1)[1][i]-keys[0][1][i]));
+      pose[channel]=value;
     }
     return pose;
   }

@@ -79,6 +79,78 @@ class AnimationTests(unittest.TestCase):
         self.assertEqual(sample_track(animation['tracks'][0], 1)['position'], [4.5, 0, 0])
         self.assertEqual(sample_track(animation['tracks'][0], 1)['scale'], [2, 1, 1])
 
+    def test_compact_independent_cycles_and_export(self):
+        source = ("animation loop 120\ntrack rotor\ncycle euler 2\ncycle position 3\n"
+                  "key 0 euler 0 0 0\nkey 2 euler 0 0 -720\n"
+                  "key 0 position 0 0 0\nkey 1.5 position 12 0 0\nkey 3 position 0 0 0\nend\nend")
+        animation = parse_animation(source)
+        track = animation['tracks'][0]
+        self.assertEqual(sum(map(len, track['channels'].values())), 5)
+        for t, angle, x in [(0,0,0), (2,-720,8), (7.5,-2700,12), (120,-43200,0)]:
+            self.assertEqual(sample_track(track,t)['euler'], [0,0,angle])
+            self.assertEqual(sample_track(track,t)['position'], [x,0,0])
+        times = sample_times(track,120)
+        self.assertTrue({0,1.5,3,118.5,120}.issubset(times))
+        self.assertEqual(parse_animation(resolve_animation_source(source)), animation)
+        # Portable exports match a fully written timeline, including rotation direction.
+        expanded = 'animation loop 120\ntrack rotor\n'
+        for i in range(61):
+            expanded += f'key {i*2} euler 0 0 {-720*i}\n'
+        for i in range(81):
+            expanded += f'key {i*1.5} position {12 if i%2 else 0} 0 0\n'
+        expanded += 'end\nend'
+        for export in (to_glb, to_usdz):
+            self.assertEqual(export([mesh()],animation_source=source),
+                             export([mesh()],animation_source=expanded))
+
+    def test_long_single_axis_cycles_use_angular_samples(self):
+        source = ('animation loop 720\ntrack second\ncycle euler 1\n'
+                  'key 0 euler 0 0 0\nkey 1 euler 0 0 -360\nend\n'
+                  'track first_assembly\ncycle euler 2\nkey 0 euler 0 0 0\n'
+                  'key 2 euler 0 0 360\nend\nend')
+        animation = parse_animation(source)
+        self.assertEqual([len(sample_times(t,720)) for t in animation['tracks']], [5761,2881])
+        for track, angle in zip(animation['tracks'], [-259200,129600]):
+            times = sample_times(track,720)
+            values = [sample_track(track,t)['euler'][2] for t in times]
+            self.assertEqual(values[-1],angle)
+            self.assertTrue(all(abs(b-a)<=45.000001 for a,b in zip(values,values[1:])))
+        # Coupled Euler interpolation retains its temporal sampling density.
+        coupled = parse_animation(clip(last='360 360 0'))['tracks'][0]
+        self.assertGreaterEqual(len(sample_times(coupled,4)),241)
+        static = parse_animation(clip(last='0 0 0'))['tracks'][0]
+        self.assertEqual(sample_times(static,4),[0,4])
+
+    def test_decimal_cycle_seams_and_scale(self):
+        source = ('animation loop 1\ntrack rotor\ncycle euler 0.1\ncycle scale 0.2\n'
+                  'key 0 euler 0 0 0\nkey 0.1 euler 0 0 360\n'
+                  'key 0 scale 1 1 1\nkey 0.1 scale 2 2 2\nkey 0.2 scale 1 1 1\nend\nend')
+        track = parse_animation(source)['tracks'][0]
+        for time in (0.1, 0.3, 0.6, 1):
+            self.assertAlmostEqual(sample_track(track,time)['euler'][2], time * 3600)
+        for value in sample_track(track,0.5)['scale']:
+            self.assertAlmostEqual(value, 2)
+        self.assertEqual(sample_track(track,1)['scale'], [1,1,1])
+
+    def test_cycle_validation_and_expressions(self):
+        source = ('animation loop 4\ntrack rotor\ncycle euler 2\n'
+                  'key 0 euler 0 0 0\nkey 2 euler 0 0 360\nend\nend')
+        model = 'let period = 2\n'
+        resolved = resolve_animation_source(source.replace('cycle euler 2', 'cycle euler (period * 1)'), model)
+        self.assertEqual(parse_animation(resolved), parse_animation(source))
+        for bad in [source.replace('cycle euler 2','cycle euler 0'),
+                    source.replace('cycle euler 2','cycle euler 3'),
+                    source.replace('cycle euler 2','cycle euler 5'),
+                    source.replace('cycle euler 2','cycle euler 2\ncycle euler 2'),
+                    source.replace('cycle euler 2','cycle scale 2'),
+                    source.replace('key 2 euler','key 4 euler'),
+                    source.replace('0 0 360','180 180 180'),
+                    source.replace('cycle euler 2','cycle euler 0.00000001')]:
+            with self.subTest(source=bad), self.assertRaises(ValueError):
+                parse_animation(bad)
+        with self.assertRaisesRegex(ValueError, 'samples'):
+            parse_animation(source.replace('loop 4','loop 1000').replace('0 0 360','0 0 360000'))
+
     def test_empty_and_comments(self):
         self.assertIsNone(parse_animation('# none\n'))
         self.assertNotIn('animations', decode_glb(to_glb([mesh()]))[0])

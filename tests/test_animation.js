@@ -51,6 +51,74 @@ for(const bad of [source.replace('loop 4','loop 0'),source.replace('0 0 360','0 
   source.replace('key 2 position','key 0 position'),source+'\nend',source.replace('loop 4','loop 0x4'),
   source.replace('0 0 360','0 0 360000000')])assert.throws(()=>A.parse(bad));
 
+// Independent periods stay compact and rotations accumulate across the seam.
+const cycles=`animation loop 120
+track rotor
+cycle euler 2
+cycle position 3
+key 0 euler 0 0 0
+key 2 euler 0 0 -720
+key 0 position 0 0 0
+key 1.5 position 12 0 0
+key 3 position 0 0 0
+end
+end`;
+const cyclic=A.parse(cycles).tracks[0];
+assert.equal(Object.values(cyclic.channels).reduce((n,keys)=>n+keys.length,0),5);
+for(const [t,angle,x] of [[0,0,0],[2,-720,8],[7.5,-2700,12],[120,-43200,0]]){
+  assert.deepEqual(plain(A.sample(cyclic,t).euler),[0,0,angle]);
+  assert.deepEqual(plain(A.sample(cyclic,t).position),[x,0,0]);
+}
+const cycleTimes=A.sampleTimes(cyclic,120);
+for(const t of [0,1.5,3,118.5,120])assert(cycleTimes.includes(t));
+assert.doesNotThrow(()=>A.validate(cycles.replace('cycle euler 2','cycle euler (period * 1)')));
+for(const bad of [cycles.replace('cycle euler 2','cycle euler 0'),
+  cycles.replace('cycle euler 2','cycle euler 7'),
+  cycles.replace('cycle euler 2','cycle euler 121'),
+  cycles.replace('cycle euler 2','cycle euler 2\ncycle euler 2'),
+  cycles.replace('cycle euler 2','cycle scale 2'),
+  cycles.replace('key 2 euler','key 120 euler'),
+  cycles.replace('0 0 -720','180 180 180'),
+  cycles.replace('cycle euler 2','cycle euler 0.00000001'),
+  cycles.replace('0 0 -720','0 0 360000')])assert.throws(()=>A.parse(bad));
+
+const decimal=A.parse(`animation loop 1
+track rotor
+cycle euler 0.1
+cycle scale 0.2
+key 0 euler 0 0 0
+key 0.1 euler 0 0 360
+key 0 scale 1 1 1
+key 0.1 scale 2 2 2
+key 0.2 scale 1 1 1
+end
+end`).tracks[0];
+for(const t of [0.1,0.3,0.6,1])assert(Math.abs(A.sample(decimal,t).euler[2]-t*3600)<1e-9);
+for(const v of A.sample(decimal,0.5).scale)assert(Math.abs(v-2)<1e-9);
+assert.deepEqual(plain(A.sample(decimal,1).scale),[1,1,1]);
+
+const longCycles=A.parse(`animation loop 720
+track second
+cycle euler 1
+key 0 euler 0 0 0
+key 1 euler 0 0 -360
+end
+track first_assembly
+cycle euler 2
+key 0 euler 0 0 0
+key 2 euler 0 0 360
+end
+end`);
+assert.deepEqual(plain(longCycles.tracks.map(t=>A.sampleTimes(t,720).length)),[5761,2881]);
+for(const [index,track] of longCycles.tracks.entries()){
+  const values=A.sampleTimes(track,720).map(t=>A.sample(track,t).euler[2]);
+  assert.equal(values.at(-1),[-259200,129600][index]);
+  for(let i=1;i<values.length;i++)assert(Math.abs(values[i]-values[i-1])<=45.000001);
+}
+const coupled=A.parse(rotationClip(0,360).replace('0 0 360','360 360 0')).tracks[0];
+assert(A.sampleTimes(coupled,4).length>=241);
+assert.deepEqual(plain(A.sampleTimes(A.parse(rotationClip(0,0)).tracks[0],4)),[0,4]);
+
 // A tiny symbolic matrix harness records transform order. Applying the recorded
 // operations to points gives independent numeric checks without a WebGL context.
 class Vector {set(...v){this.v=v;return this;}}
