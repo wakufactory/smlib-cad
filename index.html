@@ -89,6 +89,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <div id="settings-content">
 <div id="mesh-stats" aria-live="polite">トライアングル数: —
 ソリッド数: —</div>
+<button class="primary" id="preview" disabled>プレビュー</button>
 <section id="animation-controls" class="settings-group" aria-label="アニメーションコントロール">
 <h2>アニメーション</h2>
 <div class="row"><button id="animation-apply">設定を適用</button><button id="animation-play">再生</button><button id="animation-reset">先頭へ</button></div>
@@ -146,6 +147,14 @@ subtract result body hole</pre>
 <p>Boolean は左右の入力を消費し、出力名に結果を作ります。材質の RGB・metallic・roughness は 0〜1。グループの変換は scale → euler → position の順です。</p>
 </div>
 </details>
+<div class="settings-group">
+<div class="controls"><label for="file-name">保存ファイル名</label><input id="file-name" type="text" value="model" placeholder="model"><span class="help">拡張子は自動</span></div>
+<div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
+</div>
+<div class="row"><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
+<div id="export-stats" aria-live="polite" aria-label="直近の保存結果">直近の保存結果
+<span id="export-stats-glb">GLB: mesh数 — / material数 —</span>
+<span id="export-stats-usdz">USDZ: mesh数 — / material数 —</span></div>
 <h2>設定</h2>
 <div class="settings-group">
 <div class="controls"><label for="chord">曲面精度</label><input id="chord" type="number" min="0.001" max="2" step="any" value="0.08"><span class="help">小さいほど滑らか</span></div>
@@ -154,15 +163,6 @@ subtract result body hole</pre>
 <div class="controls"><label for="finish-size">幅 / 半径</label><input id="finish-size" type="number" min="0.001" step="any" value="1" disabled></div>
 <div class="controls"><label for="export-scale">保存時の座標倍率</label><input id="export-scale" type="number" min="0" step="any" value="1"><span class="help">GLB / USDZ · 原点基準 · 1 = そのまま</span></div>
 </div>
-<div class="settings-group">
-<div class="controls"><label for="file-name">保存ファイル名</label><input id="file-name" type="text" value="model" placeholder="model"><span class="help">拡張子は自動</span></div>
-<div class="row"><button id="load-model">JSON を読み込む</button><button id="save-model">JSON を保存</button><input id="model-file" type="file" accept=".json,application/json" hidden></div>
-</div>
-<button class="primary" id="preview" disabled>プレビュー</button>
-<div class="row"><button id="export" disabled>GLB を保存</button><button id="export-usdz" disabled>USDZ を保存</button></div>
-<div id="export-stats" aria-live="polite" aria-label="直近の保存結果">直近の保存結果
-<span id="export-stats-glb">GLB: mesh数 — / material数 —</span>
-<span id="export-stats-usdz">USDZ: mesh数 — / material数 —</span></div>
 <div id="grid-settings" class="settings-group">
 <h2>グリッド表示</h2>
 <label class="grid-toggle"><input id="show-grid" type="checkbox" checked>グリッド点を表示</label>

@@ -484,7 +484,7 @@ function renderObjectTree(nodes){
       const last=index===children.length-1;
       const path=[...parentPath,[node.type,node.name]],key=JSON.stringify(path);
       const row=document.createElement('div'),label=document.createElement('span'),button=document.createElement('button');
-      label.textContent=`${prefix}${last?'└─ ':'├─ '}${node.name}${node.type==='group'?' (group)':''}`;
+      label.textContent=`${prefix}${last?'└─ ':'├─ '}${node.name}${node.type==='group'?' (G)':''}`;
       button.type='button';button.className='object-visibility';
       button.disabled=$('preview-mode').value==='model';
       button.onclick=()=>{
