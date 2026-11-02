@@ -64,8 +64,8 @@ function $(id) { return elements[id]; }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function send(text) { elements['chat-input'].value = text; await elements['chat-send'].onclick(); }
 
-vm.runInContext(fs.readFileSync(require.resolve('../app.js'),'utf8').split('const $ =')[0],context);
-vm.runInContext(fs.readFileSync(require.resolve('../chat.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'),'utf8').split('const $ =')[0],context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/chat.js'), 'utf8'), context);
 (async () => {
   await tick();
   assert.equal(context.ModelChat.snapshot(),undefined);

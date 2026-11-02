@@ -81,7 +81,7 @@ class UsdzTests(unittest.TestCase):
             model = Path(directory) / "sample.json"
             output = Path(directory) / "result.usdz"
             model.write_text(json.dumps(MODEL), encoding="utf-8")
-            command = [sys.executable, str(ROOT / "json_to_usdz.py"), str(model), "-o", str(output)]
+            command = [sys.executable, str(ROOT / "server" / "json_to_usdz.py"), str(model), "-o", str(output)]
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             with zipfile.ZipFile(output) as archive:

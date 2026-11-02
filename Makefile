@@ -37,19 +37,19 @@ test-pole-normals: $(BUILD_DIR)/test-pole-normals
 start: start-https
 
 start-http: $(OUTPUT)
-	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT) $(CHAT_LOG_FLAG)
+	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server/server.py --host $(HOST) --port $(PORT) $(CHAT_LOG_FLAG)
 
 cert:
-	@$(PYTHON) local_cert.py --dir "$(CERT_DIR)" $(if $(CERT_IP),--ip "$(CERT_IP)")
+	@$(PYTHON) server/local_cert.py --dir "$(CERT_DIR)" $(if $(CERT_IP),--ip "$(CERT_IP)")
 
 start-https: $(OUTPUT) cert
-	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server.py --host $(HOST) --port $(PORT) --cert "$(CERT_DIR)/server.crt" --key "$(CERT_DIR)/server.key" $(CHAT_LOG_FLAG)
+	@PYTHONPATH="$(abspath $(BUILD_DIR)):$$PYTHONPATH" $(PYTHON) server/server.py --host $(HOST) --port $(PORT) --cert "$(CERT_DIR)/server.crt" --key "$(CERT_DIR)/server.key" $(CHAT_LOG_FLAG)
 
 glb: $(OUTPUT)
-	@$(PYTHON) json_to_glb.py "$(MODEL)" $(if $(GLB),-o "$(GLB)")
+	@$(PYTHON) server/json_to_glb.py "$(MODEL)" $(if $(GLB),-o "$(GLB)")
 
 usdz: $(OUTPUT)
-	@$(PYTHON) json_to_usdz.py "$(MODEL)" $(if $(USDZ),-o "$(USDZ)")
+	@$(PYTHON) server/json_to_usdz.py "$(MODEL)" $(if $(USDZ),-o "$(USDZ)")
 
 $(BUILD_DIR)/SMLib/%.o: usd-brep/source/SMLib/src/%.cpp
 	@mkdir -p $(@D)

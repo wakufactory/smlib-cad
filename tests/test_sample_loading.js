@@ -17,7 +17,7 @@ const context = vm.createContext({
   ResizeObserver: class {observe() {}},
   fetch: () => new Promise(() => {}), console
 });
-vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 vm.runInContext(`
   preview = () => {};
   examples = {text:'basic text', python:'basic python', gallery:'gallery text', variants:{
@@ -52,5 +52,5 @@ elements.example.onclick();
 assert.equal(elements.source.value, 'basic text');
 vm.runInContext("delete examples.variants", context);
 load('gallery', 'python', 'text', 'gallery text');
-assert.match(fs.readFileSync(require.resolve('../index.html'), 'utf8'), /option value="groups"/);
+assert.match(fs.readFileSync(require.resolve('../html/index.html'), 'utf8'), /option value="groups"/);
 console.log('sample loading: mode variants, fallback, Python groups, and line numbers passed');

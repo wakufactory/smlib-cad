@@ -55,7 +55,7 @@ const context = vm.createContext({
   window: {}, location: {protocol: 'http:'},
   console
 });
-vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 context.THREE = THREE;
 vm.runInContext('THREE = globalThis.THREE; scene = globalThis.scene; camera = globalThis.camera; renderer = globalThis.renderer',
   Object.assign(context, {scene, camera, renderer}));

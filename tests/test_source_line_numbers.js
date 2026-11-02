@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-const html = fs.readFileSync(require.resolve('../index.html'), 'utf8');
+const html = fs.readFileSync(require.resolve('../html/index.html'), 'utf8');
 assert.match(html, /id="source-line-numbers"[^>]*aria-hidden="true"/);
 assert.match(html, /<textarea id="source" wrap="off"/);
 
@@ -26,7 +26,7 @@ const context = vm.createContext({
   fetch: () => new Promise(() => {}),
   console
 });
-vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 
 const numbers = elements['source-line-numbers-inner'];
 assert.equal(numbers.textContent, '1');

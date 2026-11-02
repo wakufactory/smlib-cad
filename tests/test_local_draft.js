@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const source = fs.readFileSync(require.resolve('../app.js'), 'utf8');
+const source = fs.readFileSync(require.resolve('../html/app.js'), 'utf8');
 const key = 'smlib-modeler.draft.v1';
 const storage = new Map();
 function page() {

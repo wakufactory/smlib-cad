@@ -9,7 +9,7 @@ const context = vm.createContext({
   ResizeObserver: class {observe() {}},
   fetch: () => new Promise(() => {}), window: {}, location: {protocol: 'http:'}, console
 });
-vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 vm.runInContext('draw = () => {};', context);
 const state = () => vm.runInContext('[yaw, pitch, zoom]', context);
 const event = (name, id, x, y = 0) => handlers[name]({pointerId: id, clientX: x, clientY: y, pointerType: 'touch'});

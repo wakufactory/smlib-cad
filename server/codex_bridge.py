@@ -16,7 +16,7 @@ import tempfile
 import threading
 import time
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 TURN_TIMEOUT_SECONDS = 300
 OUTPUT_SCHEMA = {
     "type": "object", "additionalProperties": False,

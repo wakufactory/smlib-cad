@@ -22,7 +22,9 @@ from pathlib import Path
 from modeler import EXAMPLE_SCRIPT, EXAMPLE_TEXT
 from codex_bridge import ChatBridge, CodexError
 
-ROOT = Path(__file__).resolve().parent
+SERVER_DIR = Path(__file__).resolve().parent
+ROOT = SERVER_DIR.parent
+HTML_DIR = ROOT / "html"
 
 
 def load_examples():
@@ -78,7 +80,7 @@ def run_model_request(request: dict, path: str, metadata: dict | None = None) ->
         request_path.write_text(json.dumps({**request, "path": path}), encoding="utf-8")
         try:
             completed = subprocess.run(
-                [sys.executable, str(ROOT / "model_worker.py"), str(request_path), str(output_path), str(error_path)],
+                [sys.executable, str(SERVER_DIR / "model_worker.py"), str(request_path), str(output_path), str(error_path)],
                 capture_output=True, timeout=60, check=False,
             )
         except subprocess.TimeoutExpired as exc:
@@ -147,13 +149,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/":
-            self._reply(200, (ROOT / "index.html").read_bytes(), "text/html; charset=utf-8")
+            self._reply(200, (HTML_DIR / "index.html").read_bytes(), "text/html; charset=utf-8")
         elif self.path == "/animation.js":
-            self._reply(200, (ROOT / "animation.js").read_bytes(), "text/javascript; charset=utf-8")
+            self._reply(200, (HTML_DIR / "animation.js").read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/app.js":
-            self._reply(200, (ROOT / "app.js").read_bytes(), "text/javascript; charset=utf-8")
+            self._reply(200, (HTML_DIR / "app.js").read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/chat.js":
-            self._reply(200, (ROOT / "chat.js").read_bytes(), "text/javascript; charset=utf-8")
+            self._reply(200, (HTML_DIR / "chat.js").read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/chat/status":
             try:
                 self._check_origin()

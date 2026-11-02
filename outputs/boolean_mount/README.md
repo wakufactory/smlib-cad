@@ -16,7 +16,7 @@ From the workspace root, regenerate with:
 
 ```sh
 make
-PYTHONPATH=.build/smlib-core:. .packman-cache/python/3.12.14-macos-aarch64/bin/python3.12 examples/export_boolean_mount.py
+PYTHONPATH=.build/smlib-core:server .packman-cache/python/3.12.14-macos-aarch64/bin/python3.12 examples/export_boolean_mount.py
 ```
 
 The exact output sizes and triangle counts are also recorded in `manifest.json`.

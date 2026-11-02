@@ -95,7 +95,7 @@ Codexの実行権限は専用の `cad-chat` プロファイルで指定し、読
 
 ### ログとチャット用仕様書
 
-GPTとの送受信をサーバーの標準出力へ記録するには `make start CHAT_LOG=1` を使います（HTTP起動も `make start-http CHAT_LOG=1`）。既定は無効です。環境変数 `CAD_CHAT_LOG=1`、または `server.py --chat-log` でも有効にできます。
+GPTとの送受信をサーバーの標準出力へ記録するには `make start CHAT_LOG=1` を使います（HTTP起動も `make start-http CHAT_LOG=1`）。既定は無効です。環境変数 `CAD_CHAT_LOG=1`、または `python3.12 server/server.py --chat-log` でも有効にできます。
 
 ログは `[cad-chat]` で始まるJSON行です。時刻・リクエストID・Codexの会話／ターンIDに加え、最初に渡す仕様・指示全文、ユーザー指示、モデルソース全文、アニメーション設定全文、パラメータ、プレビューエラー、復元履歴、GPTの応答全文、処理終了状態・エラーを記録します。自動修正のやりとりも対象です。画像は名前・形式・バイト数を記録し、base64本体や一時画像のパス、Codexの認証情報・ログインURLは出力しません。
 
@@ -636,26 +636,30 @@ Object tree の各ノードの ◉ / ○ ボタンで、WebGL プレビューの
 サンプルの GLB を再生成するには、ワークスペースのルートで実行します。
 
 ```bash
-PYTHONPATH="$PWD/.build/smlib-core:$PWD" \
+PYTHONPATH="$PWD/.build/smlib-core:$PWD/server" \
   python3.12 \
   examples/export_primitive_gallery.py
 ```
 
 ## 実装構成
 
-モジュールは `modeler.py`（モデル評価・形状計算・テッセレーション）、`animation.py`（アニメーション構文・検証・サンプリング）、`animation.js`（設定の解析・生成済みメッシュの再生）、`model_export.py`（GLB/USDZシリアライズ）、`transforms.py`（共通変換計算）に分けています。従来の `modeler.to_glb` / `to_usdz` は互換用の転送関数として残しています。
+`server/` にHTTPサーバー・形状計算・書き出し・証明書生成などのPythonスクリプト、`html/` にクライアントのHTML・JavaScriptを置いています。`Makefile`、サンプルの `examples/`、生成物の `outputs/`、テストの `tests/` はルートに置きます。起動・書き出しの `make` コマンドはルートで実行してください。
+
+モジュールは `server/modeler.py`（モデル評価・形状計算・テッセレーション）、`server/animation.py`（アニメーション構文・検証・サンプリング）、`html/animation.js`（設定の解析・生成済みメッシュの再生）、`server/model_export.py`（GLB/USDZシリアライズ）、`server/transforms.py`（共通変換計算）に分けています。従来の `modeler.to_glb` / `to_usdz` は互換用の転送関数として残しています。
+
+通常のPythonファイルから `from modeler import Group` などを使う場合は、`server/` を `PYTHONPATH` に追加します。ネイティブAPIも使う場合は、上のサンプル再生成コマンドと同様に `.build/smlib-core/` も指定します。
 
 ## 検証
 
 ```bash
-PYTHONPATH="$PWD/.build/smlib-core:$PWD" \
+PYTHONPATH="$PWD/.build/smlib-core:$PWD/server" \
   python3.12 \
   -m unittest discover -s tests -v
 PYTHONPYCACHEPREFIX=/tmp/cad-pycache \
   python3.12 \
-  -m py_compile modeler.py server.py codex_bridge.py json_to_glb.py json_to_usdz.py
-node --check app.js
-node --check chat.js
+  -m py_compile server/*.py
+node --check html/app.js
+node --check html/chat.js
 node tests/test_animation.js
 node tests/test_model_file_ui.js
 node tests/test_preview_guides.js

@@ -7,7 +7,7 @@ const context=vm.createContext({
   cancelAnimationFrame:id=>frames.delete(id),
   fetch:()=>{requests++;throw Error('Playback must never request geometry');}
 });
-vm.runInContext(fs.readFileSync(require.resolve('../animation.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/animation.js'),'utf8'),context);
 const A=context.ModelAnimation;
 const source=fs.readFileSync(require.resolve('../examples/animation_loop.anim'),'utf8');
 const plain=value=>JSON.parse(JSON.stringify(value));

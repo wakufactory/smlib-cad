@@ -16,5 +16,5 @@ The last two entries are surfaces without thickness. The GLB uses Y up; the
 source model uses Z up. Regenerate it from the workspace root with:
 
 ```sh
-PYTHONPATH=.build/smlib-core:. .packman-cache/python/3.12.14-macos-aarch64/bin/python3.12 examples/export_primitive_gallery.py
+PYTHONPATH=.build/smlib-core:server .packman-cache/python/3.12.14-macos-aarch64/bin/python3.12 examples/export_primitive_gallery.py
 ```

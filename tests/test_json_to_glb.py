@@ -105,7 +105,7 @@ class JsonToGlbTests(unittest.TestCase):
             model = Path(directory) / "sample.json"
             output = Path(directory) / "result.glb"
             model.write_text(json.dumps(MODEL), encoding="utf-8")
-            command = [sys.executable, str(ROOT / "json_to_glb.py"), str(model), "-o", str(output)]
+            command = [sys.executable, str(ROOT / "server" / "json_to_glb.py"), str(model), "-o", str(output)]
             completed = subprocess.run(command, capture_output=True, text=True, check=False)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual(output.read_bytes()[:4], b"glTF")

@@ -22,7 +22,7 @@ const context=vm.createContext({
     throw Error(`Unexpected request: ${path}`);
   }
 });
-vm.runInContext(fs.readFileSync(require.resolve('../app.js'),'utf8'),context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'),'utf8'),context);
 
 class Camera{
   constructor(){this.up={set(){}};this.position={set(){}};}

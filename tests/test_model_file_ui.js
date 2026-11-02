@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
-const html = fs.readFileSync(require.resolve('../index.html'), 'utf8');
+const html = fs.readFileSync(require.resolve('../html/index.html'), 'utf8');
 const leftPane = html.split('</aside>')[0];
 const leftMarkup = html.split('<main><aside>')[1].split('</aside>')[0];
 const viewport = html.split('</aside>')[1].split('<section class="source-pane"')[0];
@@ -73,8 +73,8 @@ const context = vm.createContext({
     throw Error('No server request expected');
   }
 });
-vm.runInContext(fs.readFileSync(require.resolve('../animation.js'), 'utf8'), context);
-vm.runInContext(fs.readFileSync(require.resolve('../app.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/animation.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 const ModelFile = vm.runInContext('ModelFile', context);
 assert.equal(context.gridPoints([0, 0, 0], [0, 0, 0]).length / 3, 25);
 assert.equal(context.gridPoints([0, 0, 0], [1000, 1000, 0]).length / 3, 101 * 101);
@@ -222,7 +222,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(requestBody.exportScale, 2.5);
   assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(elements['usd-model'].src, '/preview/assets/test.usdz');
-  assert.equal(elements['object-tree'].textContent, '└─ assembly (group)\n   └─ body');
+  assert.equal(elements['object-tree'].textContent, '└─ assembly (G)\n   └─ body');
   assert.equal(elements.canvas.hidden, true);
   assert.equal(elements['usd-model'].hidden, false);
   assert.equal(elements['view-controls'].hidden, true);
@@ -272,7 +272,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   ];
   context.request=async()=>({json:async()=>({meshes:treeMeshes})});
   await actualPreview();
-  const tree='├─ assembly (group)\n│  ├─ body\n│  └─ detail (group)\n│     └─ bolt\n└─ loose<solid>';
+  const tree='├─ assembly (G)\n│  ├─ body\n│  └─ detail (G)\n│     └─ bolt\n└─ loose<solid>';
   assert.equal(elements['object-tree'].textContent,tree);
   elements.source.value='edited but not previewed';
   assert.equal(elements['object-tree'].textContent,tree);

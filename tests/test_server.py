@@ -106,6 +106,21 @@ class ChatRouteTests(unittest.TestCase):
         handler.end_headers = lambda: None
         return handler
 
+    def test_client_assets_are_served_from_html_directory(self):
+        from pathlib import Path
+        html_dir = Path(__file__).resolve().parents[1] / "html"
+        for route, name in (("/", "index.html"), ("/app.js", "app.js"),
+                            ("/animation.js", "animation.js"), ("/chat.js", "chat.js")):
+            with self.subTest(route=route):
+                handler = self.handler(route)
+                headers = {}
+                handler.send_header = headers.__setitem__
+                handler.do_GET()
+                self.assertEqual(handler.responses, [200])
+                self.assertEqual(handler.wfile.getvalue(), (html_dir / name).read_bytes())
+                self.assertIn("text/html" if name.endswith(".html") else "text/javascript",
+                              headers["Content-Type"])
+
     def test_export_headers_count_meshes_and_deduplicated_materials(self):
         from modeler import evaluate, tessellate, to_glb, to_usdz
         from test_modeler import FakeBrep

@@ -13,7 +13,7 @@ from model_export import to_glb, to_usdz
 from animation import resolve_animation_source
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _number(value, name: str, minimum: float, maximum: float = math.inf) -> float:
