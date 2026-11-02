@@ -437,8 +437,9 @@ function show(meshes){
   updateGuides(lo,hi);
   zoom=meshes.length>1?2.25:2.8;draw();
 }
-async function request(path){
+async function request(path,filename){
   const data={animationSource:animationText(),mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
+  if(filename)data.filename=filename;
   if(path==='/export' || path==='/export/usdz' || path==='/preview/usdz'){
     if(!$('export-scale').checkValidity() || $('export-scale').value.trim()==='')throw Error('保存時の座標倍率は正の数値にしてください');
     data.exportScale=ModelFile.exportScale(Number($('export-scale').value));
@@ -548,7 +549,7 @@ function saveFileName(format){
 async function exportFile(format){
   const id=format==='usdz'?'export-usdz':'export';
   $(id).disabled=true;note(`${format.toUpperCase()} を生成中…`);
-  try{const name=saveFileName(format),response=await request(format==='usdz'?'/export/usdz':'/export'),blob=await response.blob(),url=URL.createObjectURL(blob);
+  try{const name=saveFileName(format),response=await request(format==='usdz'?'/export/usdz':'/export',name),blob=await response.blob(),url=URL.createObjectURL(blob);
     const meshCount=response.headers.get('X-Mesh-Count'),materialCount=response.headers.get('X-Material-Count');
     const counts=`mesh数 ${meshCount===null?'—':Number(meshCount).toLocaleString()} / material数 ${materialCount===null?'—':Number(materialCount).toLocaleString()}`;
     const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('export-stats-'+format).textContent=`${format.toUpperCase()}: ${counts}`;
@@ -566,18 +567,22 @@ function modelDocument(validateAnimation=true){
       finish:$('finish').value,finishSize:Number($('finish-size').value),exportScale:Number($('export-scale').value)}
   },validateAnimation);
 }
-function saveModel(){
+async function saveModel(){
+  $('save-model').disabled=true;
   try{
     const name=saveFileName('json');
     const data=modelDocument();
     const chat=globalThis.ModelChat?.snapshot();
     if(chat)data.chat=ModelFile.chat(chat);
-    const blob=new Blob([JSON.stringify(data,null,2)+'\n'],{type:'application/json'});
+    const content=JSON.stringify(data,null,2)+'\n';
+    const blob=new Blob([content],{type:'application/json'});
     if(blob.size>16_000_000)throw Error('JSONファイルは16 MB以下にしてください');
+    const response=await fetch('/save/json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:name,content})});
+    if(!response.ok){const error=await response.json();throw Error(error.error||'保存に失敗しました');}
     const url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     note(`${name} を保存しました`);
-  }catch(e){note(e.message,true);}
+  }catch(e){note(e.message,true);}finally{$('save-model').disabled=false;}
 }
 async function loadModel(file){
   if(!file)return;

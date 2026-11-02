@@ -44,7 +44,7 @@ elements.message.style = {};
 elements.source.addEventListener = () => {};
 elements.canvas = {getContext: () => null, addEventListener() {}};
 let savedBlob, downloadName;
-let exportPath, requestBody, allowExport = false;
+let exportPath, requestBody, allowExport = false, saveError = false;
 let resolveRequests=0,resolveResponse=null;
 const context = vm.createContext({
   Blob, console, setTimeout: () => {},
@@ -58,6 +58,7 @@ const context = vm.createContext({
   window: {isSecureContext: true, HTMLModelElement: class {}},
   fetch: async (path, options) => {
     if(options)requestBody=JSON.parse(options.body);
+    if(path==='/save/json')return {ok:!saveError,json:async()=>saveError?{error:'disk full'}:{saved:false}};
     if(path==='/animation/resolve'){
       resolveRequests++;
       return {ok:true,json:async()=>resolveResponse};
@@ -131,17 +132,27 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   elements.finish.value = 'fillet';
   elements['finish-size'].value = '0.5';
   elements['export-scale'].value = '2.5';
-  elements['save-model'].onclick();
+  await elements['save-model'].onclick();
   assert.equal(downloadName, 'model.json');
   elements['file-name'].value = 'engine block.glb';
-  elements['save-model'].onclick();
+  await elements['save-model'].onclick();
   assert.equal(downloadName, 'engine block.json');
+  assert.equal(requestBody.filename,'engine block.json');
+  assert.equal(requestBody.content,await savedBlob.text());
+  saveError=true;
+  downloadName=undefined;
+  await elements['save-model'].onclick();
+  assert.equal(downloadName,undefined);
+  assert.match(elements.message.textContent,/disk full/);
+  assert.equal(elements['save-model'].disabled,false);
+  saveError=false;
   allowExport = true;
   await elements.export.onclick();
   assert.equal(exportPath, '/export');
   assert.equal(requestBody.exportScale, 2.5);
   assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(downloadName, 'engine block.glb');
+  assert.equal(requestBody.filename,'engine block.glb');
   assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   assert.match(elements.message.textContent, /mesh数 3 \/ material数 2/);
   await elements['export-usdz'].onclick();
@@ -149,6 +160,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(requestBody.exportScale, 2.5);
   assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(downloadName, 'engine block.usdz');
+  assert.equal(requestBody.filename,'engine block.usdz');
   assert.equal(elements['export-stats-usdz'].textContent, 'USDZ: mesh数 3 / material数 1');
   assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   elements['export-scale'].value = '0';
@@ -166,7 +178,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   elements['file-name'].value = 'folder/model';
   assert.throws(() => context.saveFileName('glb'), /保存ファイル名/);
   elements['file-name'].value = 'model';
-  elements['save-model'].onclick();
+  await elements['save-model'].onclick();
   const json = await savedBlob.text();
   assert.equal(JSON.parse(json).parameters.exportScale, 2.5);
   elements.source.value = 'box changed 0 0 0 2 2 2';
@@ -189,7 +201,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(elements['save-model'].disabled, false);
   elements.source.value = pythonSource;
   elements['animation-source'].value = "animation loop 4\ntrack assembly\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend";
-  elements['save-model'].onclick();
+  await elements['save-model'].onclick();
   const pythonJson = await savedBlob.text();
   assert.equal(JSON.parse(pythonJson).mode, 'python');
   assert.equal(JSON.parse(pythonJson).animationSource,elements['animation-source'].value);
@@ -242,7 +254,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   let restored, blocked = false;
   context.ModelChat = {snapshot:()=>chat, restore:value=>{restored=value;}, assertIdle:()=>{if(blocked)throw Error('応答待ち');}};
   for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
-  elements['save-model'].onclick();
+  await elements['save-model'].onclick();
   const savedChatJson = await savedBlob.text();
   assert.deepEqual(JSON.parse(savedChatJson).chat, chat);
   await context.loadModel({size:savedChatJson.length,text:async()=>savedChatJson});
@@ -299,7 +311,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   const beforeToggle=JSON.stringify(context.modelDocument());
   elements['object-tree'].children[0].children[1].onclick();
   assert.equal(JSON.stringify(context.modelDocument()),beforeToggle,'preview visibility does not change JSON serialization');
-  elements['save-model'].onclick();
+  await elements['save-model'].onclick();
   const treeJson=await savedBlob.text();
   assert.deepEqual(JSON.parse(treeJson).objectTree,expectedTree);
   assert.deepEqual(JSON.parse(JSON.stringify(ModelFile.parse(treeJson).objectTree)),expectedTree);
@@ -320,7 +332,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   await context.loadModel({size:legacyJson.length,text:async()=>legacyJson});
   assert.equal(elements['object-tree'].textContent,'オブジェクトはありません');
   for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
-  elements['save-model'].onclick();
+  await elements['save-model'].onclick();
   assert.deepEqual(JSON.parse(await savedBlob.text()).objectTree,[]);
   // Reuse geometry only when it belongs to the current modeling inputs.
   let geometryFallbacks=0;

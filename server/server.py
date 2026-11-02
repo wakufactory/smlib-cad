@@ -128,6 +128,30 @@ def allowed_origin(origin: str, host_header: str, scheme: str = "http") -> bool:
     return not origin or origin == f"{scheme}://{host_header}"
 
 
+def save_filename(name, extension: str) -> str:
+    if (not isinstance(name, str) or not name.endswith(extension)
+            or not name[:-len(extension)].strip()
+            or name[:-len(extension)] in (".", "..")
+            or any(c in '\\/:*?"<>|' or ord(c) < 32 for c in name)):
+        raise ValueError("Invalid save filename")
+    return name
+
+
+def store_download(directory: Path | None, name: str, data: bytes):
+    if directory is None:
+        return
+    # Replace atomically so readers never see a partial file, and existing
+    # symlinks are replaced rather than followed outside the configured folder.
+    with tempfile.NamedTemporaryFile(dir=directory, prefix=".cad-save-", delete=False) as output:
+        temporary = Path(output.name)
+        try:
+            output.write(data)
+            output.close()
+            temporary.replace(directory / name)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+
 class Handler(BaseHTTPRequestHandler):
     def _check_origin(self):
         host = self.headers.get("Host", "")
@@ -182,7 +206,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         chat_paths = ("/chat/login", "/chat/send", "/chat/poll", "/chat/cancel", "/chat/reset")
-        if self.path not in ("/preview", "/preview/usdz", "/export", "/export/usdz", "/animation/resolve", *chat_paths):
+        if self.path not in ("/preview", "/preview/usdz", "/export", "/export/usdz", "/save/json", "/animation/resolve", *chat_paths):
             self.send_error(404)
             return
         try:
@@ -191,11 +215,27 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError("Content-Type must be application/json")
             length = int(self.headers.get("Content-Length", "0"))
             limit = 24_000_000 if self.path == "/chat/send" else (250_000 if self.path in chat_paths else 100_000)
+            if self.path == "/save/json":
+                limit = 33_000_000  # A 16 MB document, JSON-escaped in the envelope.
             if length < 1 or length > limit:
                 raise ValueError(f"Request must be between 1 and {limit} bytes")
             request = json.loads(self.rfile.read(length))
             if not isinstance(request, dict):
                 raise ValueError("JSON object required")
+            save_dir = getattr(self.server, "save_dir", None)
+            if self.path == "/save/json":
+                name = save_filename(request.get("filename"), ".json")
+                content = request.get("content")
+                if not isinstance(content, str):
+                    raise ValueError("content must be text")
+                data = content.encode("utf-8")
+                if len(data) > 16_000_000:
+                    raise ValueError("JSONファイルは16 MB以下にしてください")
+                if not isinstance(json.loads(content), dict):
+                    raise ValueError("JSON object required")
+                store_download(save_dir, name, data)
+                self._json(200, {"saved": save_dir is not None})
+                return
             if self.path in chat_paths:
                 chat = self.server.chat
                 if self.path == "/chat/login":
@@ -212,6 +252,9 @@ class Handler(BaseHTTPRequestHandler):
             source = request["source"]
             if not isinstance(source, str):
                 raise ValueError("source must be text")
+            if self.path in ("/export", "/export/usdz"):
+                extension = ".usdz" if self.path == "/export/usdz" else ".glb"
+                name = save_filename(request.get("filename", "model" + extension), extension)
             if self.path == "/preview/usdz":
                 metadata = {}
                 data = run_model_request(request, self.path, metadata=metadata)
@@ -221,6 +264,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path in ("/export", "/export/usdz"):
                 usdz = self.path == "/export/usdz"
                 mesh_count, material_count = export_counts(data, usdz)
+                store_download(save_dir, name, data)
                 self.send_response(200)
                 self.send_header("Content-Type", "model/vnd.usdz+zip" if usdz else "model/gltf-binary")
                 self.send_header("Content-Disposition", 'attachment; filename="model.usdz"' if usdz else 'attachment; filename="model.glb"')
@@ -261,6 +305,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="0.0.0.0", help="IPv4 listen address (default: 0.0.0.0; use 127.0.0.1 for local only)")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--save-dir", type=Path, help="Also save UI JSON/GLB/USDZ downloads in this folder (overwrite same names)")
     parser.add_argument("--cert", type=Path, help="TLS server certificate")
     parser.add_argument("--key", type=Path, help="TLS server private key")
     parser.add_argument("--chat-log", action="store_true", help="Log GPT instructions, requests and replies to stdout (images are metadata only)")
@@ -271,7 +316,14 @@ def main():
         ipaddress.IPv4Address(args.host)
     except ipaddress.AddressValueError:
         parser.error("--host must be an IPv4 address")
+    save_dir = args.save_dir.expanduser().resolve() if args.save_dir is not None else None
+    if save_dir is not None:
+        try:
+            save_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            parser.error(f"--save-dir: {exc}")
     server = ModelHTTPServer((args.host, args.port), Handler)
+    server.save_dir = save_dir
     if args.chat_log:
         server.chat.log_enabled = True
     server.scheme = "https" if args.cert else "http"
@@ -285,6 +337,8 @@ def main():
         server.socket = context.wrap_socket(server.socket, server_side=True,
                                             do_handshake_on_connect=False)
     scheme = server.scheme
+    if save_dir is not None:
+        print(f"UI downloads will also be saved to {save_dir} (same names are overwritten).", flush=True)
     if server.chat.log_enabled:
         print("GPT exchange logging enabled on stdout ([cad-chat]).", flush=True)
     if args.host == "0.0.0.0":

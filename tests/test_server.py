@@ -3,15 +3,28 @@ import io
 import json
 import ssl
 import subprocess
+import tempfile
 import unittest
+from pathlib import Path
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from server import Handler, ModelError, ModelHTTPServer, PreviewStore, allowed_host, allowed_origin, run_model_request, load_examples
+from server import Handler, ModelError, ModelHTTPServer, PreviewStore, allowed_host, allowed_origin, run_model_request, load_examples, main
 
 
 class LanAccessTests(unittest.TestCase):
+    def test_startup_save_directory_is_optional_and_created(self):
+        with tempfile.TemporaryDirectory() as folder:
+            directory = Path(folder) / 'new' / '保存 folder'
+            for options, expected in (([], None), (['--save-dir', str(directory)], directory)):
+                with patch('sys.argv', ['server.py', *options]), patch('server.ModelHTTPServer') as factory, patch('builtins.print'):
+                    main()
+                self.assertEqual(factory.return_value.save_dir, expected.resolve() if expected else None)
+                factory.return_value.serve_forever.assert_called_once()
+                factory.return_value.server_close.assert_called_once()
+            self.assertTrue(directory.is_dir())
+
     def test_animation_resolution_worker_does_not_execute_geometry(self):
         request = {'mode': 'text', 'source': 'let rpm = 120\nfn angle(t) = 360*rpm*t/60\nnot_a_geometry_command\n',
                    'animationSource': 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${angle(4)}\nend\nend'}
@@ -106,6 +119,59 @@ class ChatRouteTests(unittest.TestCase):
         handler.end_headers = lambda: None
         return handler
 
+    def test_json_download_is_stored_exactly_and_overwritten(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for content in ('{"source":"初回"}\n', '{"source":"更新", "chat": {}}\n'):
+                handler = self.handler('/save/json', {'filename': '設計 model.json', 'content': content})
+                handler.server.save_dir = Path(folder)
+                with patch('server.run_model_request') as worker:
+                    handler.do_POST()
+                worker.assert_not_called()
+                self.assertEqual(handler.responses, [200])
+                self.assertEqual((Path(folder) / '設計 model.json').read_bytes(), content.encode())
+            self.assertEqual(len(list(Path(folder).iterdir())), 1)
+
+    def test_json_save_without_directory_and_invalid_requests(self):
+        handler = self.handler('/save/json', {'filename': 'model.json', 'content': '{}'})
+        handler.do_POST()
+        self.assertEqual(json.loads(handler.wfile.getvalue()), {'saved': False})
+        handler = self.handler('/save/json', {'filename': 'large.json', 'content': json.dumps({'source': 'x' * 200_000})})
+        handler.do_POST()
+        self.assertEqual(handler.responses, [200])
+        for name in ('../escape.json', '/tmp/escape.json', 'folder\\escape.json', 'a.glb', '', '..json'):
+            handler = self.handler('/save/json', {'filename': name, 'content': '{}'})
+            handler.do_POST()
+            self.assertEqual(handler.responses, [400], name)
+        for content in ('broken json', '[]', None):
+            handler = self.handler('/save/json', {'filename': 'model.json', 'content': content})
+            handler.do_POST()
+            self.assertEqual(handler.responses, [400])
+        for headers in ({'Origin': 'https://evil.example'}, {'Host': 'evil.example:8765'}):
+            handler = self.handler('/save/json', {'filename': 'model.json', 'content': '{}'}, headers)
+            handler.do_POST()
+            self.assertEqual(handler.responses, [400])
+
+    def test_save_failure_returns_error_and_symlink_is_replaced(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            outside = root / 'outside.json'
+            outside.write_text('original')
+            directory = root / 'downloads'
+            directory.mkdir()
+            (directory / 'model.json').symlink_to(outside)
+            handler = self.handler('/save/json', {'filename': 'model.json', 'content': '{}'})
+            handler.server.save_dir = directory
+            handler.do_POST()
+            self.assertEqual(handler.responses, [200])
+            self.assertEqual(outside.read_text(), 'original')
+            self.assertFalse((directory / 'model.json').is_symlink())
+            handler = self.handler('/save/json', {'filename': 'model.json', 'content': '{}'})
+            handler.server.save_dir = directory
+            with patch('server.store_download', side_effect=OSError('disk full')):
+                handler.do_POST()
+            self.assertEqual(handler.responses, [400])
+            self.assertIn('disk full', json.loads(handler.wfile.getvalue())['error'])
+
     def test_client_assets_are_served_from_html_directory(self):
         from pathlib import Path
         html_dir = Path(__file__).resolve().parents[1] / "html"
@@ -141,6 +207,17 @@ class ChatRouteTests(unittest.TestCase):
                 self.assertEqual(headers["X-Mesh-Count"], "2")
                 self.assertEqual(headers["X-Material-Count"], "1")
                 self.assertEqual(handler.wfile.getvalue(), data)
+                with tempfile.TemporaryDirectory() as folder:
+                    name = '設計 model' + ('.usdz' if path.endswith('usdz') else '.glb')
+                    target = Path(folder) / name
+                    target.write_bytes(b'old')
+                    handler = self.handler(path, {'source': 'test', 'filename': name})
+                    handler.server.save_dir = Path(folder)
+                    with patch('server.run_model_request', return_value=data):
+                        handler.do_POST()
+                    self.assertEqual(handler.responses, [200])
+                    self.assertEqual(target.read_bytes(), handler.wfile.getvalue())
+                    self.assertEqual(target.read_bytes(), data)
 
     def test_chat_routes_do_not_require_model_source_except_send(self):
         for action, method in (("login", "login_start"), ("send", "send"), ("poll", "poll"),
