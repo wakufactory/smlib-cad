@@ -11,7 +11,7 @@ class Element {
   click() {this.clicked=true;}
   get firstChild() { return {remove: () => this.children.shift()}; }
 }
-const ids = ['chat-history', 'chat-status', 'chat-input', 'chat-send', 'chat-stop', 'chat-reset',
+const ids = ['chat-pane', 'chat-toggle', 'chat-history', 'chat-status', 'chat-input', 'chat-send', 'chat-stop', 'chat-reset',
   'chat-undo', 'chat-apply', 'chat-proposal', 'chat-login', 'chat-login-link', 'chat-connect',
   'source', 'animation-source', 'mode', 'example', 'model-file', 'sample', 'export', 'export-usdz', 'chat-attach', 'chat-files', 'chat-images'];
 const elements = Object.fromEntries(ids.map(id => [id, new Element()]));

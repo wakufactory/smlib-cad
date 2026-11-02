@@ -25,6 +25,17 @@ const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
 for (const id of ['animation-source', 'animation-apply', 'animation-play', 'animation-reset', 'animation-seek', 'animation-time', 'message', 'status', 'preview', 'export', 'export-usdz', 'object-tree', 'mesh-stats', 'export-stats-glb', 'export-stats-usdz', 'save-model', 'load-model', 'model-file', 'shading-mode', 'preview-mode', 'view-controls', 'show-axes', 'show-grid', 'usd-model', 'model-status', 'hint', 'example']) {
   elements[id] = elements[id] || {value: '', disabled: false};
 }
+function treeElement() {
+  return {children: [], attributes: {},
+    set textContent(value) {this.text = value; this.children = [];},
+    get textContent() {return this.children.length ? this.children.map(child => child.textContent).join(this === elements['object-tree'] ? '\n' : '') : this.text || '';},
+    appendChild(child) {this.children.push(child);},
+    setAttribute(name, value) {this.attributes[name] = value;},
+    getAttribute(name) {return this.attributes[name];},
+    click() {downloadName = this.download;}
+  };
+}
+elements['object-tree'] = treeElement();
 elements['preview-mode'].value = 'webgl';
 elements['show-axes'].checked = true;
 elements['show-grid'].checked = true;
@@ -40,7 +51,7 @@ const context = vm.createContext({
   URL: {createObjectURL(blob) {savedBlob = blob; return 'blob:test';}, revokeObjectURL() {}},
   document: {
     getElementById: id => elements[id],
-    createElement: () => ({click() {downloadName = this.download;}})
+    createElement: treeElement
   },
   ResizeObserver: class {observe() {}},
   location: {protocol: 'https:'},
@@ -285,6 +296,9 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
     ]},
     {type:'solid',name:'loose<solid>'}
   ];
+  const beforeToggle=JSON.stringify(context.modelDocument());
+  elements['object-tree'].children[0].children[1].onclick();
+  assert.equal(JSON.stringify(context.modelDocument()),beforeToggle,'preview visibility does not change JSON serialization');
   elements['save-model'].onclick();
   const treeJson=await savedBlob.text();
   assert.deepEqual(JSON.parse(treeJson).objectTree,expectedTree);

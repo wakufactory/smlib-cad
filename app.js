@@ -90,7 +90,7 @@ function selectEditorTab(name, focus=false){
     if(button)button.tabIndex=selected?0:-1;
     if(selected && focus)button?.focus?.();
   }
-  if(name==='model')refreshSourceLines();
+  refreshSourceLines();
 }
 for(const name of ['model','animation']){
   $('tab-'+name)?.addEventListener?.('click',()=>selectEditorTab(name));
@@ -102,22 +102,24 @@ for(const name of ['model','animation']){
 }
 const canvas = $('canvas');
 const message = $('message');
-let sourceLineCount = 0;
-function syncSourceLineScroll(){
-  const numbers=$('source-line-numbers-inner');
-  if(numbers?.style)numbers.style.transform=`translateY(${-$('source').scrollTop}px)`;
+const editorLineCounts = new Map();
+function syncSourceLineScroll(id='source'){
+  const numbers=$(id+'-line-numbers-inner');
+  if(numbers?.style)numbers.style.transform=`translateY(${-($(id).scrollTop||0)}px)`;
 }
 function refreshSourceLines(){
-  const source=$('source'),gutter=$('source-line-numbers'),numbers=$('source-line-numbers-inner');
-  if(!gutter?.style || !numbers?.style)return;
-  let count=1;
-  for(const char of source.value)if(char==='\n')count++;
-  if(count!==sourceLineCount){
-    numbers.textContent=Array.from({length:count},(_,index)=>index+1).join('\n');
-    gutter.style.width=`calc(${Math.max(2,String(count).length)}ch + 20px)`;
-    sourceLineCount=count;
+  for(const id of ['source','animation-source']){
+    const source=$(id),gutter=$(id+'-line-numbers'),numbers=$(id+'-line-numbers-inner');
+    if(!source || !gutter?.style || !numbers?.style)continue;
+    let count=1;
+    for(const char of source.value||'')if(char==='\n')count++;
+    if(count!==editorLineCounts.get(id)){
+      numbers.textContent=Array.from({length:count},(_,index)=>index+1).join('\n');
+      gutter.style.width=`calc(${Math.max(2,String(count).length)}ch + 20px)`;
+      editorLineCounts.set(id,count);
+    }
+    syncSourceLineScroll(id);
   }
-  syncSourceLineScroll();
 }
 const usdModel = $('usd-model');
 const modelStatus = $('model-status');
@@ -129,6 +131,12 @@ let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
 let previewFailure = null;
 let currentObjectTree = [];
+const hiddenPreviewNodes = new Set();
+function previewNodeKeys(mesh){
+  const path=(mesh.groupPath||[]).map(group=>['group',group.name]);
+  return [...path.map((_,index)=>JSON.stringify(path.slice(0,index+1))),
+    JSON.stringify([...path,['solid',mesh.name]])];
+}
 let currentMeshKey=null;
 function modelingKey(){return JSON.stringify(['source','mode','chord','angle','finish','finish-size'].map(id=>$(id).value));}
 let animationPlayer = null;
@@ -308,9 +316,10 @@ function draw(){
   camera.lookAt(...center);
   const mode=$('shading-mode').value;
   for(const mesh of rendered){
-    mesh.solid.visible=mode==='shading';
-    mesh.normal.visible=mode==='normal';
-    mesh.wire.visible=mode==='wireframe';
+    const visible=!mesh.nodeKeys.some(key=>hiddenPreviewNodes.has(key));
+    mesh.solid.visible=visible && mode==='shading';
+    mesh.normal.visible=visible && mode==='normal';
+    mesh.wire.visible=visible && mode==='wireframe';
   }
   for(const guide of guides)guide.object.visible=$(guide.toggle).checked;
   renderer.render(scene,camera);
@@ -421,7 +430,7 @@ function show(meshes){
     const lineColor=new THREE.Color().setRGB(...mesh.material.baseColor.map(c=>0.45+0.55*c),THREE.LinearSRGBColorSpace);
     const wire=new THREE.LineSegments(edgeGeometry,new THREE.LineBasicMaterial({color:lineColor}));
     scene.add(solid,normal,wire);
-    rendered.push({solid,normal,wire});
+    rendered.push({solid,normal,wire,nodeKeys:previewNodeKeys(mesh)});
     for(let i=0;i<mesh.positions.length;i+=3)for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],mesh.positions[i+j]);hi[j]=Math.max(hi[j],mesh.positions[i+j]);}
   }
   if(meshes.length){center=lo.map((x,i)=>(x+hi[i])/2);radius=Math.max(1,Math.hypot(...sub(hi,lo))/2);}
@@ -458,16 +467,39 @@ function updateObjectTree(objects){
 }
 function renderObjectTree(nodes){
   currentObjectTree=ModelFile.objectTree(nodes);
-  const lines=[];
-  function append(children,prefix){
+  hiddenPreviewNodes.clear();
+  const tree=$('object-tree'),entries=[];
+  tree.textContent='';
+  function refresh(){
+    for(const {button,row,path,key,node} of entries){
+      const visible=!path.some((_,index)=>hiddenPreviewNodes.has(JSON.stringify(path.slice(0,index+1))));
+      button.setAttribute('aria-pressed',String(!hiddenPreviewNodes.has(key)));
+      button.setAttribute('aria-label',`${node.name} を${hiddenPreviewNodes.has(key)?'表示':'非表示'}`);
+      button.title=button.disabled?'表示切替は WebGL プレビューで利用できます':button.getAttribute('aria-label');
+      row.className='object-tree-row'+(visible?'':' is-hidden');
+    }
+  }
+  function append(children,prefix,parentPath){
     children.forEach((node,index)=>{
       const last=index===children.length-1;
-      lines.push(`${prefix}${last?'└─ ':'├─ '}${node.name}${node.type==='group'?' (group)':''}`);
-      if(node.type==='group')append(node.children,prefix+(last?'   ':'│  '));
+      const path=[...parentPath,[node.type,node.name]],key=JSON.stringify(path);
+      const row=document.createElement('div'),label=document.createElement('span'),button=document.createElement('button');
+      label.textContent=`${prefix}${last?'└─ ':'├─ '}${node.name}${node.type==='group'?' (group)':''}`;
+      button.type='button';button.className='object-visibility';
+      button.disabled=$('preview-mode').value==='model';
+      button.onclick=()=>{
+        if($('preview-mode').value==='model')return;
+        if(hiddenPreviewNodes.has(key))hiddenPreviewNodes.delete(key);else hiddenPreviewNodes.add(key);
+        refresh();draw();
+      };
+      row.appendChild(label);row.appendChild(button);tree.appendChild(row);
+      entries.push({button,row,path,key,node});
+      if(node.type==='group')append(node.children,prefix+(last?'   ':'│  '),path);
     });
   }
-  append(currentObjectTree,'');
-  $('object-tree').textContent=lines.join('\n')||'オブジェクトはありません';
+  append(currentObjectTree,'',[]);
+  if(!entries.length)tree.textContent='オブジェクトはありません';
+  refresh();draw();
 }
 
 async function preview(){
@@ -623,7 +655,9 @@ $('example').onclick=()=>{
 };
 $('source').addEventListener('keydown',e=>{if(e.key==='Enter'&&(e.ctrlKey||e.metaKey)){e.preventDefault();preview();}});
 $('source').addEventListener('input',refreshSourceLines);
-$('source').addEventListener('scroll',syncSourceLineScroll);
+$('source').addEventListener('scroll',()=>syncSourceLineScroll('source'));
+$('animation-source').addEventListener?.('input',refreshSourceLines);
+$('animation-source').addEventListener?.('scroll',()=>syncSourceLineScroll('animation-source'));
 // Track captured pointers so a second finger switches rotation to pinch zoom.
 const viewPointers = new Map();
 function pinchDistance(){

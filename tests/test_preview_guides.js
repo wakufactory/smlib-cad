@@ -47,7 +47,9 @@ const camera = {
 let renders = 0;
 const renderer = {setSize() {}, render() { renders++; }};
 const context = vm.createContext({
-  document: {getElementById: id => elements[id] ||= {}},
+  document: {getElementById: id => elements[id] ||= {},
+    createElement: () => ({children: [], attributes: {}, appendChild(child) {this.children.push(child);},
+      setAttribute(name, value) {this.attributes[name] = value;}, getAttribute(name) {return this.attributes[name];}})},
   ResizeObserver: class {observe() {}},
   fetch: () => new Promise(() => {}),
   window: {}, location: {protocol: 'http:'},
@@ -182,3 +184,44 @@ assert.equal(elements['export-usdz'].disabled, true);
 assert.equal(vm.runInContext('currentMeshes.length', context), 0);
 assert.equal(vm.runInContext('previewRequestId', context), priorRequest + 1);
 console.log('clear model: geometry, guides, USDZ, counts, and pending preview reset passed');
+
+// Tree visibility only changes cached render objects, including all display modes.
+elements['object-tree'] = {children: [], appendChild(row) {this.children.push(row);}};
+elements['preview-mode'].value = 'webgl';
+const treeMeshes = [
+  {...mesh, name:'face', groupPath:[{name:'assembly'}]},
+  {...mesh, name:'face', groupPath:[{name:'other'}]},
+  {...mesh, name:'bolt', groupPath:[{name:'assembly'},{name:'detail'}]}
+];
+context.show(treeMeshes);
+context.updateObjectTree(treeMeshes);
+const rows = elements['object-tree'].children;
+const buttons = rows.map(row => row.children[1]);
+const snapshot = vm.runInContext('JSON.stringify(currentObjectTree)',context);
+let unexpectedSideEffects = 0;
+context.request = context.saveDraft = context.saveModel = () => {unexpectedSideEffects++;};
+// assembly, face, detail, bolt, other, face
+buttons[1].onclick();
+buttons[0].onclick();
+buttons[0].onclick();
+for(const mode of ['shading','wireframe','normal']) {
+  elements['shading-mode'].value = mode;
+  context.draw();
+  const visible = vm.runInContext('rendered.map(mesh => [mesh.solid,mesh.normal,mesh.wire].some(object => object.visible))', context);
+  assert.deepEqual(Array.from(visible), [false,true,true], 'child stays hidden after restoring parent; duplicate name is independent');
+}
+buttons[2].onclick();
+assert.equal(vm.runInContext('rendered[2].normal.visible',context),false,'nested group hides its descendants');
+assert.equal(buttons[3].attributes['aria-pressed'],'true','child retains its own visibility');
+assert(rows[3].className.includes('is-hidden'),'ancestor hiding is reflected in tree');
+assert.equal(vm.runInContext('JSON.stringify(currentObjectTree)',context),snapshot,'visibility is absent from saved model');
+assert.equal(unexpectedSideEffects,0,'toggle performs no requests or saves');
+elements['preview-mode'].value = 'model';
+buttons[4].onclick();
+assert.equal(unexpectedSideEffects,0);
+assert.equal(vm.runInContext('hiddenPreviewNodes.size',context),2,'model mode ignores visibility clicks');
+elements['object-tree'].children=[];
+context.updateObjectTree(treeMeshes);
+assert(elements['object-tree'].children.every(row => row.children[1].disabled));
+assert.equal(vm.runInContext('hiddenPreviewNodes.size',context),0,'new preview resets transient visibility');
+console.log('object tree: per-node visibility, hierarchy, modes, and no generation/save passed');

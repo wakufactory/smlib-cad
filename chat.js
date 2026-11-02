@@ -7,6 +7,13 @@
   let stopRequested = false;
   let activePoll = null;
   const history = $('chat-history');
+  let chatCollapsed = false;
+  $('chat-toggle').onclick = () => {
+    chatCollapsed = !chatCollapsed;
+    $('chat-pane').setAttribute('data-collapsed', String(chatCollapsed));
+    $('chat-toggle').setAttribute('aria-expanded', String(!chatCollapsed));
+    $('chat-toggle').textContent = chatCollapsed ? 'チャットを開く' : 'チャットを閉じる';
+  };
   function entry(role, text, error = false, record = true, images = []) {
     if(record){
       transcript.push({role,text,...(error ? {error:true} : {}),...(images.length?{images:images.map(item=>({...item}))}:{})});
