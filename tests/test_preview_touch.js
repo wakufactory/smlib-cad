@@ -29,7 +29,7 @@ event('pointermove', 2, 10);
 assert(Number.isFinite(state()[2]), 'coincident fingers stay finite');
 event('pointermove', 2, 11);
 event('pointermove', 2, 10010);
-assert.equal(state()[2], 1.2, 'near zoom limit');
+assert.equal(state()[2], 0.1, 'near zoom limit');
 event('pointermove', 2, 10.001);
 assert.equal(state()[2], 30, 'far zoom limit');
 event('pointerup', 2, 10);

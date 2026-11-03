@@ -125,7 +125,7 @@ const usdModel = $('usd-model');
 const modelStatus = $('model-status');
 let examples = {}, currentMeshes = [], rendered = [], center = [0, 0, 0], radius = 20;
 let guides = [], guideBounds = null;
-let yaw = 0.72, pitch = 0.44, zoom = 2.8;
+let yaw = -0.72, pitch = 0.44, zoom = 2.8;
 let THREE, renderer, scene, camera, perspectiveCamera, orthographicCamera, cameraLight;
 let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
@@ -669,7 +669,7 @@ function pinchDistance(){
   const [a,b]=Array.from(viewPointers.values());
   return Math.hypot(a[0]-b[0],a[1]-b[1]);
 }
-function setZoom(value){zoom=Math.max(1.2,Math.min(30,value));}
+function setZoom(value){zoom=Math.max(0.1,Math.min(30,value));}
 canvas.addEventListener('pointerdown',e=>{
   if(e.pointerType==='mouse' && e.button!==0)return;
   viewPointers.set(e.pointerId,[e.clientX,e.clientY]);
@@ -694,7 +694,7 @@ canvas.addEventListener('pointermove',e=>{
   draw();
 });
 canvas.addEventListener('wheel',e=>{e.preventDefault();setZoom(zoom*Math.exp(e.deltaY*0.001));draw();},{passive:false});
-canvas.ondblclick=()=>{yaw=0.72;pitch=0.44;zoom=2.8;draw();};
+canvas.ondblclick=()=>{yaw=-0.72;pitch=0.44;zoom=2.8;draw();};
 new ResizeObserver(draw).observe(canvas);
 const restoredDraft=restoreDraft();
 refreshSourceLines();

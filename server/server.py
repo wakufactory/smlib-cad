@@ -147,6 +147,7 @@ def store_download(directory: Path | None, name: str, data: bytes):
         try:
             output.write(data)
             output.close()
+            temporary.chmod(0o644)
             temporary.replace(directory / name)
         finally:
             temporary.unlink(missing_ok=True)

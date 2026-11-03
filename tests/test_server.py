@@ -129,6 +129,7 @@ class ChatRouteTests(unittest.TestCase):
                 worker.assert_not_called()
                 self.assertEqual(handler.responses, [200])
                 self.assertEqual((Path(folder) / '設計 model.json').read_bytes(), content.encode())
+                self.assertEqual((Path(folder) / '設計 model.json').stat().st_mode & 0o777, 0o644)
             self.assertEqual(len(list(Path(folder).iterdir())), 1)
 
     def test_json_save_without_directory_and_invalid_requests(self):
@@ -211,6 +212,7 @@ class ChatRouteTests(unittest.TestCase):
                     name = '設計 model' + ('.usdz' if path.endswith('usdz') else '.glb')
                     target = Path(folder) / name
                     target.write_bytes(b'old')
+                    target.chmod(0o600)
                     handler = self.handler(path, {'source': 'test', 'filename': name})
                     handler.server.save_dir = Path(folder)
                     with patch('server.run_model_request', return_value=data):
@@ -218,6 +220,7 @@ class ChatRouteTests(unittest.TestCase):
                     self.assertEqual(handler.responses, [200])
                     self.assertEqual(target.read_bytes(), handler.wfile.getvalue())
                     self.assertEqual(target.read_bytes(), data)
+                    self.assertEqual(target.stat().st_mode & 0o777, 0o644)
 
     def test_chat_routes_do_not_require_model_source_except_send(self):
         for action, method in (("login", "login_start"), ("send", "send"), ("poll", "poll"),
