@@ -134,6 +134,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <div class="command-entry"><dt><code>invisible</code></dt><dd>group 内に引数なしで指定し、子グループを含めて非表示にする。ソリッド計算は実行する</dd></div>
 <div class="command-entry"><dt><code>scale</code></dt><dd>グループ内で <code>scale sx sy sz</code>（各軸の正の倍率）</dd></div>
 <div class="command-entry"><dt><code>euler</code></dt><dd>グループ内で <code>euler rx ry rz</code>（度数）</dd></div>
+<div class="command-entry"><dt><code>quaternion</code></dt><dd>グループ内で <code>quaternion x y z w</code>（有限・非ゼロ、自動正規化）。同じgroupのeulerと排他。<code>quaternion dquaternion(x, y, z, 度数)</code>で軸と角度も指定可能</dd></div>
 <div class="command-entry"><dt><code>position</code></dt><dd>グループ内で <code>position x y z</code>（親座標での移動）</dd></div>
 <div class="command-entry"><dt><code>let</code></dt><dd><code>let 名前 = 式</code>（数値変数。<code>${式}</code> を数値引数や形状名に埋め込める）。<code>pi</code>、<code>e</code>、<code>sin</code> / <code>cos</code> / <code>tan</code>（ラジアン）、<code>asin</code> / <code>acos</code> / <code>atan</code> / <code>atan2</code>、<code>exp</code>、<code>log</code>、<code>sqrt</code>、<code>abs</code>、<code>radians</code> / <code>degrees</code> が使える</dd></div>
 <div class="command-entry"><dt><code>fn</code></dt><dd><code>fn 名前(引数, ...) = 式</code>（数値を返す計算関数）。例: <code>fn area(r) = pi * r * r</code> → <code>${area(5)}</code>。定義時の変数・関数を保持。定義以降で使用可。再帰不可</dd></div>
@@ -144,7 +145,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <pre>box body 0 0 0 20 20 8
 cylinder hole 10 10 -1 3 10
 subtract result body hole</pre>
-<p>Boolean は左右の入力を消費し、出力名に結果を作ります。材質の RGB・metallic・roughness は 0〜1。グループの変換は scale → euler → position の順です。</p>
+<p>Boolean は左右の入力を消費し、出力名に結果を作ります。材質の RGB・metallic・roughness は 0〜1。グループの変換は scale → 回転（euler / quaternion）→ position の順です。</p>
 </div>
 </details>
 <div class="settings-group">

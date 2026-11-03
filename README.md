@@ -203,6 +203,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `invisible` | group 内に引数なしで指定し、子グループを含めて非表示にする。ソリッド計算は実行する |
 | `scale` | グループ内で `scale sx sy sz`（各軸の正の倍率） |
 | `euler` | グループ内で `euler rx ry rz`（度数） |
+| `quaternion` | グループ内で `quaternion x y z w`（自動正規化、同じgroupの`euler`と排他） |
 | `position` | グループ内で `position x y z`（親座標での移動） |
 | `tessellation` | `形状名 曲面精度 角度条件`（形状別。各値に `default` を指定すると UI 設定を使用） |
 
@@ -360,6 +361,18 @@ Python の詳細設定は `extended_offset=True`（凸部の隣接面を延長�
 ### グループ変換
 
 `group 名前` から `end` までの形状と Boolean 結果をまとめて変換できます。グループの原点はローカル座標 `(0, 0, 0)` です。`scale`、`euler`、`position` はグループの設定値であり、記述位置にかかわらずそのグループ内の完成形状すべてに適用します。同じ項目を複数回書いた場合は最後の値を使います。省略値はそれぞれ `1 1 1`、`0 0 0`、`0 0 0` です。
+
+回転は `euler` の代わりに `quaternion x y z w` でも指定できます。成分は有限数4個で、入力を正規化して使用します。全成分が0の場合はエラーです。同じgroup内で `euler` と `quaternion` を併用すると、記述順や値にかかわらずエラーになります。親と子で異なる方式を使うことはできます。同じgroup内の `quaternion` の再指定は最後の値を使います。変換順は scale → quaternionによる回転 → position です。GLBには座標系変換したquaternion、USDZには `xformOp:orient` として保存します。アニメーション定義のキー構文は従来の `position|euler|scale` です。
+
+`quaternion dquaternion(x, y, z, d)` は、回転軸 `(x, y, z)` と回転角 `d`（度）からquaternionを生成します。軸は自動正規化するため単位ベクトルでなくてもよく、ゼロ軸はエラーです。引数には `let` の変数や `fn`・数学関数を含む数式が使えます。例：`quaternion dquaternion(0, 0, 2, angle(i))`。`quaternion ${dquaternion(0, 0, 1, 90)}` とも書けます。`dquaternion` はquaternion指定用で、数値だけを扱う `let` や `fn` の戻り値には使えません。
+
+```text
+group tilted
+  quaternion dquaternion(0, 0, 1, 90)  # Z軸90度回転
+  box body 0 0 0 10 20 5
+end
+```
+
 
 `include 既存group名` を group 内に書くと、先に `end` で閉じた group を名前で参照して、その group の子へ移せます。コピーは作らず、元の場所から移動します。形状名・材質・テッセレーション設定・子階層・非表示設定と、移す group 自身のローカル変換を保持し、さらに新しい親の変換を適用します。
 

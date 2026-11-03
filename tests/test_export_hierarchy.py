@@ -82,7 +82,7 @@ def usd_world(data):
         body = stage[declaration.end():end]
         if kind == 'Xform':
             node = {}
-            for op in ('translate', 'rotateXYZ', 'scale'):
+            for op in ('translate', 'rotateXYZ', 'orient', 'scale'):
                 match = re.search(r'xformOp:' + op + r' = (\([^\n]+\))', body)
                 if match:
                     node[op] = ast.literal_eval(match.group(1))
@@ -103,6 +103,9 @@ def usd_world(data):
                         j, k = (axis+1) % 3, (axis+2) % 3
                         c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
                         v[j], v[k] = c*v[j]-s*v[k], s*v[j]+c*v[k]
+                    if 'orient' in node:
+                        w, x, y, z = node['orient']
+                        v = rotate_quaternion(v, (x, y, z, w))
                     if attr == 'points':
                         v = [v[i] + node.get('translate', (0, 0, 0))[i] for i in range(3)]
                 items.extend(v)
@@ -112,6 +115,28 @@ def usd_world(data):
 
 
 class ExportHierarchyTests(unittest.TestCase):
+    def test_quaternion_export_and_animation_keep_static_rotation(self):
+        objects, materials, _ = evaluate("""group g
+quaternion 1 2 3 4
+box body 1 2 3 4 5 6
+end""", 'text', FakeBrep())
+        meshes = tessellate(objects, FakeBrep(), materials=materials)
+        clip = "animation loop 2\ntrack g\nkey 0 euler 0 0 0\nkey 2 euler 0 0 360\nend\nend"
+        for animation in ('', clip):
+            doc, _ = glb_world(to_glb(meshes, animation_source=animation))
+            rotation = next(node for node in doc['nodes'] if node['name'] == 'g')['rotation']
+            for actual, expected in zip(rotation, (1, 3, -2, 4)):
+                self.assertAlmostEqual(actual, expected / math.sqrt(30))
+            with zipfile.ZipFile(io.BytesIO(to_usdz(meshes, animation_source=animation))) as archive:
+                stage = archive.read('model.usda').decode()
+            match = re.search(r'quatd xformOp:orient = (\([^\n]+\))', stage)
+            self.assertIsNotNone(match)
+            for actual, expected in zip(ast.literal_eval(match.group(1)), (4, 1, 2, 3)):
+                self.assertAlmostEqual(actual, expected / math.sqrt(30))
+            self.assertIn('["xformOp:translate", "xformOp:orient", "xformOp:scale"]', stage)
+            if animation:
+                self.assertIn('xformOp:rotateXYZ.timeSamples', stage)
+
     def test_boolean_result_parent_and_pruning(self):
         for op in ('union', 'subtract', 'intersect'):
             for operands, expected in [('a b', ['parent']), ('left right', ['parent']),
@@ -220,7 +245,12 @@ position 10 -7 3
 include detail
 sphere ball 0 0 0 1
 end'''
-        cases = [(source, 'none'), (source, 'fillet'), (referenced, 'none')]
+        quaternion_source = source.replace('euler 23 37 -19', 'quaternion 1 2 -3 4').replace(
+            'euler -31 11 42', 'quaternion 0 2 0 2')
+        cases = [(source, 'none'), (source, 'fillet'), (referenced, 'none'),
+                 (quaternion_source, 'none'),
+                 (quaternion_source.replace('quaternion 1 2 -3 4', 'quaternion dquaternion(1, 2, -3, 123)'), 'none'),
+                 (quaternion_source.replace('quaternion 0 2 0 2', 'quaternion 0 -2 0 2'), 'none')]
         for op in ('union', 'subtract', 'intersect'):
             closed = boolean_source.replace('subtract result a b', f'{op} result left right')
             opened = closed.replace(f'end\n{op} result', f'{op} result') + '\nend'

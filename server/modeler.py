@@ -9,6 +9,8 @@ import math
 import re
 from contextlib import redirect_stdout
 
+from transforms import _normalize_quaternion, _quaternion_euler, _degree_quaternion
+
 
 EXAMPLE_SCRIPT = """# _smlib_core is available as sm. Assign the finished solid to result.
 body = sm.create_box((-10, -10, 0), 20, 20, 8)
@@ -194,6 +196,15 @@ def _number_expression(source, variables):
     return visit(_expression_tree(source), variables)
 
 
+def _quaternion_expression(source, variables):
+    """Read dquaternion(axis x, y, z, degrees) with bounded numeric arguments."""
+    call = _expression_tree(source)
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+            and call.func.id == "dquaternion" and not call.keywords and len(call.args) == 4):
+        raise ValueError("dquaternion: expected four positional arguments x, y, z, degrees")
+    return _degree_quaternion(*[_number_expression(ast.unparse(arg), variables) for arg in call.args])
+
+
 def _define_calculation(line, scope, line_number):
     match = re.fullmatch(r"fn\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(([^()]*)\)\s*=\s*(.+)", line, re.I)
     if not match:
@@ -269,7 +280,10 @@ def _split_comment(line):
 
 def _expand_text(line, variables):
     def replace(match):
-        value = _number_expression(match.group(1), variables)
+        expression = match.group(1).strip()
+        if re.match(r"dquaternion\s*\(", expression):
+            return " ".join(format(v, ".17g") for v in _quaternion_expression(expression, variables))
+        value = _number_expression(expression, variables)
         return str(int(value)) if isinstance(value, int) or value.is_integer() else format(value, ".15g")
     code, comment = _split_comment(line)
     result = _INTERPOLATION.sub(replace, code)
@@ -785,6 +799,8 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 parent["objects"].update(objects)
                 parent["objects"].tessellation.update(objects.tessellation)
                 transform = {key: frame[key] for key in ("name", "scale", "euler", "position")}
+                if "quaternion" in frame:
+                    transform["quaternion"] = frame["quaternion"]
                 if frame.get("invisible", False):
                     transform["invisible"] = True
                 if frame.get("properties"):
@@ -819,6 +835,18 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                 if len(frames) == 1 or args:
                     raise ValueError("invisible: no arguments inside a group required")
                 frame["invisible"] = True
+            elif op == "quaternion":
+                expression = line.split(None, 1)[1] if args else ""
+                axis_angle = bool(re.match(r"dquaternion\s*\(", expression))
+                if len(frames) == 1 or (not axis_angle and len(args) != 4):
+                    raise ValueError("quaternion: four numbers x y z w or dquaternion(x,y,z,degrees) inside a group required")
+                if frame.get("rotation_command") == "euler":
+                    raise ValueError("quaternion and euler are mutually exclusive in the same group")
+                values = (_quaternion_expression(expression, variables) if axis_angle
+                          else _normalize_quaternion(tuple(float(x) for x in args)))
+                frame["quaternion"] = values
+                frame["euler"] = _quaternion_euler(values)
+                frame["rotation_command"] = "quaternion"
             elif op in ("scale", "euler", "position"):
                 if len(frames) == 1 or len(args) != 3:
                     raise ValueError(f"{op}: three numbers inside a group required")
@@ -827,6 +855,10 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
                     raise ValueError(f"{op}: values must be finite")
                 if op == "scale" and any(x <= 0 for x in values):
                     raise ValueError("scale: factors must be positive")
+                if op == "euler":
+                    if frame.get("rotation_command") == "quaternion":
+                        raise ValueError("quaternion and euler are mutually exclusive in the same group")
+                    frame["rotation_command"] = "euler"
                 frame[op] = values
             elif op in PRIMITIVE_ARGUMENTS:
                 count = PRIMITIVE_ARGUMENTS[op]

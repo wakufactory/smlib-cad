@@ -239,7 +239,7 @@
       this.frameMatrix=new THREE.Matrix4();this.world=new THREE.Matrix4();
     }
     matrix(pose,target){
-      this.vector.set(...pose.position);this.quat.set(...quaternion(pose.euler));this.scale.set(...pose.scale);
+      this.vector.set(...pose.position);this.quat.set(...(pose.quaternion||quaternion(pose.euler)));this.scale.set(...pose.scale);
       return target.compose(this.vector,this.quat,this.scale);
     }
     configure(source,meshes,rendered){

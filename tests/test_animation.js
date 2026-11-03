@@ -202,4 +202,13 @@ assert.throws(()=>A.bind(clip,meshes));
 assert.equal(A.bind(A.parse(nested.replace('track parent\n','track /parent\n')),meshes).size,2);
 const repeated=[{groupPath:[group('a'),group('child')]},{groupPath:[group('b'),group('child')]}];
 assert.throws(()=>A.bind(A.parse(nested.replace('track parent\n','track child\n')),repeated));
+const quaternionRendered=[objects()];
+const quaternionMeshes=plain(meshes);
+quaternionMeshes[0].groupPath[0].quaternion=[0,0,Math.SQRT1_2,Math.SQRT1_2];
+// Deliberately omit the Euler fallback to verify quaternion is used directly.
+delete quaternionMeshes[0].groupPath[0].euler;
+const quaternionPlayer=new A.Player(THREE,()=>draws++);
+quaternionPlayer.configure(nested,quaternionMeshes,quaternionRendered);
+quaternionPlayer.seek(2);
+close(quaternionRendered[0].solid.matrix.point([10,22,0]),[7,24,0]);
 console.log('animation: parser, nested nonuniform transforms, playback, loop, pause, seek, reset, and zero geometry requests passed');

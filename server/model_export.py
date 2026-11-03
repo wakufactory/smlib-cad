@@ -348,13 +348,19 @@ def to_usdz(meshes, scale=1, animation_source=""):
             entry = item["transform"]
             def vector(values):
                 return "(" + ", ".join(format(v, ".17g") for v in values) + ")"
+            rotation_op = "orient" if "quaternion" in entry else "rotateXYZ"
+            if rotation_op == "orient":
+                x, y, z, w = _group_quaternion(entry)
+                rotation_line = f'quatd xformOp:orient = {vector((w, x, y, z))}'
+            else:
+                rotation_line = f'double3 xformOp:rotateXYZ = {vector(entry["euler"])}'
             group_start = len(geometry_lines)
             geometry_lines.extend([
                 f'{indent}def Xform "{name}"', indent + "{",
                 f'{indent}    double3 xformOp:translate = {vector(_scaled_positions(entry["position"], scale))}',
-                f'{indent}    double3 xformOp:rotateXYZ = {vector(entry["euler"])}',
+                f'{indent}    {rotation_line}',
                 f'{indent}    double3 xformOp:scale = {vector(entry["scale"])}',
-                f'{indent}    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:rotateXYZ", "xformOp:scale"]',
+                f'{indent}    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:{rotation_op}", "xformOp:scale"]',
             ])
             if "animation" in entry:
                 track = entry["animation"]

@@ -1,4 +1,5 @@
 import json
+import math
 import struct
 import unittest
 
@@ -64,6 +65,64 @@ class FakeBrep:
 
 
 class ModelerTests(unittest.TestCase):
+    def test_degree_quaternion_expressions(self):
+        for expression in ('dquaternion(0, 0, 10, 90)',
+                           '${dquaternion(0, 0, 1e308, 90)}',
+                           'dquaternion(0,0,1e-320,angle(45))',
+                           'dquaternion(0, 0, axis, ${angle(45)})'):
+            with self.subTest(expression=expression):
+                sm = FakeBrep()
+                source = f"let axis = 2\nfn angle(d) = d * 2\ngroup g\nquaternion {expression}\nbox a 0 0 0 1 1 1\nend"
+                objects, _, _ = evaluate(source, 'text', sm)
+                q = objects.group_paths['a'][0]['quaternion']
+                for actual, expected in zip(q, (0, 0, math.sqrt(.5), math.sqrt(.5))):
+                    self.assertAlmostEqual(actual, expected)
+                self.assertAlmostEqual(sm.transforms[0][2][2], 90)
+
+    def test_degree_quaternion_invalid_arguments(self):
+        for expression in ('dquaternion(0,0,0,90)', 'dquaternion(0,0,1)',
+                           'dquaternion(0,0,1,90,0)', 'dquaternion(0,0,1,d=90)',
+                           'dquaternion(0,0,1,1e999)', 'dquaternion(0,0,1,1/0)',
+                           'dquaternion(0,0,1,unknown)', 'dquaternion(0,0,1,abs())',
+                           'dquaternion(0,0,1,__import__("os"))',
+                           'dquaternion(0,0,1,90)[0]'):
+            for wrapped in (expression, '${' + expression + '}'):
+                with self.subTest(expression=wrapped), self.assertRaisesRegex(ValueError, 'Line 2:'):
+                    evaluate(f'group g\nquaternion {wrapped}\nend', 'text', FakeBrep())
+        with self.assertRaisesRegex(ValueError, 'mutually exclusive'):
+            evaluate('group g\neuler 0 0 0\nquaternion dquaternion(0,0,1,90)\nend', 'text', FakeBrep())
+
+    def test_quaternion_normalization_and_kernel_rotation(self):
+        for value in ("0 0 2 2", "0 0 1e308 1e308", "0 0 1e-320 1e-320"):
+            with self.subTest(value=value):
+                sm = FakeBrep()
+                objects, _, _ = evaluate(f"group g\nquaternion {value}\nbox a 0 0 0 1 1 1\nend", "text", sm)
+                q = objects.group_paths["a"][0]["quaternion"]
+                self.assertAlmostEqual(math.hypot(*q), 1)
+                self.assertAlmostEqual(q[2], math.sqrt(0.5))
+                for actual, expected in zip(sm.transforms[0][2], (0, 0, 90)):
+                    self.assertAlmostEqual(actual, expected)
+
+    def test_quaternion_errors_and_group_scope(self):
+        for command in ("quaternion 0 0 0 0", "quaternion nan 0 0 1",
+                        "quaternion 0 inf 0 1", "quaternion 0 0 1",
+                        "quaternion 0 0 0 1\neuler 0 0 0",
+                        "euler 0 0 0\nquaternion 0 0 0 1"):
+            with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Line .*quaternion"):
+                evaluate(f"group g\n{command}\nend", "text", FakeBrep())
+        with self.assertRaisesRegex(ValueError, "inside a group"):
+            evaluate("quaternion 0 0 0 1", "text", FakeBrep())
+        objects, _, _ = evaluate("""group parent
+quaternion 0 0 0 2
+quaternion 0 0 2 2
+group child
+euler 20 30 40
+box a 0 0 0 1 1 1
+end
+end""", "text", FakeBrep())
+        self.assertIn("quaternion", objects.group_paths["a"][0])
+        self.assertNotIn("quaternion", objects.group_paths["a"][1])
+
     def test_group_properties_reach_glb_extras(self):
         source = '''group assembly
 property label "部品 #1 with \\"quotes\\"" # trailing comment
