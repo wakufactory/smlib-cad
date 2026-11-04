@@ -167,12 +167,6 @@
           if(syntaxOnly)continue;
           const period=track.cycles?.[channel]??duration;
           if(keys[0][0]!==0 || keys.at(-1)[0]!==period)fail(n,`${channel} needs keys at 0 and ${period} seconds`);
-          const first=keys[0][1],last=keys.at(-1)[1];
-          const equal=channel==='euler'
-            ? Math.abs(quaternion(first).reduce((s,v,i)=>s+v*quaternion(last)[i],0))>=1-1e-9
-            : first.every((v,i)=>Math.abs(v-last[i])<=1e-9);
-          if(channel==='euler' && track.cycles?.euler && !first.every((v,i)=>Math.abs((last[i]-v)/360-Math.round((last[i]-v)/360))<=1e-9))fail(n,'euler cycle endpoints must differ by whole turns on each axis');
-          if(!equal)fail(n,`${channel} loop endpoints must have the same pose`);
         }
         tracks.push(track);track=null;
       }else if(w.length===2 && w[0]==='track' && !track){

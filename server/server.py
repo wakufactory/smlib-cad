@@ -175,6 +175,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/":
             self._reply(200, (HTML_DIR / "index.html").read_bytes(), "text/html; charset=utf-8")
+        elif self.path == "/command-reference.js":
+            self._reply(200, (HTML_DIR / "command-reference.js").read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/animation.js":
             self._reply(200, (HTML_DIR / "animation.js").read_bytes(), "text/javascript; charset=utf-8")
         elif self.path == "/app.js":

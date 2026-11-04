@@ -144,7 +144,6 @@ class AnimationTests(unittest.TestCase):
                     source.replace('cycle euler 2','cycle euler 2\ncycle euler 2'),
                     source.replace('cycle euler 2','cycle scale 2'),
                     source.replace('key 2 euler','key 4 euler'),
-                    source.replace('0 0 360','180 180 180'),
                     source.replace('cycle euler 2','cycle euler 0.00000001')]:
             with self.subTest(source=bad), self.assertRaises(ValueError):
                 parse_animation(bad)
@@ -234,9 +233,28 @@ class AnimationTests(unittest.TestCase):
             with self.subTest(expression=expression), self.assertRaisesRegex(ValueError, 'Animation line 5:'):
                 parse_animation(clip(last=f'0 0 {expression}'))
 
+    def test_open_loop_endpoints(self):
+        for channel, first, last in [('position', '0 0 0', '12 0 0'),
+                                     ('euler', '0 0 0', '0 0 180'),
+                                     ('scale', '1 1 1', '2 3 4')]:
+            with self.subTest(channel=channel):
+                source = clip(channel, first=first, last=last)
+                animation = parse_animation(resolve_animation_source(source))
+                track = animation['tracks'][0]
+                self.assertEqual(sample_track(track, 4)[channel], list(map(float, last.split())))
+                self.assertEqual(sample_track(track, 0)[channel], list(map(float, first.split())))
+                self.assertTrue(to_glb([mesh()], animation_source=source))
+                self.assertTrue(to_usdz([mesh()], animation_source=source))
+                cyclic = source.replace('track rotor', f'track rotor\ncycle {channel} 4').replace('loop 4', 'loop 8')
+                track = parse_animation(cyclic)['tracks'][0]
+                if channel != 'euler':
+                    self.assertGreater(sample_track(track, 3.999)[channel][0], 0.99 * float(last.split()[0]))
+                    self.assertEqual(sample_track(track, 4)[channel], list(map(float, first.split())))
+                else:
+                    self.assertEqual(sample_track(track, 8)[channel], [0, 0, 360])
+
     def test_invalid(self):
         invalid = [None, 1, 'x'*100001, 'animation loop 0\nend', 'animation loop 601\nend',
-                   clip(last='0 0 180'), clip('position',last='1 0 0'),
                    clip('scale',last='1 1 1',first='0 1 1'), clip(first='NaN 0 0'),
                    clip(middle='key 0 euler 0 0 90'), clip(middle='key 5 euler 0 0 90'),
                    clip().replace('key 0','key 1'), clip().replace('key 4','key 3'),

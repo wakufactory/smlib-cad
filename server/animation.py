@@ -8,8 +8,6 @@ No native geometry is evaluated here.
 import math
 import re
 
-from transforms import _group_quaternion
-
 DEFAULTS = {"position": [0., 0., 0.], "euler": [0., 0., 0.], "scale": [1., 1., 1.]}
 MAX_SAMPLES = 120_000
 _DECIMAL = r"(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?"
@@ -260,20 +258,6 @@ def parse_animation(source="", *, scope=None):
                     period = track.get("cycles", {}).get(channel, duration)
                     if keys[0][0] != 0 or keys[-1][0] != period:
                         fail(n, f"{channel} needs keys at 0 and {period} seconds")
-                    first, last = keys[0][1], keys[-1][1]
-                    if channel == "euler":
-                        # Rotation equivalence, including coupled Euler representations.
-                        a, b = (_group_quaternion({"euler": v}) for v in (first, last))
-                        equal = abs(sum(x*y for x, y in zip(a, b))) >= 1 - 1e-9
-                    else:
-                        equal = all(abs(a-b) <= 1e-9 for a, b in zip(first, last))
-                    if channel == "euler" and channel in track.get("cycles", {}):
-                        whole_turns = all(abs((b-a)/360 - round((b-a)/360)) <= 1e-9
-                                          for a, b in zip(first, last))
-                        if not whole_turns:
-                            fail(n, "euler cycle endpoints must differ by whole turns on each axis")
-                    if not equal:
-                        fail(n, f"{channel} loop endpoints must have the same pose")
                 tracks.append(track)
                 track = None
         elif len(words) == 2 and words[0] == "track" and track is None:

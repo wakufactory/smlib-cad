@@ -19,6 +19,16 @@ assert.deepEqual(plain(A.sample(clip.tracks[0],1).euler),[0,0,90]);
 assert.deepEqual(plain(A.sample(clip.tracks[1],1).position),[6,0,0]);
 assert.deepEqual(plain(A.sample(clip.tracks[2],2).scale),[1.6,1.6,1.6]);
 const rotationClip=(first,last,channel='euler')=>`animation loop 4\ntrack rotor\nkey 0 ${channel} 0 0 ${first}\nkey 4 ${channel} 0 0 ${last}\nend\nend`;
+// Loop endpoints may differ; position/scale cycles jump back at their boundary.
+for(const [channel,first,last] of [['position',[0,0,0],[12,0,0]],['euler',[0,0,0],[0,0,180]],['scale',[1,1,1],[2,3,4]]]){
+  const source=`animation loop 4\ntrack rotor\nkey 0 ${channel} ${first.join(' ')}\nkey 4 ${channel} ${last.join(' ')}\nend\nend`;
+  assert.doesNotThrow(()=>A.validate(source));
+  const track=A.parse(source).tracks[0];
+  assert.deepEqual(plain(A.sample(track,4)[channel]),last);
+  assert.deepEqual(plain(A.sample(track,0)[channel]),first);
+  const cyclic=A.parse(source.replace('track rotor',`track rotor\ncycle ${channel} 4`).replace('loop 4','loop 8')).tracks[0];
+  assert.deepEqual(plain(A.sample(cyclic,4)[channel]),channel==='euler'?last:first);
+}
 for(const expression of ['${angle(4)}','angle(period)','${angle(2 + 2) + rpm * 0}', 'sin(radians(360))']){
   const source=rotationClip(0,expression);
   assert.throws(()=>A.parse(source),error=>error.modelReference===true);
@@ -46,7 +56,7 @@ for(const expression of ['1/0','1e308*10','360**2','0x168','Math.sin(0)',
   '('.repeat(34)+'360'+')'.repeat(34),'('+Array(257).fill('0').join('+')+')']){
   assert.throws(()=>A.parse(rotationClip(0,expression)),/Animation line 4:/);
 }
-for(const bad of [source.replace('loop 4','loop 0'),source.replace('0 0 360','0 0 180'),
+for(const bad of [source.replace('loop 4','loop 0'),
   source.replace('key 4 euler','key 3 euler'),source.replace('1.6 1.6 1.6','0 1 1'),
   source.replace('key 2 position','key 0 position'),source+'\nend',source.replace('loop 4','loop 0x4'),
   source.replace('0 0 360','0 0 360000000')])assert.throws(()=>A.parse(bad));
@@ -78,7 +88,6 @@ for(const bad of [cycles.replace('cycle euler 2','cycle euler 0'),
   cycles.replace('cycle euler 2','cycle euler 2\ncycle euler 2'),
   cycles.replace('cycle euler 2','cycle scale 2'),
   cycles.replace('key 2 euler','key 120 euler'),
-  cycles.replace('0 0 -720','180 180 180'),
   cycles.replace('cycle euler 2','cycle euler 0.00000001'),
   cycles.replace('0 0 -720','0 0 360000')])assert.throws(()=>A.parse(bad));
 

@@ -177,7 +177,8 @@ class ChatRouteTests(unittest.TestCase):
         from pathlib import Path
         html_dir = Path(__file__).resolve().parents[1] / "html"
         for route, name in (("/", "index.html"), ("/app.js", "app.js"),
-                            ("/animation.js", "animation.js"), ("/chat.js", "chat.js")):
+                            ("/animation.js", "animation.js"), ("/chat.js", "chat.js"),
+                            ("/command-reference.js", "command-reference.js")):
             with self.subTest(route=route):
                 handler = self.handler(route)
                 headers = {}
