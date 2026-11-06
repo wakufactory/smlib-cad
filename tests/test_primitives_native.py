@@ -180,6 +180,55 @@ class PrimitiveIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "positive"):
             sm.chamfer_fillet(box, radius=0)
 
+    def test_chamfer_preserves_open_cylinder_cavity(self):
+        source = """let diameter = 0.16
+let height = 0.18
+let body_thickness = 0.01
+let radius = diameter / 2
+group pot
+  cylinder outer 0 0 0 ${radius} ${height}
+  cylinder cavity 0 0 ${body_thickness} ${radius - body_thickness} ${height + 0.01}
+  subtract vessel outer cavity
+  material vessel 0.65 0.7 0.75 0.8 0.25
+  chamfer vessel 0.001
+end"""
+        objects, materials, _ = evaluate(source, "text", sm)
+        self.assertEqual(len(sm.face_info(objects["vessel"])), 9)
+        mesh = tessellate(objects, sm, materials=materials)[0]
+        wall = []
+        floor = []
+        for i in range(0, len(mesh["positions"]), 3):
+            x, y, z = mesh["positions"][i:i + 3]
+            nx, ny, nz = mesh["normals"][i:i + 3]
+            radius = math.hypot(x, y)
+            if 0.0699 < radius < 0.0701 and 0.0106 < z < 0.1794 and abs(nz) < 0.1:
+                wall.append(x * nx + y * ny)
+            if math.isclose(z, 0.01) and radius < 0.0694 and abs(nz) > 0.99:
+                floor.append(nz)
+        self.assertTrue(wall)
+        self.assertTrue(all(dot < 0 for dot in wall))
+        self.assertTrue(floor)
+        self.assertTrue(all(nz > 0 for nz in floor))
+
+    def test_chamfer_preserves_inward_winding_of_subtracted_cavity(self):
+        source = ("box body 0 0 0 10 10 10\n"
+                  "sphere cutter 5 5 5 2\n"
+                  "subtract part body cutter\n"
+                  "chamfer part 0.5")
+        objects, materials, _ = evaluate(source, "text", sm)
+        positions = tessellate(objects, sm, materials=materials)[0]["positions"]
+        cavity_triangles = 0
+        for i in range(0, len(positions), 9):
+            a, b, c = (positions[j:j + 3] for j in (i, i + 3, i + 6))
+            if any(math.dist(point, (5, 5, 5)) > 2.01 for point in (a, b, c)):
+                continue
+            u = [b[j] - a[j] for j in range(3)]
+            v = [c[j] - a[j] for j in range(3)]
+            cross = (u[1]*v[2] - u[2]*v[1], u[2]*v[0] - u[0]*v[2], u[0]*v[1] - u[1]*v[0])
+            self.assertGreater(sum(cross[j] * (5 - a[j]) for j in range(3)), 0)
+            cavity_triangles += 1
+        self.assertGreater(cavity_triangles, 0)
+
     def test_curved_normals_are_smooth_and_box_edges_stay_sharp(self):
         sphere = sm.create_sphere((0, 0, 0), 4)
         mesh = tessellate({"sphere": sphere}, sm, chord=0.08)[0]
