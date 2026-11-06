@@ -196,28 +196,28 @@ const treeMeshes = [
 context.show(treeMeshes);
 context.updateObjectTree(treeMeshes);
 const rows = elements['object-tree'].children;
-const buttons = rows.map(row => row.children[1]);
+const checkboxes = rows.map(row => row.children[1]);
 const snapshot = vm.runInContext('JSON.stringify(currentObjectTree)',context);
 let unexpectedSideEffects = 0;
 context.request = context.saveDraft = context.saveModel = () => {unexpectedSideEffects++;};
 // assembly, face, detail, bolt, other, face
-buttons[1].onclick();
-buttons[0].onclick();
-buttons[0].onclick();
+checkboxes[1].onclick();
+checkboxes[0].onclick();
+checkboxes[0].onclick();
 for(const mode of ['shading','wireframe','normal']) {
   elements['shading-mode'].value = mode;
   context.draw();
   const visible = vm.runInContext('rendered.map(mesh => [mesh.solid,mesh.normal,mesh.wire].some(object => object.visible))', context);
   assert.deepEqual(Array.from(visible), [false,true,true], 'child stays hidden after restoring parent; duplicate name is independent');
 }
-buttons[2].onclick();
+checkboxes[2].onclick();
 assert.equal(vm.runInContext('rendered[2].normal.visible',context),false,'nested group hides its descendants');
-assert.equal(buttons[3].attributes['aria-pressed'],'true','child retains its own visibility');
+assert.equal(checkboxes[3].checked,true,'child retains its own visibility');
 assert(rows[3].className.includes('is-hidden'),'ancestor hiding is reflected in tree');
 assert.equal(vm.runInContext('JSON.stringify(currentObjectTree)',context),snapshot,'visibility is absent from saved model');
 assert.equal(unexpectedSideEffects,0,'toggle performs no requests or saves');
 elements['preview-mode'].value = 'model';
-buttons[4].onclick();
+checkboxes[4].onclick();
 assert.equal(unexpectedSideEffects,0);
 assert.equal(vm.runInContext('hiddenPreviewNodes.size',context),2,'model mode ignores visibility clicks');
 elements['object-tree'].children=[];

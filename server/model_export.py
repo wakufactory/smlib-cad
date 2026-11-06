@@ -58,8 +58,15 @@ def _export_meshes(meshes):
     return output
 
 
+def _mesh_group_key(mesh, material_key):
+    path = mesh.get("groupPath")
+    if path:
+        return ("path", tuple(entry["name"] for entry in path), material_key)
+    return ("name", mesh.get("group", mesh["name"]))
+
+
 def to_glb(meshes, scale=1, animation_source=""):
-    """Encode recursive group TRS and individually selectable solid meshes."""
+    """Encode recursive group TRS and merge sibling meshes by material."""
     scale = _export_scale(scale)
     animation, bound = prepare_animation(animation_source, meshes)
     meshes = animation_meshes(_export_meshes(meshes), bound) if bound else _export_meshes(meshes)
@@ -103,10 +110,11 @@ def to_glb(meshes, scale=1, animation_source=""):
                 "baseColorFactor": [*material["baseColor"], 1.0],
                 "metallicFactor": material["metallic"],
                 "roughnessFactor": material["roughness"]}, "doubleSided": True})
-        group_name = mesh.get("group", mesh["name"])
-        if group_name not in groups:
-            groups[group_name] = {"materials": {}, "names": [], "path": mesh.get("groupPath", [])}
-        group = groups[group_name]
+        key = _mesh_group_key(mesh, material_key)
+        if key not in groups:
+            groups[key] = {"materials": {}, "names": [], "path": mesh.get("groupPath", []),
+                           "name": mesh.get("group", mesh["name"])}
+        group = groups[key]
         group["materials"].setdefault(material_key, []).append(mesh)
         group["names"].append(mesh["name"])
 
@@ -141,7 +149,8 @@ def to_glb(meshes, scale=1, animation_source=""):
             children = doc["nodes"][group_nodes[prefix]]["children"]
         return children
 
-    for group_name, group in groups.items():
+    for group in groups.values():
+        group_name = group["name"]
         children = parent_children(group["path"])
         primitives = []
         for material_key, members in group["materials"].items():
@@ -270,12 +279,13 @@ def to_usdz(meshes, scale=1, animation_source=""):
             raise ValueError("Mesh positions and normals must contain matching triangles")
         material = normalize_material(mesh.get("material", {}))
         key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
-        group_name = mesh.get("group", mesh["name"])
-        if group_name not in groups:
-            groups[group_name] = {"positions": [], "normals": [], "names": [], "faces": {},
-                                  "path": mesh.get("groupPath", []),
-                                  "hierarchical": "groupPath" in mesh}
-        group = groups[group_name]
+        group_key = _mesh_group_key(mesh, key)
+        if group_key not in groups:
+            groups[group_key] = {"positions": [], "normals": [], "names": [], "faces": {},
+                                 "name": mesh.get("group", mesh["name"]),
+                                 "path": mesh.get("groupPath", []),
+                                 "hierarchical": "groupPath" in mesh}
+        group = groups[group_key]
         first_face = len(group["positions"]) // 9
         group["positions"].extend(_scaled_positions(positions, scale))
         group["normals"].extend(normals)
@@ -284,7 +294,8 @@ def to_usdz(meshes, scale=1, animation_source=""):
 
     geometry_lines = lines
     tree = {}
-    for index, (group_name, group) in enumerate(groups.items()):
+    for index, group in enumerate(groups.values()):
+        group_name = group["name"]
         lines = []
         positions, normals = group["positions"], group["normals"]
         count = len(positions) // 3

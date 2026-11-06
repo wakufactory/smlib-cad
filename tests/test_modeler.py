@@ -935,7 +935,15 @@ end
         glb = to_glb(meshes)
         json_length = struct.unpack_from("<I", glb, 12)[0]
         doc = json.loads(glb[20:20 + json_length])
-        self.assertEqual(len(doc["meshes"]), 4)
+        self.assertEqual(len(doc["meshes"]), 3)
+        merged = next(node for node in doc["nodes"] if node["name"] == "plain")
+        self.assertEqual(merged["extras"]["sourceSolids"], ["plain", "instance__body"])
+        primitives = doc["meshes"][merged["mesh"]]["primitives"]
+        self.assertEqual(len(primitives), 1)
+        expected_vertices = sum(len(m["positions"]) // 3 for m in meshes
+                                if m["name"] in ("plain", "instance__body"))
+        self.assertEqual(doc["accessors"][primitives[0]["attributes"]["POSITION"]]["count"],
+                         expected_vertices)
         self.assertEqual(len(doc["materials"]), 2)
 
     def test_group_material_after_end_and_nested_priority(self):

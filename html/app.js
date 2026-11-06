@@ -472,11 +472,11 @@ function renderObjectTree(nodes){
   const tree=$('object-tree'),entries=[];
   tree.textContent='';
   function refresh(){
-    for(const {button,row,path,key,node} of entries){
+    for(const {checkbox,row,path,key,node} of entries){
       const visible=!path.some((_,index)=>hiddenPreviewNodes.has(JSON.stringify(path.slice(0,index+1))));
-      button.setAttribute('aria-pressed',String(!hiddenPreviewNodes.has(key)));
-      button.setAttribute('aria-label',`${node.name} を${hiddenPreviewNodes.has(key)?'表示':'非表示'}`);
-      button.title=button.disabled?'表示切替は WebGL プレビューで利用できます':button.getAttribute('aria-label');
+      checkbox.checked=!hiddenPreviewNodes.has(key);
+      checkbox.setAttribute('aria-label',`${node.name} を${hiddenPreviewNodes.has(key)?'表示':'非表示'}`);
+      checkbox.title=checkbox.disabled?'表示切替は WebGL プレビューで利用できます':checkbox.getAttribute('aria-label');
       row.className='object-tree-row'+(visible?'':' is-hidden');
     }
   }
@@ -484,17 +484,19 @@ function renderObjectTree(nodes){
     children.forEach((node,index)=>{
       const last=index===children.length-1;
       const path=[...parentPath,[node.type,node.name]],key=JSON.stringify(path);
-      const row=document.createElement('div'),label=document.createElement('span'),button=document.createElement('button');
-      label.textContent=`${prefix}${last?'└─ ':'├─ '}${node.name}${node.type==='group'?' (G)':''}`;
-      button.type='button';button.className='object-visibility';
-      button.disabled=$('preview-mode').value==='model';
-      button.onclick=()=>{
+      const row=document.createElement('div'),branch=document.createElement('span'),label=document.createElement('span'),checkbox=document.createElement('input');
+      branch.className='object-tree-branch';
+      branch.textContent=`${prefix}${last?'└─ ':'├─ '}`;
+      label.textContent=`${node.name}${node.type==='group'?' (G)':''}`;
+      checkbox.type='checkbox';checkbox.className='object-visibility';
+      checkbox.disabled=$('preview-mode').value==='model';
+      checkbox.onclick=()=>{
         if($('preview-mode').value==='model')return;
         if(hiddenPreviewNodes.has(key))hiddenPreviewNodes.delete(key);else hiddenPreviewNodes.add(key);
         refresh();draw();
       };
-      row.appendChild(label);row.appendChild(button);tree.appendChild(row);
-      entries.push({button,row,path,key,node});
+      row.appendChild(branch);row.appendChild(checkbox);row.appendChild(label);tree.appendChild(row);
+      entries.push({checkbox,row,path,key,node});
       if(node.type==='group')append(node.children,prefix+(last?'   ':'│  '),path);
     });
   }
@@ -688,7 +690,7 @@ canvas.addEventListener('pointermove',e=>{
     const after=pinchDistance();
     if(before>0 && after>0)setZoom(zoom*before/after);
   }else{
-    yaw+=(e.clientX-previous[0])*0.007;
+    yaw-=(e.clientX-previous[0])*0.007;
     pitch=Math.max(-1.48,Math.min(1.48,pitch+(e.clientY-previous[1])*0.007));
   }
   draw();

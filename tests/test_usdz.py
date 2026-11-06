@@ -49,17 +49,18 @@ class UsdzTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "matching triangles"):
             to_usdz([{"name": "bad", "positions": [0, 0, 0], "normals": []}])
 
-    def test_top_level_groups_keep_individual_meshes(self):
+    def test_same_material_merges_only_within_each_group(self):
         model = {**MODEL, "source": (
             "group left\nbox a 0 0 0 1 1 1\nbox b 2 0 0 1 1 1\nend\n"
             "group right\nbox c 4 0 0 1 1 1\nend\n")}
         with zipfile.ZipFile(io.BytesIO(build_usdz(model, FakeBrep()))) as archive:
             stage = archive.read("model.usda").decode("utf-8")
-        self.assertEqual(stage.count('def Mesh '), 3)
+        self.assertEqual(stage.count('def Mesh '), 2)
         self.assertIn('def Xform "left"', stage)
         self.assertIn('def Xform "right"', stage)
         self.assertIn('sourceName = "a"', stage)
-        self.assertIn('sourceName = "b"', stage)
+        self.assertIn('sourceName = "c"', stage)
+        self.assertIn('sourceSolids = ["a", "b"]', stage)
         self.assertNotIn('def GeomSubset', stage)
 
     def test_multiple_materials_keep_solid_bindings(self):

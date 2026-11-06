@@ -377,6 +377,9 @@ class AnimationTests(unittest.TestCase):
         # Repeated leaf names, flattened path collisions, and user names all differ.
         self.assertIn('Animation_a__detail_', names)
         self.assertIn('Animation_a__detail__', names)
+        merged = next(n for n in doc['nodes'] if n['name'] == 'first')
+        self.assertEqual(merged['extras']['sourceSolids'], ['first', 'fourth'])
+        self.assertEqual(len(doc['meshes']), 3)
         reversed_doc, _ = decode_glb(to_glb(list(reversed(meshes)), animation_source=source))
         reversed_names = {reversed_doc['nodes'][c['target']['node']]['name']
                           for c in reversed_doc['animations'][0]['channels']}
@@ -386,7 +389,10 @@ class AnimationTests(unittest.TestCase):
         for name in names:
             self.assertEqual(stage.count(f'def Xform "{name}"'), 1)
         paths, world = usd_world(data)
-        self.assertEqual(paths['first'][:-1], paths['fourth'][:-1])
+        self.assertEqual(paths['first'][-1], 'Animation_a__detail_')
+        self.assertEqual(len(world), 3)
+        self.assertIn('sourceSolids = ["first", "fourth"]', stage)
+        self.assertEqual(len(world['first'][0]), len(a['positions']) + len(d['positions']))
         _, static_world = usd_world(to_usdz(meshes))
         for name in world:
             for animated, static in zip(world[name][0], static_world[name][0]):
