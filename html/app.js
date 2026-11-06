@@ -280,10 +280,7 @@ function setupRenderer(){
   if(globalThis.ModelAnimation)animationPlayer=new ModelAnimation.Player(THREE,draw,animationStatus);
   perspectiveCamera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
   orthographicCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 1000);
-  for(const view of [perspectiveCamera,orthographicCamera]){
-    view.up.set(0, 0, 1);
-    scene.add(view);
-  }
+  scene.add(perspectiveCamera, orthographicCamera);
   scene.add(new THREE.AmbientLight(0xffffff, 0.7));
   cameraLight = new THREE.DirectionalLight(0xffffff, 3);
   cameraLight.position.set(...cameraLightDirection);
@@ -313,6 +310,9 @@ function draw(){
   camera.far=radius*zoom+radius*10;
   camera.updateProjectionMatrix();
   camera.position.set(...cameraEye());
+  // Keep screen-up perpendicular to the view direction, even at the poles.
+  const sinPitch = Math.sin(pitch);
+  camera.up.set(-sinPitch * Math.cos(yaw), -sinPitch * Math.sin(yaw), Math.cos(pitch));
   camera.lookAt(...center);
   const mode=$('shading-mode').value;
   for(const mesh of rendered){
@@ -691,7 +691,7 @@ canvas.addEventListener('pointermove',e=>{
     if(before>0 && after>0)setZoom(zoom*before/after);
   }else{
     yaw-=(e.clientX-previous[0])*0.007;
-    pitch=Math.max(-1.48,Math.min(1.48,pitch+(e.clientY-previous[1])*0.007));
+    pitch=Math.max(-Math.PI/2,Math.min(Math.PI/2,pitch+(e.clientY-previous[1])*0.007));
   }
   draw();
 });

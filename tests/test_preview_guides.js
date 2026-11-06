@@ -42,7 +42,7 @@ const scene = {
 };
 const camera = {
   updateProjectionMatrix() {},
-  position: {set() {}}, lookAt() {}, add() {}
+  position: {set() {}}, up: {set() {}}, lookAt() {}, add() {}
 };
 let renders = 0;
 const renderer = {setSize() {}, render() { renders++; }};
@@ -68,7 +68,7 @@ assert.deepEqual(Array.from(first[1].geometry.attributes.position.array), [0, -3
 assert.deepEqual(Array.from(first[2].geometry.attributes.position.array), [0, 0, -3, 0, 0, 3]);
 assert.equal(first[3].geometry.attributes.position.array.length / 3, 49);
 assert.deepEqual(Array.from(first[3].geometry.attributes.position.array.slice(0, 3)), [-3, -3, 0]);
-const orthoCamera = {isOrthographicCamera:true,updateProjectionMatrix(){},position:{set(){}},lookAt(){},add(){}};
+const orthoCamera = {...camera, isOrthographicCamera: true};
 context.orthographicCamera=orthoCamera;
 context.perspectiveCamera=camera;
 context.cameraLight={target:{}};
