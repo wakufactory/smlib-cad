@@ -132,6 +132,8 @@ let previewRequestId = 0;
 let previewFailure = null;
 let currentObjectTree = [];
 const hiddenPreviewNodes = new Set();
+let selectedPreviewNode = null;
+let selectionSurfaceMaterial, selectionWireMaterial, selectionAxes;
 function previewNodeKeys(mesh){
   const path=(mesh.groupPath||[]).map(group=>['group',group.name]);
   return [...path.map((_,index)=>JSON.stringify(path.slice(0,index+1))),
@@ -315,14 +317,110 @@ function draw(){
   camera.up.set(-sinPitch * Math.cos(yaw), -sinPitch * Math.sin(yaw), Math.cos(pitch));
   camera.lookAt(...center);
   const mode=$('shading-mode').value;
+  const selection=$('preview-mode').value==='webgl'?selectedPreviewNode:null;
+  let selectedGroup=null;
   for(const mesh of rendered){
     const visible=!mesh.nodeKeys.some(key=>hiddenPreviewNodes.has(key));
     mesh.solid.visible=visible && mode==='shading';
     mesh.normal.visible=visible && mode==='normal';
     mesh.wire.visible=visible && mode==='wireframe';
+    const index=selection===null?-1:mesh.nodeKeys.indexOf(selection);
+    const selected=visible && index>=0;
+    mesh.wire.material=selected && mesh.wire.visible
+      ? (selectionWireMaterial??=new THREE.LineBasicMaterial({color:0x64dcff,toneMapped:false}))
+      : mesh.wireMaterial;
+    const surface=selected && mode!=='wireframe';
+    if(surface){
+      selectionSurfaceMaterial??=new THREE.MeshBasicMaterial({
+        color:0x64dcff,opacity:0.4,transparent:true,depthWrite:false,toneMapped:false,
+        side:THREE.DoubleSide,forceSinglePass:true,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1
+      });
+      mesh.highlight??=new THREE.Mesh(mesh.solid.geometry,selectionSurfaceMaterial);
+      const parent=mode==='normal'?mesh.normal:mesh.solid;
+      if(mesh.highlight.parent!==parent)parent.add(mesh.highlight);
+    }
+    if(mesh.highlight)mesh.highlight.visible=surface;
+    if(!selectedGroup && index>=0){
+      const depth=Math.min(index+1,mesh.groupPath.length);
+      const selectionPath=mesh.nodeKeys.slice(0,index+1);
+      if(depth>0 && !selectionPath.some(key=>hiddenPreviewNodes.has(key))){
+        selectedGroup=mesh.groupPath.slice(0,depth);
+      }
+    }
   }
-  for(const guide of guides)guide.object.visible=$(guide.toggle).checked;
+  const showLocalAxes=drawSelectionAxes(selectedGroup,w,h);
+  for(const guide of guides){
+    if(guide.toggle==='show-grid'){
+      drawGrid(guide,showLocalAxes?selection:null,selectedGroup);
+      continue;
+    }
+    guide.object.visible=$(guide.toggle).checked && !showLocalAxes;
+  }
   renderer.render(scene,camera);
+}
+function drawGrid(guide,selection,groups){
+  const {object,settings}=guide;
+  object.visible=$('show-grid').checked;
+  if(!object.visible)return;
+  if(selection===null){
+    object.geometry=guide.worldGeometry;
+    if(guide.localGeometry){
+      object.matrix.identity();
+      object.matrixWorldNeedsUpdate=true;
+    }
+    return;
+  }
+  const world=selectionAxes.world;
+  if(selection!==guide.gridSelection){
+    const [lo,hi]=guideBounds;
+    const bounds=new THREE.Box3(new THREE.Vector3(...lo),new THREE.Vector3(...hi));
+    // Preview bounds are baked before animation, so convert them with the rest pose.
+    const rest=animationPlayer.groupMatrix(groups,new THREE.Matrix4(),undefined,{animated:false});
+    bounds.applyMatrix4(rest.invert());
+    guide.localGeometry?.dispose();
+    guide.localGeometry=gridGeometry(bounds.min.toArray(),bounds.max.toArray(),settings);
+    guide.gridSelection=selection;
+  }
+  object.geometry=guide.localGeometry;
+  object.matrixAutoUpdate=false;
+  object.matrix.copy(world);
+  object.matrixWorldNeedsUpdate=true;
+}
+function drawSelectionAxes(groups,width,height){
+  const overlay=$('local-axes');
+  overlay.hidden=true;
+  if(!groups || !animationPlayer)return false;
+  camera.updateMatrixWorld();
+  if(!selectionAxes){
+    selectionAxes={
+      world:new THREE.Matrix4(),local:new THREE.Matrix4(),origin:new THREE.Vector3(),projected:new THREE.Vector3(),
+      directions:[new THREE.Vector3(),new THREE.Vector3(),new THREE.Vector3()]
+    };
+  }
+  const {world,local,origin,projected,directions}=selectionAxes;
+  animationPlayer.groupMatrix(groups,world,local).extractBasis(...directions);
+  origin.setFromMatrixPosition(world);
+  projected.copy(origin).project(camera);
+  if(projected.z < -1 || projected.z > 1 || !Number.isFinite(projected.z))return false;
+  const x=(1+projected.x)*width/2,y=(1-projected.y)*height/2;
+  const depth=camera.isOrthographicCamera?radius*zoom:-projected.copy(origin).applyMatrix4(camera.matrixWorldInverse).z;
+  const length=depth*2*Math.tan(Math.PI/8)*64/height;
+  const svg=overlay.firstElementChild;
+  svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+  for(const [index,axis] of Array.from(svg.children).entries()){
+    projected.copy(directions[index]).setLength(length).add(origin).project(camera);
+    const endX=(1+projected.x)*width/2,endY=(1-projected.y)*height/2;
+    axis.setAttribute('transform',`translate(${x} ${y})`);
+    const [line,label]=axis.children;
+    line.setAttribute('x2',endX-x);line.setAttribute('y2',endY-y);
+    label.setAttribute('x',endX-x+4);label.setAttribute('y',endY-y-4);
+  }
+  projected.setFromMatrixPosition(local);
+  const coordinates=['x','y','z'].map(axis=>`${axis.toUpperCase()} ${Number(projected[axis].toFixed(4))}`);
+  const frame=groups.length>1?'親座標':'ワールド座標';
+  $('local-axes-origin').textContent=`原点（${frame}） ${coordinates.join(' / ')}`;
+  overlay.hidden=false;
+  return true;
 }
 function gridSettings(){
   const spacing=Number($('grid-spacing').value),offset=Number($('grid-offset').value);
@@ -353,7 +451,12 @@ function gridPoints(lo,hi,settings={spacing:1,offset:0,axes:[0,1,2]}){
   return positions;
 }
 function updateGuides(lo,hi){
-  for(const guide of guides){scene.remove(guide.object);guide.object.geometry.dispose();guide.object.material.dispose();}
+  for(const {object,worldGeometry,localGeometry} of guides){
+    scene.remove(object);
+    (worldGeometry||object.geometry).dispose();
+    localGeometry?.dispose();
+    object.material.dispose();
+  }
   guides=[];
   guideBounds=lo.every(Number.isFinite) && hi.every(Number.isFinite)?[lo.slice(),hi.slice()]:null;
   if(!guideBounds)return;
@@ -368,10 +471,15 @@ function updateGuides(lo,hi){
     object.renderOrder=1;
     scene.add(object);guides.push({object,toggle:'show-axes'});
   }
+  const settings=gridSettings()||{spacing:1,offset:0,axes:[0,1,2]};
+  const worldGeometry=gridGeometry(lo,hi,settings);
+  const object=new THREE.Points(worldGeometry,new THREE.PointsMaterial({color:0xb3c4d0,size:3,sizeAttenuation:false,transparent:true,opacity:0.65,depthWrite:false,toneMapped:false}));
+  scene.add(object);guides.push({object,toggle:'show-grid',settings,worldGeometry});
+}
+function gridGeometry(lo,hi,settings){
   const geometry=new THREE.BufferGeometry();
-  geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(gridPoints(lo,hi,gridSettings()||{spacing:1,offset:0,axes:[0,1,2]})),3));
-  const object=new THREE.Points(geometry,new THREE.PointsMaterial({color:0xb3c4d0,size:3,sizeAttenuation:false,transparent:true,opacity:0.65,depthWrite:false,toneMapped:false}));
-  scene.add(object);guides.push({object,toggle:'show-grid'});
+  geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(gridPoints(lo,hi,settings)),3));
+  return geometry;
 }
 function changeGrid(){
   const valid=!!gridSettings();
@@ -411,7 +519,7 @@ function show(meshes){
     scene.remove(mesh.solid,mesh.normal,mesh.wire);
     mesh.solid.geometry.dispose();mesh.solid.material.dispose();
     mesh.normal.material.dispose();
-    mesh.wire.geometry.dispose();mesh.wire.material.dispose();
+    mesh.wire.geometry.dispose();mesh.wireMaterial.dispose();
   }
   rendered=[];
   const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
@@ -430,7 +538,7 @@ function show(meshes){
     const lineColor=new THREE.Color().setRGB(...mesh.material.baseColor.map(c=>0.45+0.55*c),THREE.LinearSRGBColorSpace);
     const wire=new THREE.LineSegments(edgeGeometry,new THREE.LineBasicMaterial({color:lineColor}));
     scene.add(solid,normal,wire);
-    rendered.push({solid,normal,wire,nodeKeys:previewNodeKeys(mesh)});
+    rendered.push({solid,normal,wire,wireMaterial:wire.material,groupPath:mesh.groupPath||[],nodeKeys:previewNodeKeys(mesh)});
     for(let i=0;i<mesh.positions.length;i+=3)for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],mesh.positions[i+j]);hi[j]=Math.max(hi[j],mesh.positions[i+j]);}
   }
   if(meshes.length){center=lo.map((x,i)=>(x+hi[i])/2);radius=Math.max(1,Math.hypot(...sub(hi,lo))/2);}
@@ -469,34 +577,44 @@ function updateObjectTree(objects){
 function renderObjectTree(nodes){
   currentObjectTree=ModelFile.objectTree(nodes);
   hiddenPreviewNodes.clear();
+  selectedPreviewNode=null;
   const tree=$('object-tree'),entries=[];
   tree.textContent='';
   function refresh(){
-    for(const {checkbox,row,path,key,node} of entries){
+    for(const {checkbox,row,label,path,key,node} of entries){
       const visible=!path.some((_,index)=>hiddenPreviewNodes.has(JSON.stringify(path.slice(0,index+1))));
       checkbox.checked=!hiddenPreviewNodes.has(key);
       checkbox.setAttribute('aria-label',`${node.name} を${hiddenPreviewNodes.has(key)?'表示':'非表示'}`);
       checkbox.title=checkbox.disabled?'表示切替は WebGL プレビューで利用できます':checkbox.getAttribute('aria-label');
-      row.className='object-tree-row'+(visible?'':' is-hidden');
+      const selected=selectedPreviewNode===key;
+      label.setAttribute('aria-pressed',String(selected));
+      row.className='object-tree-row'+(visible?'':' is-hidden')+(selected?' is-selected':'');
     }
   }
   function append(children,prefix,parentPath){
     children.forEach((node,index)=>{
       const last=index===children.length-1;
       const path=[...parentPath,[node.type,node.name]],key=JSON.stringify(path);
-      const row=document.createElement('div'),branch=document.createElement('span'),label=document.createElement('span'),checkbox=document.createElement('input');
+      const row=document.createElement('div'),branch=document.createElement('span'),label=document.createElement('button'),checkbox=document.createElement('input');
       branch.className='object-tree-branch';
       branch.textContent=`${prefix}${last?'└─ ':'├─ '}`;
       label.textContent=`${node.name}${node.type==='group'?' (G)':''}`;
+      label.type='button';label.className='object-tree-label';
       checkbox.type='checkbox';checkbox.className='object-visibility';
       checkbox.disabled=$('preview-mode').value==='model';
+      label.disabled=checkbox.disabled;
+      label.onclick=()=>{
+        if($('preview-mode').value!=='webgl')return;
+        selectedPreviewNode=selectedPreviewNode===key?null:key;
+        refresh();draw();
+      };
       checkbox.onclick=()=>{
         if($('preview-mode').value==='model')return;
         if(hiddenPreviewNodes.has(key))hiddenPreviewNodes.delete(key);else hiddenPreviewNodes.add(key);
         refresh();draw();
       };
       row.appendChild(branch);row.appendChild(checkbox);row.appendChild(label);tree.appendChild(row);
-      entries.push({checkbox,row,path,key,node});
+      entries.push({checkbox,row,label,path,key,node});
       if(node.type==='group')append(node.children,prefix+(last?'   ':'│  '),path);
     });
   }

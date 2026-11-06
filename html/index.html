@@ -57,6 +57,12 @@ button.primary{background:#1784ab;border-color:#32a5ca;color:white}button:disabl
 .source-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}.source-heading span{font-size:11px;color:#8faabb}
 #viewport{position:relative;min-width:0;min-height:0;overflow:hidden;background-color:#0e1a26}
 canvas{width:100%;height:100%;display:block;touch-action:none}
+#local-axes{position:absolute;inset:0;pointer-events:none}
+#local-axes[hidden],canvas[hidden]+#local-axes{display:none}
+#local-axes svg{display:block;width:100%;height:100%}
+#local-axes line{stroke:currentColor;stroke-width:3;stroke-linecap:round;filter:drop-shadow(0 0 2px #0e1a26)}
+#local-axes text{fill:currentColor;stroke:#0e1a26;stroke-width:3;paint-order:stroke;font:bold 13px system-ui,sans-serif}
+#local-axes-origin{position:absolute;left:12px;bottom:34px;max-width:calc(100% - 24px);padding:4px 8px;border-radius:4px;background:#152538ee;color:#dbe8f0;font:12px/1.5 ui-monospace,monospace;overflow-wrap:anywhere}
 #shading-mode{position:absolute;top:12px;right:12px;background:#152538dd;z-index:1}
 #preview-options{position:absolute;top:12px;left:12px;z-index:1;display:flex;gap:6px;max-width:calc(100% - 120px)}#preview-options select{background:#152538dd}
 #view-controls{position:absolute;top:52px;right:12px;z-index:1;display:flex;padding:6px 8px;border:1px solid #36516a;border-radius:6px;background:#152538ee}
@@ -67,9 +73,11 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 #object-tree-panel summary{padding:8px 10px;cursor:pointer;font-weight:600}
 #object-tree{margin:0;padding:0 10px 10px;max-height:240px;overflow:auto;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;-webkit-user-select:text;user-select:text}
 .object-tree-row{display:flex;align-items:center;gap:0;min-width:max-content}
-.object-tree-row span{flex:1;white-space:pre}
-.object-tree-row .object-tree-branch{flex:none}
-.object-tree-row.is-hidden span{opacity:.45}
+.object-tree-branch{flex:none;white-space:pre}
+.object-tree-label{flex:1;border:0;padding:0 4px;background:transparent;color:inherit;font:inherit;text-align:left;white-space:pre}
+.object-tree-label:focus-visible{outline:2px solid #64dcff;outline-offset:-2px}
+.object-tree-row.is-selected{background:#21485d;color:#b7f0ff;border-radius:4px}
+.object-tree-row.is-hidden .object-tree-branch,.object-tree-row.is-hidden .object-tree-label{opacity:.45}
 .object-visibility{flex:none;width:12px;height:12px;min-height:0;margin:0 5px 0 0;padding:0;accent-color:#32a5ca;cursor:pointer}
 .object-visibility:disabled{opacity:.45;cursor:default}
 #export-stats{font-size:12px;line-height:1.7;font-variant-numeric:tabular-nums;white-space:pre-line;color:#dbe8f0}
@@ -124,7 +132,13 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <div class="controls"><label for="grid-offset">法線軸座標</label><input id="grid-offset" type="number" step="any" value="0" inputmode="decimal" aria-describedby="grid-offset-help"><span id="grid-offset-help" class="help">XY→Z · YZ→X · ZX→Y · WebGL のみ</span></div>
 </div>
 </div>
-</aside><section id="viewport"><canvas id="canvas"></canvas><model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><div id="preview-options"><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="projection-mode" aria-label="WebGL 投影方式"><option value="orthographic">平行投影</option><option value="perspective">透視投影</option></select></div><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="functions">計算関数の円形配置</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option><option value="groups">Python グループ・材質</option><option value="animation">TRS ループアニメーション</option></select><button id="example">読込</button></div>
+</aside><section id="viewport"><canvas id="canvas"></canvas>
+<div id="local-axes" hidden><svg aria-hidden="true">
+<g style="color:#ff6262"><line/><text>X</text></g>
+<g style="color:#65d98a"><line/><text>Y</text></g>
+<g style="color:#69aaff"><line/><text>Z</text></g>
+</svg><div id="local-axes-origin"></div></div>
+<model id="usd-model" stagemode="orbit" hidden></model><div id="model-status" hidden></div><div id="preview-options"><select id="preview-mode" aria-label="プレビュー方式" disabled><option value="webgl">WebGL</option><option value="model">USDZ &lt;model&gt;</option></select><select id="projection-mode" aria-label="WebGL 投影方式"><option value="orthographic">平行投影</option><option value="perspective">透視投影</option></select></div><select id="shading-mode" aria-label="プレビュー表示"><option value="shading">Shading</option><option value="wireframe">Wireframe</option><option value="normal">面法線 RGB</option></select><div id="view-controls"><label><input id="show-axes" type="checkbox" checked>XYZ 軸</label></div><div id="hint">ドラッグ: 回転 · ホイール / ピンチ: ズーム · ダブルクリック: 視点を戻す</div></section><section class="source-pane" aria-label="ソース"><div class="source-editor"><div class="row"><select id="mode"><option value="text">テキスト命令</option><option value="python">Python コード</option></select><select id="sample"><option value="clear">クリア</option><option value="default">基本例</option><option value="gallery">全プリミティブ</option><option value="functions">計算関数の円形配置</option><option value="circular">円形 CSG 配置</option><option value="sweeps">押し出し・回転体・スプライン</option><option value="offsets">オフセット・シェル</option><option value="groups">Python グループ・材質</option><option value="animation">TRS ループアニメーション</option></select><button id="example">読込</button></div>
 <div class="editor-tabs" role="tablist" aria-label="編集対象">
 <button id="tab-model" type="button" role="tab" aria-selected="true" aria-controls="model-panel">モデル</button>
 <button id="tab-animation" type="button" role="tab" aria-selected="false" aria-controls="animation-panel" tabindex="-1">アニメーション</button>

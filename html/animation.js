@@ -230,11 +230,31 @@
     constructor(THREE,draw,status){
       this.THREE=THREE;this.draw=draw;this.status=status;this.records=[];this.time=0;this.running=false;
       this.vector=new THREE.Vector3();this.quat=new THREE.Quaternion();this.scale=new THREE.Vector3();
-      this.frameMatrix=new THREE.Matrix4();this.world=new THREE.Matrix4();
+      this.frameMatrix=new THREE.Matrix4();this.groupFrameMatrix=new THREE.Matrix4();this.world=new THREE.Matrix4();
+      this.tracks=new Map();
     }
     matrix(pose,target){
       this.vector.set(...pose.position);this.quat.set(...(pose.quaternion||quaternion(pose.euler)));this.scale.set(...pose.scale);
       return target.compose(this.vector,this.quat,this.scale);
+    }
+    appendFrame(target,matrix,track){
+      target.multiply(matrix);
+      this.applyTrack(target,track);
+    }
+    applyTrack(target,track){
+      if(track)target.multiply(this.matrix(sample(track,this.time),this.frameMatrix));
+    }
+    groupMatrix(groups,target,local=this.groupFrameMatrix,{animated=true}={}){
+      target.identity();
+      local.identity();
+      let path='';
+      for(const group of groups){
+        path+=(path?'/':'')+group.name;
+        this.matrix(group,local);
+        if(animated)this.applyTrack(local,this.tracks.get(path));
+        target.multiply(local);
+      }
+      return target;
     }
     configure(source,meshes,rendered){
       const animation=parse(source),bound=bind(animation,meshes); // Validate before replacing a running clip.
@@ -248,16 +268,13 @@
         });
         return {frames,inverse:base.invert(),objects:[rendered[i].solid,rendered[i].normal,rendered[i].wire]};
       });
-      this.pause();this.animation=animation;this.records=records;this.time=0;this.seek(0);
+      this.pause();this.animation=animation;this.records=records;this.tracks=bound;this.time=0;this.seek(0);
     }
     seek(time){
       this.time=this.animation?Math.max(0,Math.min(this.animation.duration,time)):0;
       for(const record of this.records){
         this.world.identity();
-        for(const frame of record.frames){
-          this.world.multiply(frame.matrix);
-          if(frame.track)this.world.multiply(this.matrix(sample(frame.track,this.time),this.frameMatrix));
-        }
+        for(const frame of record.frames)this.appendFrame(this.world,frame.matrix,frame.track);
         this.world.multiply(record.inverse);
         for(const object of record.objects){object.matrixAutoUpdate=false;object.matrix.copy(this.world);object.matrixWorldNeedsUpdate=true;}
       }
@@ -280,7 +297,7 @@
       this.handle=undefined;this.status?.(this.time,this.animation?.duration||0,false);
     }
     reset(){this.pause();this.seek(0);}
-    clear(){this.pause();this.records=[];this.animation=null;this.time=0;this.status?.(0,0,false);}
+    clear(){this.pause();this.records=[];this.tracks.clear();this.animation=null;this.time=0;this.status?.(0,0,false);}
   }
   globalThis.ModelAnimation={parse,validate,bind,sample,sampleTimes,quaternion,Player};
 })();
