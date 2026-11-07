@@ -261,17 +261,22 @@ def _range_expressions(source):
     return [ast.unparse(argument) for argument in call.args]
 
 
+_RAW_PROPERTY_PREFIX = re.compile(r"\s*property\s+\S+\s+`", re.I)
+
+
 def _split_comment(line):
     """Keep # inside quoted property strings, including escaped quotes."""
+    raw_property = _RAW_PROPERTY_PREFIX.match(line)
+    raw_start = raw_property.end() - 1 if raw_property else -1
     quote, escaped = None, False
     for index, char in enumerate(line):
         if escaped:
             escaped = False
-        elif quote and char == "\\":
+        elif quote in ('"', "'") and char == "\\":
             escaped = True
         elif char == quote:
             quote = None
-        elif not quote and char in ('"', "'"):
+        elif not quote and (char in ('"', "'") or index == raw_start):
             quote = char
         elif not quote and char == "#":
             return line[:index], line[index:]
@@ -286,10 +291,15 @@ def _expand_text(line, variables):
         value = _number_expression(expression, variables)
         return str(int(value)) if isinstance(value, int) or value.is_integer() else format(value, ".15g")
     code, comment = _split_comment(line)
+    raw_property = _RAW_PROPERTY_PREFIX.match(code)
+    literal = ""
+    if raw_property:
+        raw_start = raw_property.end() - 1
+        code, literal = code[:raw_start], code[raw_start:]
     result = _INTERPOLATION.sub(replace, code)
     if "${" in result:
         raise ValueError("unclosed or nested ${expression}")
-    return result + comment
+    return result + literal + comment
 
 
 def _block_end(records, start, opener):
@@ -823,13 +833,19 @@ def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line
             elif op == "property":
                 fields = line.split(None, 2)
                 if len(frames) == 1 or len(fields) != 3:
-                    raise ValueError("property: key and JSON value inside a group required")
-                try:
-                    value = json.loads(fields[2])
-                    # json.loads accepts NaN/Infinity, but glTF requires JSON numbers.
-                    json.dumps(value, allow_nan=False)
-                except (ValueError, OverflowError) as exc:
-                    raise ValueError("property: value must be valid JSON with finite numbers") from exc
+                    raise ValueError("property: key and value inside a group required")
+                literal = fields[2]
+                if literal.startswith("`"):
+                    if not literal.endswith("`") or literal.count("`") != 2:
+                        raise ValueError("property: expected a single backtick-delimited string")
+                    value = literal[1:-1]
+                else:
+                    try:
+                        value = json.loads(literal)
+                        # json.loads accepts NaN/Infinity, but glTF requires JSON numbers.
+                        json.dumps(value, allow_nan=False)
+                    except (ValueError, OverflowError) as exc:
+                        raise ValueError("property: value must be valid JSON with finite numbers") from exc
                 frame.setdefault("properties", {})[fields[1]] = value
             elif op == "invisible":
                 if len(frames) == 1 or args:

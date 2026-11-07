@@ -132,6 +132,24 @@ const mesh = {name: 'face', positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
   normals: [0, 0, -1, 0, 0, -1, 0, 0, -1],
   material: {baseColor: [0.2, 0.4, 0.6], metallic: 0, roughness: 1}};
 context.show([mesh]);
+// Rebuilding changed geometry preserves the entire view in either projection.
+vm.runInContext('yaw=1.2; pitch=-0.3; zoom=1.7;', context);
+const viewState = () => vm.runInContext('JSON.stringify([center,radius,yaw,pitch,zoom,cameraEye()])', context);
+const retainedView = viewState();
+const movedMesh = {...mesh, positions:mesh.positions.map((value,index)=>value*5+[20,30,40][index%3])};
+for(const projection of ['perspective','orthographic']) {
+  elements['projection-mode'].value=projection;
+  elements['projection-mode'].onchange();
+  context.show([movedMesh,movedMesh]);
+  assert.equal(viewState(),retainedView,'geometry and solid count changes retain the camera and zoom');
+}
+vm.runInContext('resetPreviewView=true',context);
+context.show([movedMesh]);
+assert.notEqual(viewState(),retainedView,'loading another model fits the new geometry');
+assert.equal(vm.runInContext('zoom',context),2.8);
+assert.equal(vm.runInContext('yaw',context),-0.72);
+assert.equal(vm.runInContext('pitch',context),0.44);
+context.show([mesh]);
 const preview = vm.runInContext('rendered[0]', context);
 const colors = Array.from(preview.normal.geometry.attributes.color.array);
 const middle = ((0.5 + 0.055) / 1.055) ** 2.4;

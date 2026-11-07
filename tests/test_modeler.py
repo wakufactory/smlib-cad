@@ -124,8 +124,9 @@ end""", "text", FakeBrep())
         self.assertNotIn("quaternion", objects.group_paths["a"][1])
 
     def test_group_properties_reach_glb_extras(self):
-        source = '''group assembly
-property label "部品 #1 with \\"quotes\\"" # trailing comment
+        source = r'''group assembly
+property label "部品 #1 with \"quotes\"" # trailing comment
+property metadataText `{"id":"#1","path":"C:\\parts","template":"${id}"}` # trailing comment
 property count 2
 property count 3
 property active true
@@ -143,7 +144,8 @@ end'''
         nodes = {node["name"]: node for node in json.loads(data[20:20 + length])["nodes"]}
         self.assertEqual(nodes["assembly"]["extras"], {
             "label": '部品 #1 with "quotes"', "count": 3, "active": True,
-            "optional": None, "metadata": {"tags": ["steel", 12, False], "offset": 0.25}})
+            "optional": None, "metadata": {"tags": ["steel", 12, False], "offset": 0.25},
+            "metadataText": r'{"id":"#1","path":"C:\\parts","template":"${id}"}'})
         self.assertEqual(nodes["child"]["extras"], {"label": "child"})
         self.assertNotIn("extras", nodes["body"])
 
@@ -177,7 +179,8 @@ end'''
         for command in ('property', 'property key', 'property key bare text',
                         'property key "unclosed', 'property key NaN',
                         'property key Infinity', 'property key {"n": 1e999}',
-                        'property key [1,]', 'property key true false'):
+                        'property key [1,]', 'property key true false',
+                        'property key `unclosed', 'property key `valid` trailing'):
             with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Line 2: property:"):
                 evaluate(f"group g\n{command}\nend", "text", FakeBrep())
         with self.assertRaisesRegex(ValueError, "inside a group required"):

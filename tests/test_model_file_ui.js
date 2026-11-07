@@ -77,6 +77,10 @@ const context = vm.createContext({
 vm.runInContext(fs.readFileSync(require.resolve('../html/animation.js'), 'utf8'), context);
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 const ModelFile = vm.runInContext('ModelFile', context);
+// Diagnose malformed JSON even when Safari supplies no line or column.
+assert.throws(()=>ModelFile.parse('{\n  "source": "group g'),/2行13列からのJSON文字列が閉じる前/);
+assert.throws(()=>ModelFile.parse('{\n  "source": "group g\nend"\n}'),/2行21列: JSON文字列内に未エスケープ/);
+assert.throws(()=>ModelFile.parse('{"source":"trailing\\'),/1行11列からのJSON文字列が閉じる前/);
 assert.equal(context.gridPoints([0, 0, 0], [0, 0, 0]).length / 3, 25);
 assert.equal(context.gridPoints([0, 0, 0], [1000, 1000, 0]).length / 3, 101 * 101);
 assert.equal(context.gridPoints([1e9, 0, 0], [1e9 + 1, 1, 0]).length, 0);
@@ -193,6 +197,17 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(elements['export-scale'].value, 2.5);
   assert.equal(elements['finish-size'].disabled, false);
   assert.equal(elements['file-name'].value, 'model');
+
+  const beforeInvalid=elements.source.value, previewsBeforeInvalid=previewCalls;
+  const truncated='{\n  "source": "group g';
+  await context.loadModel({name:'truncated.json',size:100,text:async()=>truncated});
+  assert.match(elements.message.textContent,/2行13列/);
+  assert.match(elements.message.textContent,/truncated.json: 100 bytes \/ 読み取り後 22 bytes/);
+  assert.equal(elements.source.value,beforeInvalid);
+  assert.equal(previewCalls,previewsBeforeInvalid);
+
+  const propertySource='group lid\n  property interact {"clips":[["Loop",0,2.5],["Loop",3.5,6]]}\nend';
+  assert.equal(ModelFile.parse(JSON.stringify({...document,source:propertySource})).source,propertySource);
 
   const pythonSource = 'result = sm.create_box((0, 0, 0), 2, 3, 4)\n';
   for (const id of ['chord', 'angle', 'finish-size', 'export-scale']) elements[id].value = String(elements[id].value);
