@@ -78,7 +78,35 @@ const ModelFile = (() => {
     };
   }
 
-  return { validate, chat, images, exportScale, objectTree, parse: json => validate(JSON.parse(json)) };
+  function parse(json) {
+    let document;
+    try { document = JSON.parse(json); }
+    catch(error) {
+      // Safari reports both truncated strings and literal newlines as
+      // "Unterminated string", without a location. Diagnose the original text.
+      let start = -1, escaped = false, detail = '';
+      const location = index => {
+        const lines = json.slice(0, index).split('\n');
+        return `${lines.length}行${lines[lines.length - 1].length + 1}列`;
+      };
+      for(let i = 0; i < json.length; i++) {
+        const char = json[i];
+        if(start < 0) { if(char === '"')start = i; continue; }
+        if(char.charCodeAt(0) < 32) {
+          detail = `${location(i)}: JSON文字列内に未エスケープの制御文字があります（文字列開始: ${location(start)}）`;
+          break;
+        }
+        if(escaped)escaped = false;
+        else if(char === '\\')escaped = true;
+        else if(char === '"')start = -1;
+      }
+      if(!detail && start >= 0)detail = `${location(start)}からのJSON文字列が閉じる前にファイルが終わっています`;
+      throw Error(`${error.message}${detail ? `\n${detail}` : ''}`);
+    }
+    return validate(document);
+  }
+
+  return { validate, chat, images, exportScale, objectTree, parse };
 })();
 
 const $ = id => document.getElementById(id);
@@ -126,6 +154,7 @@ const modelStatus = $('model-status');
 let examples = {}, currentMeshes = [], rendered = [], center = [0, 0, 0], radius = 20;
 let guides = [], guideBounds = null;
 let yaw = -0.72, pitch = 0.44, zoom = 2.8;
+let resetPreviewView = true;
 let THREE, renderer, scene, camera, perspectiveCamera, orthographicCamera, cameraLight;
 let viewportWidth = 0, viewportHeight = 0;
 let previewRequestId = 0;
@@ -541,9 +570,14 @@ function show(meshes){
     rendered.push({solid,normal,wire,wireMaterial:wire.material,groupPath:mesh.groupPath||[],nodeKeys:previewNodeKeys(mesh)});
     for(let i=0;i<mesh.positions.length;i+=3)for(let j=0;j<3;j++){lo[j]=Math.min(lo[j],mesh.positions[i+j]);hi[j]=Math.max(hi[j],mesh.positions[i+j]);}
   }
-  if(meshes.length){center=lo.map((x,i)=>(x+hi[i])/2);radius=Math.max(1,Math.hypot(...sub(hi,lo))/2);}
+  if(meshes.length && resetPreviewView){
+    center=lo.map((x,i)=>(x+hi[i])/2);
+    radius=Math.max(1,Math.hypot(...sub(hi,lo))/2);
+    yaw=-0.72;pitch=0.44;zoom=meshes.length>1?2.25:2.8;
+    resetPreviewView=false;
+  }
   updateGuides(lo,hi);
-  zoom=meshes.length>1?2.25:2.8;draw();
+  draw();
 }
 async function request(path,filename){
   const data={animationSource:animationText(),mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
@@ -706,9 +740,11 @@ async function saveModel(){
 }
 async function loadModel(file){
   if(!file)return;
+  let text;
   try{
     if(file.size>16_000_000)throw Error('JSONファイルは16 MB以下にしてください');
-    const data=ModelFile.parse(await file.text()),p=data.parameters;
+    text=await file.text();
+    const data=ModelFile.parse(text),p=data.parameters;
     globalThis.ModelChat?.assertIdle();
     animationPlayer?.clear();
     $('animation-source').value=data.animationSource || '';
@@ -722,7 +758,11 @@ async function loadModel(file){
     globalThis.ModelChat?.restore(data.chat);
     renderObjectTree(data.objectTree||[]);
     previewFailure=null;
-  }catch(e){note(`JSONを読み込めません: ${e.message}`,true);return;}
+    resetPreviewView=true;
+  }catch(e){
+    const fileInfo=`${file.name || 'JSON'}: ${file.size} bytes${text===undefined ? '' : ` / 読み取り後 ${new Blob([text]).size} bytes`}`;
+    note(`JSONを読み込めません: ${e.message}\n${fileInfo}`,true);return;
+  }
   finally{$('model-file').value='';}
   await preview();
 }
@@ -744,11 +784,12 @@ $('preview-mode').onchange=()=>{
   showPreviewMode();preview();
 };
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
-$('mode').onchange=()=>{animationPlayer?.clear();$('animation-source').value='';$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
+$('mode').onchange=()=>{resetPreviewView=true;animationPlayer?.clear();$('animation-source').value='';$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
 function clearModel(){
   // Invalidate pending previews so an older response cannot restore the model.
   ++previewRequestId;
   previewFailure=null;
+  resetPreviewView=true;
   animationPlayer?.clear();$('animation-source').value='';
   $('source').value='';
   refreshSourceLines();
@@ -772,6 +813,7 @@ $('example').onclick=()=>{
   const mode=typeof variants[$('mode').value]==='string' ? $('mode').value
     : ['text','python'].find(mode=>typeof variants[mode]==='string');
   if(!mode){note('このサンプルはまだ読み込めません。',true);return;}
+  resetPreviewView=true;
   animationPlayer?.clear();$('animation-source').value=examples.animations?.[sample] || '';
   $('mode').value=mode;$('source').value=variants[mode];
   refreshSourceLines();
