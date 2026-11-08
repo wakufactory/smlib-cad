@@ -54,15 +54,15 @@ subtract result body hole</pre>
 <h3>アニメーション定義</h3>
 <p>右側の「アニメーション」タブに記述します。テキスト命令・Python の両モードで共通です。時刻は秒、回転は度、座標は対象グループのローカル座標です。<code>#</code> 以降はコメントです。</p>
 <dl>
-<div class="command-entry"><dt><code>animation loop 秒数</code> / <code>end</code></dt><dd>全体を囲むブロック。モデル全体で1つ、周期は <code>0 &lt; 秒数 &lt;= 1000</code>。内部に <code>track</code> を記述します。</dd></div>
+<div class="command-entry"><dt><code>animation [名前] loop 秒数</code> / <code>end</code></dt><dd>名前付きクリップ。名前を省略した <code>animation loop 4</code> は <code>main</code> として扱います。省略名同士や明示した main との重複はエラーです。最大64個、名前は英字または _ で始まる英数字・_・-、重複不可。左ペインで1本を選択して再生します。周期は <code>0 &lt; 秒数 &lt;= 1000</code>。内部に <code>track</code> を記述します。</dd></div>
 <div class="command-entry"><dt><code>track グループ名</code> / <code>end</code></dt><dd>出力に残るグループを対象にします。形状はグループで包んでください。同名グループは <code>assembly/rotor</code>、ルートからの指定は <code>/assembly/rotor</code> のようにパスで区別します。非表示・空・Booleanで消費されたグループや対象の重複指定はエラーです。</dd></div>
-<div class="command-entry"><dt><code>key 秒数 position|euler|scale X Y Z</code></dt><dd>1行に1チャンネルのキーを記述します。チャンネルごとに時刻を厳密に増やし、0秒と終端のキーが必要です。移動はモデルの座標単位、Euler回転は度、拡縮は正の倍率。省略時は移動・回転が <code>0 0 0</code>、拡縮が <code>1 1 1</code> です。各成分を線形補間し、回転の <code>360</code> は1回転、<code>720</code> は2回転になります。</dd></div>
+<div class="command-entry"><dt><code>key 秒数 position|euler|scale X Y Z</code></dt><dd>1行に1チャンネルのキーを記述します。チャンネルごとに時刻を厳密に増やし、0秒と終端のキーが必要です。移動はモデルの座標単位、Euler回転は度、拡縮は正の倍率。指定チャンネルを上書きし、省略したチャンネルは初期値を維持します。各成分を線形補間し、回転の <code>360</code> は1回転、<code>720</code> は2回転になります。</dd></div>
 <div class="command-entry"><dt><code>cycle position|euler|scale 秒数</code></dt><dd><code>track</code> 内でチャンネルごとの周期を指定します。そのチャンネルは0秒と周期の終端までのキーだけを書き、全体の秒数は各周期の整数倍にします。未指定のチャンネルは全体の終端までキーが必要です。両端の値・姿勢が異なっていても指定できます。移動・拡縮は周期の境界で開始値へジャンプします。回転差分は周期ごとに累積します。同じチャンネルへの重複指定やキーのない指定はエラーです。</dd></div>
 <div class="command-entry"><dt><code>for 変数 in range(...)</code> / <code>end</code></dt><dd><code>track</code> 内でキーを繰り返し生成します。<code>range(回数)</code>、<code>range(開始, 終了[, 刻み])</code> に対応し、終了値を含みません。内部には <code>key</code> と入れ子の <code>for</code> のみ記述できます。ループ変数は時刻・値の式で使えます。展開後もチャンネルごとの時刻を増やし、境界のキーを重複させないでください。長時間の同じ動きの反復には <code>cycle</code> を使います。</dd></div>
 <div class="command-entry"><dt>数式・<code>let</code>・<code>fn</code> の参照</dt><dd>周期・キー時刻・各値・<code>range</code> の引数には数式が使えます。テキストモデルのトップレベルの <code>let</code>・<code>fn</code> と数学関数・定数を参照できます。例：<code>key 4 euler 0 0 \${360 * 2}</code>。空白を含む式は <code>(式)</code> または <code>\${式}</code> で囲みます。モデル内のローカル定義やPythonの変数・関数は参照できません。</dd></div>
 </dl>
 <p>例：グループ <code>rotor</code> を2秒で1回転させ、全体で4秒のループにする</p>
-<pre>animation loop 4
+<pre>animation main loop 4
   track rotor
     cycle euler 2
     for i in range(3)
@@ -70,6 +70,6 @@ subtract result body hole</pre>
     end
   end
 end</pre>
-<p>モデルをプレビューした後、「設定を適用」で反映し、「再生」で確認できます。静的なグループ変換にアニメーションTRSを合成し、グループのローカル原点を中心に動かします。ループ両端の値・姿勢が異なるキーも指定でき、境界でのジャンプを許容します。上限は256トラック・4096キー・120,000生成サンプルです。設定はJSONへ保存され、動きはGLB・USDZへ書き出せます。</p>
+<p>モデルをプレビューした後、「設定を適用」で反映し、「再生」で確認できます。対象自身の初期変換を <code>base.position.x/y/z</code>・<code>base.euler.x/y/z</code>・<code>base.scale.x/y/z</code> で参照できます。例：<code>key 4 position (base.position.x + 100) base.position.y base.position.z</code>。初期値は再生中固定で、モデル再評価時に更新します。変換は元のグループに直接上書きし、追加グループは作りません。ループ両端の値・姿勢が異なるキーも指定でき、境界でのジャンプを許容します。上限は各クリップ256トラック・4096キー、全クリップ合計120,000生成サンプルです。設定はJSONへ保存され、GLBは全クリップ、USDZは選択した1クリップを書き出します。従来の追加変換方式には対応しません。</p>
 </div>`;
 })();

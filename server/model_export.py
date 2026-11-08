@@ -8,7 +8,7 @@ import zipfile
 
 from modeler import normalize_material
 from transforms import _group_quaternion, _group_rotation
-from animation import prepare_animation, animation_meshes, sample_times, sample_track
+from animation import prepare_animation, animation_meshes, sample_times, sample_track, select_clip
 
 
 def _export_scale(scale):
@@ -69,7 +69,7 @@ def to_glb(meshes, scale=1, animation_source=""):
     """Encode recursive group TRS and merge sibling meshes by material."""
     scale = _export_scale(scale)
     animation, bound = prepare_animation(animation_source, meshes)
-    meshes = animation_meshes(_export_meshes(meshes), bound) if bound else _export_meshes(meshes)
+    meshes = _export_meshes(meshes)
     if not meshes:
         doc = {"asset": {"version": "2.0", "generator": "USD BRep Modeler"},
                "scene": 0, "scenes": [{}]}
@@ -124,7 +124,6 @@ def to_glb(meshes, scale=1, animation_source=""):
                 for item in (v[i], v[i+2], -v[i+1])]
 
     group_nodes = {}
-    animated_nodes = []
 
     def parent_children(path):
         children = doc["scenes"][0]["nodes"]
@@ -144,8 +143,6 @@ def to_glb(meshes, scale=1, animation_source=""):
                 group_nodes[prefix] = index
                 children.append(index)
                 doc["nodes"].append(node)
-                if "animation" in entry:
-                    animated_nodes.append((index, entry["animation"]))
             children = doc["nodes"][group_nodes[prefix]]["children"]
         return children
 
@@ -169,10 +166,8 @@ def to_glb(meshes, scale=1, animation_source=""):
             node["extras"] = {"sourceSolids": group["names"]}
         children.append(len(doc["nodes"]))
         doc["nodes"].append(node)
-    if animated_nodes:
-        clip = {"name": "Loop", "channels": [], "samplers": [],
-                "extras": {"loop": True, "duration": animation["duration"]}}
-
+    if animation:
+        doc["animations"] = []
         def animation_accessor(values, width):
             blob.extend(b"\0" * (-len(blob) % 4))
             view = len(doc["bufferViews"])
@@ -185,45 +180,42 @@ def to_glb(meshes, scale=1, animation_source=""):
             doc["accessors"].append(item)
             return len(doc["accessors"])-1
 
-        for index, track in animated_nodes:
-            times = sample_times(track, animation["duration"])
-            # glTF uses float32 times. Reject colliding keys rather than emit invalid samplers.
-            packed_times = struct.unpack("<" + "f"*len(times), struct.pack("<" + "f"*len(times), *times))
-            if any(b <= a for a, b in zip(packed_times, packed_times[1:])):
-                raise ValueError("Animation key times are too close for GLB float32 precision")
-            time_accessor = animation_accessor(times, 1)
-            poses = [sample_track(track, time) for time in times]
-            # Write defaults for unused channels too, so the first pose is explicit.
-            for channel, target in (("position", "translation"), ("euler", "rotation"), ("scale", "scale")):
-                values = []
-                previous = None
-                for pose in poses:
-                    if channel == "euler":
-                        x, y, z, w = _group_quaternion(pose)
-                        value = [x, z, -y, w]
-                        if previous is not None and sum(a*b for a, b in zip(value, previous)) < 0:
-                            value = [-v for v in value]
-                        previous = value
-                    elif channel == "position":
-                        value = y_up(_scaled_positions(pose[channel], scale))
-                    else:
-                        x, y, z = pose[channel]
-                        value = [x, z, y]
-                    values.extend(value)
-                output = animation_accessor(values, 4 if channel == "euler" else 3)
-                sampler = len(clip["samplers"])
-                clip["samplers"].append({"input": time_accessor, "output": output, "interpolation": "LINEAR"})
-                clip["channels"].append({"sampler": sampler, "target": {"node": index, "path": target}})
-                first = poses[0]
-                if channel == "euler":
-                    x, y, z, w = _group_quaternion(first)
-                    doc["nodes"][index][target] = [x, z, -y, w]
-                elif channel == "position":
-                    doc["nodes"][index][target] = y_up(_scaled_positions(first[channel], scale))
-                else:
-                    x, y, z = first[channel]
-                    doc["nodes"][index][target] = [x, z, y]
-        doc["animations"] = [clip]
+        for selected, clip_bound in zip(animation["clips"], bound):
+            clip = {"name": selected["name"], "channels": [], "samplers": [],
+                    "extras": {"loop": True, "duration": selected["duration"]}}
+            for path, track in clip_bound.items():
+                index = group_nodes[path]
+                times = sample_times(track, selected["duration"])
+                # glTF uses float32 times. Reject colliding keys rather than emit invalid samplers.
+                packed_times = struct.unpack("<" + "f"*len(times), struct.pack("<" + "f"*len(times), *times))
+                if any(b <= a for a, b in zip(packed_times, packed_times[1:])):
+                    raise ValueError("Animation key times are too close for GLB float32 precision")
+                time_accessor = animation_accessor(times, 1)
+                poses = [sample_track(track, time) for time in times]
+                # Only authored channels are animated; node TRS retains the rest pose.
+                for channel, target in (("position", "translation"), ("euler", "rotation"), ("scale", "scale")):
+                    if channel not in track["channels"]:
+                        continue
+                    values = []
+                    previous = None
+                    for pose in poses:
+                        if channel == "euler":
+                            x, y, z, w = _group_quaternion(pose)
+                            value = [x, z, -y, w]
+                            if previous is not None and sum(a*b for a, b in zip(value, previous)) < 0:
+                                value = [-v for v in value]
+                            previous = value
+                        elif channel == "position":
+                            value = y_up(_scaled_positions(pose[channel], scale))
+                        else:
+                            x, y, z = pose[channel]
+                            value = [x, z, y]
+                        values.extend(value)
+                    output = animation_accessor(values, 4 if channel == "euler" else 3)
+                    sampler = len(clip["samplers"])
+                    clip["samplers"].append({"input": time_accessor, "output": output, "interpolation": "LINEAR"})
+                    clip["channels"].append({"sampler": sampler, "target": {"node": index, "path": target}})
+            doc["animations"].append(clip)
     doc["buffers"].append({"byteLength": len(blob)})
     js = json.dumps(doc, separators=(",", ":")).encode()
     js += b" " * (-len(js) % 4)
@@ -234,10 +226,12 @@ def to_glb(meshes, scale=1, animation_source=""):
             struct.pack("<I4s", len(blob), b"BIN\0") + blob)
 
 
-def to_usdz(meshes, scale=1, animation_source=""):
+def to_usdz(meshes, scale=1, animation_source="", animation_clip=None):
     """Package recursive Xforms and solid meshes as a Z-up USD stage."""
     scale = _export_scale(scale)
-    animation, bound = prepare_animation(animation_source, meshes)
+    collection, bindings = prepare_animation(animation_source, meshes)
+    animation = select_clip(collection, animation_clip)
+    bound = bindings[collection["clips"].index(animation)] if animation else {}
     meshes = animation_meshes(_export_meshes(meshes), bound) if bound else _export_meshes(meshes)
     def triples(values):
         if len(values) % 3 or not all(math.isfinite(float(v)) for v in values):
@@ -359,7 +353,7 @@ def to_usdz(meshes, scale=1, animation_source=""):
             entry = item["transform"]
             def vector(values):
                 return "(" + ", ".join(format(v, ".17g") for v in values) + ")"
-            rotation_op = "orient" if "quaternion" in entry else "rotateXYZ"
+            rotation_op = "orient" if "quaternion" in entry and "euler" not in entry.get("animation", {}).get("channels", {}) else "rotateXYZ"
             if rotation_op == "orient":
                 x, y, z, w = _group_quaternion(entry)
                 rotation_line = f'quatd xformOp:orient = {vector((w, x, y, z))}'
@@ -378,6 +372,8 @@ def to_usdz(meshes, scale=1, animation_source=""):
                 times = sample_times(track, animation["duration"])
                 poses = [sample_track(track, time) for time in times]
                 for field, op in (("position", "translate"), ("euler", "rotateXYZ"), ("scale", "scale")):
+                    if field not in track["channels"]:
+                        continue
                     value = poses[0][field]
                     if field == "position":
                         value = _scaled_positions(value, scale)

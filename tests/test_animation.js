@@ -9,60 +9,76 @@ const context=vm.createContext({
 });
 vm.runInContext(fs.readFileSync(require.resolve('../html/animation.js'),'utf8'),context);
 const A=context.ModelAnimation;
-const source=fs.readFileSync(require.resolve('../examples/animation_loop.anim'),'utf8');
+const parseClip=(source,...args)=>A.parse(source,...args)?.clips[0]||null;
+const source=`animation main loop 4
+track rotor
+key 0 euler 0 0 0
+key 4 euler 0 0 360
+end
+track slider
+key 0 position 0 0 0
+key 2 position 12 0 0
+key 4 position 0 0 0
+end
+track indicator
+key 0 scale 1 1 1
+key 2 scale 1.6 1.6 1.6
+key 4 scale 1 1 1
+end
+end`;
 const plain=value=>JSON.parse(JSON.stringify(value));
-assert.equal(A.parse('# empty'),null);
-const clip=A.parse(source);
+assert.equal(parseClip('# empty'),null);
+const clip=parseClip(source);
 assert.equal(clip.duration,4);
 assert.equal(clip.tracks.length,3);
 assert.deepEqual(plain(A.sample(clip.tracks[0],1).euler),[0,0,90]);
 assert.deepEqual(plain(A.sample(clip.tracks[1],1).position),[6,0,0]);
 assert.deepEqual(plain(A.sample(clip.tracks[2],2).scale),[1.6,1.6,1.6]);
-const rotationClip=(first,last,channel='euler')=>`animation loop 4\ntrack rotor\nkey 0 ${channel} 0 0 ${first}\nkey 4 ${channel} 0 0 ${last}\nend\nend`;
+const rotationClip=(first,last,channel='euler')=>`animation main loop 4\ntrack rotor\nkey 0 ${channel} 0 0 ${first}\nkey 4 ${channel} 0 0 ${last}\nend\nend`;
 // Loop endpoints may differ; position/scale cycles jump back at their boundary.
 for(const [channel,first,last] of [['position',[0,0,0],[12,0,0]],['euler',[0,0,0],[0,0,180]],['scale',[1,1,1],[2,3,4]]]){
-  const source=`animation loop 4\ntrack rotor\nkey 0 ${channel} ${first.join(' ')}\nkey 4 ${channel} ${last.join(' ')}\nend\nend`;
+  const source=`animation main loop 4\ntrack rotor\nkey 0 ${channel} ${first.join(' ')}\nkey 4 ${channel} ${last.join(' ')}\nend\nend`;
   assert.doesNotThrow(()=>A.validate(source));
-  const track=A.parse(source).tracks[0];
+  const track=parseClip(source).tracks[0];
   assert.deepEqual(plain(A.sample(track,4)[channel]),last);
   assert.deepEqual(plain(A.sample(track,0)[channel]),first);
-  const cyclic=A.parse(source.replace('track rotor',`track rotor\ncycle ${channel} 4`).replace('loop 4','loop 8')).tracks[0];
+  const cyclic=parseClip(source.replace('track rotor',`track rotor\ncycle ${channel} 4`).replace('loop 4','loop 8')).tracks[0];
   assert.deepEqual(plain(A.sample(cyclic,4)[channel]),channel==='euler'?last:first);
 }
 for(const expression of ['${angle(4)}','angle(period)','${angle(2 + 2) + rpm * 0}', 'sin(radians(360))']){
   const source=rotationClip(0,expression);
-  assert.throws(()=>A.parse(source),error=>error.modelReference===true);
+  assert.throws(()=>parseClip(source),error=>error.modelReference===true);
   assert.doesNotThrow(()=>A.validate(source));
 }
-assert.doesNotThrow(()=>A.validate('animation loop ${period}\ntrack rotor\nkey 0 euler 0 0 0\nkey ${period} euler 0 0 ${angle(period)}\nend\nend'));
+assert.doesNotThrow(()=>A.validate('animation main loop ${period}\ntrack rotor\nkey 0 euler 0 0 0\nkey ${period} euler 0 0 ${angle(period)}\nend\nend'));
 for(const expression of ['${angle(4) +}','Math.sin(0)','${angle(4,)}','${angle(4)}garbage']){
   assert.throws(()=>A.validate(rotationClip(0,expression)));
 }
 for(const base of [1e12,-1e12]){
-  const track=A.parse(rotationClip(base,base+360)).tracks[0];
+  const track=parseClip(rotationClip(base,base+360)).tracks[0];
   assert.deepEqual(plain(A.sample(track,2).euler),[0,0,base+180]);
 }
-for(const value of ['1e999','-1e999','NaN'])assert.throws(()=>A.parse(rotationClip(value,value)),/finite/);
-for(const channel of ['position','scale'])assert.throws(()=>A.parse(rotationClip('1e12','1e12',channel)),/within ±1e9/);
+for(const value of ['1e999','-1e999','NaN'])assert.throws(()=>parseClip(rotationClip(value,value)),/finite/);
+for(const channel of ['position','scale'])assert.throws(()=>parseClip(rotationClip('1e12','1e12',channel)),/within ±1e9/);
 for(const [expression,expected] of [['360*10',3600],['(360 * (2 + 3))',1800],
   ['${360 * (2 + 3)}',1800],['-360*2',-720],['((1e3 - 280) / 2)',360],
   ['360/2/2*4',360],['((.5 + .5) * 360)',360]]){
-  const track=A.parse(rotationClip(0,expression)).tracks[0];
+  const track=parseClip(rotationClip(0,expression)).tracks[0];
   assert.deepEqual(plain(track.channels.euler.at(-1)[1]),[0,0,expected]);
   assert.deepEqual(plain(A.sample(track,2).euler),[0,0,expected/2]);
 }
 for(const expression of ['1/0','1e308*10','360**2','0x168','Math.sin(0)',
   '__import__("os")','turns*360','(360','${360','360)','(360 +)','()',
   '('.repeat(34)+'360'+')'.repeat(34),'('+Array(257).fill('0').join('+')+')']){
-  assert.throws(()=>A.parse(rotationClip(0,expression)),/Animation line 4:/);
+  assert.throws(()=>parseClip(rotationClip(0,expression)),/Animation line 4:/);
 }
 for(const bad of [source.replace('loop 4','loop 0'),
   source.replace('key 4 euler','key 3 euler'),source.replace('1.6 1.6 1.6','0 1 1'),
   source.replace('key 2 position','key 0 position'),source+'\nend',source.replace('loop 4','loop 0x4'),
-  source.replace('0 0 360','0 0 360000000')])assert.throws(()=>A.parse(bad));
+  source.replace('0 0 360','0 0 360000000')])assert.throws(()=>parseClip(bad));
 
 // Independent periods stay compact and rotations accumulate across the seam.
-const cycles=`animation loop 120
+const cycles=`animation main loop 120
 track rotor
 cycle euler 2
 cycle position 3
@@ -73,7 +89,7 @@ key 1.5 position 12 0 0
 key 3 position 0 0 0
 end
 end`;
-const cyclic=A.parse(cycles).tracks[0];
+const cyclic=parseClip(cycles).tracks[0];
 assert.equal(Object.values(cyclic.channels).reduce((n,keys)=>n+keys.length,0),5);
 for(const [t,angle,x] of [[0,0,0],[2,-720,8],[7.5,-2700,12],[120,-43200,0]]){
   assert.deepEqual(plain(A.sample(cyclic,t).euler),[0,0,angle]);
@@ -89,9 +105,9 @@ for(const bad of [cycles.replace('cycle euler 2','cycle euler 0'),
   cycles.replace('cycle euler 2','cycle scale 2'),
   cycles.replace('key 2 euler','key 120 euler'),
   cycles.replace('cycle euler 2','cycle euler 0.00000001'),
-  cycles.replace('0 0 -720','0 0 360000')])assert.throws(()=>A.parse(bad));
+  cycles.replace('0 0 -720','0 0 360000')])assert.throws(()=>parseClip(bad));
 
-const decimal=A.parse(`animation loop 1
+const decimal=parseClip(`animation main loop 1
 track rotor
 cycle euler 0.1
 cycle scale 0.2
@@ -106,7 +122,7 @@ for(const t of [0.1,0.3,0.6,1])assert(Math.abs(A.sample(decimal,t).euler[2]-t*36
 for(const v of A.sample(decimal,0.5).scale)assert(Math.abs(v-2)<1e-9);
 assert.deepEqual(plain(A.sample(decimal,1).scale),[1,1,1]);
 
-const longCycles=A.parse(`animation loop 720
+const longCycles=parseClip(`animation main loop 720
 track second
 cycle euler 1
 key 0 euler 0 0 0
@@ -124,18 +140,18 @@ for(const [index,track] of longCycles.tracks.entries()){
   assert.equal(values.at(-1),[-259200,129600][index]);
   for(let i=1;i<values.length;i++)assert(Math.abs(values[i]-values[i-1])<=45.000001);
 }
-const coupled=A.parse(rotationClip(0,360).replace('0 0 360','360 360 0')).tracks[0];
+const coupled=parseClip(rotationClip(0,360).replace('0 0 360','360 360 0')).tracks[0];
 assert(A.sampleTimes(coupled,4).length>=241);
-assert.deepEqual(plain(A.sampleTimes(A.parse(rotationClip(0,0)).tracks[0],4)),[0,4]);
+assert.deepEqual(plain(A.sampleTimes(parseClip(rotationClip(0,0)).tracks[0],4)),[0,4]);
 
-const forSource=`animation loop 4
+const forSource=`animation main loop 4
 track rotor
 for i in range(5)
 key i euler 0 0 ${'${i * 360}'}
 end
 end
 end`;
-assert.throws(()=>A.parse(forSource),error=>error.modelReference===true);
+assert.throws(()=>parseClip(forSource),error=>error.modelReference===true);
 assert.doesNotThrow(()=>A.validate(forSource));
 assert.doesNotThrow(()=>A.validate(forSource.replace('range(5)','range(count)')));
 assert.doesNotThrow(()=>A.validate(forSource.replace('for i in range(5)','for j in range(1)\nfor i in range(5)')+'\nend'));
@@ -174,7 +190,7 @@ const group=(name,position=[0,0,0],euler=[0,0,0],scale=[1,1,1])=>({name,position
 const meshes=[{groupPath:[group('parent',[10,20,0],[0,0,90],[2,3,1]),group('child',[1,0,0])]}];
 const objects=()=>({solid:{matrix:new Matrix()},normal:{matrix:new Matrix()},wire:{matrix:new Matrix()}});
 const rendered=[objects()];
-const nested=`animation loop 4
+const nested=`animation main loop 4
 track parent
 key 0 position 0 0 0
 key 2 position 1 0 0
@@ -190,20 +206,20 @@ const player=new A.Player(THREE,()=>draws++);
 player.configure(nested,meshes,rendered);
 function close(actual,expected){actual.forEach((v,i)=>assert(Math.abs(v-expected[i])<1e-9,`${actual} != ${expected}`));}
 // Original baked world point for child local origin: parent([1,0,0]) = [10,22,0].
-close(rendered[0].solid.matrix.point([10,22,0]),[10,22,0]);
+close(rendered[0].solid.matrix.point([10,22,0]),[0,0,0]);
 player.seek(2);
 // Parent animation [1,0,0] and child animation [0,1,0] both precede parent's static rotation/scale.
-close(rendered[0].solid.matrix.point([10,22,0]),[7,24,0]);
+close(rendered[0].solid.matrix.point([10,22,0]),[-2,0,0]);
 const groupWorld=new Matrix();
 player.groupMatrix(meshes[0].groupPath.slice(0,1),groupWorld);
-close(groupWorld.point([0,0,0]),[10,22,0]);
+close(groupWorld.point([0,0,0]),[1,0,0]);
 const groupLocal=new Matrix();
 player.groupMatrix(meshes[0].groupPath,groupWorld,groupLocal);
-close(groupWorld.point([0,0,0]),[7,24,0]);
-close(groupLocal.point([0,0,0]),[1,1,0]);
-close(groupWorld.point([1,0,0]),[7,26,0]);
-close(groupWorld.point([0,1,0]),[4,24,0]);
-for(const mode of ['normal','wire'])close(rendered[0][mode].matrix.point([10,22,0]),[7,24,0]);
+close(groupWorld.point([0,0,0]),[-2,0,0]);
+close(groupLocal.point([0,0,0]),[0,1,0]);
+close(groupWorld.point([1,0,0]),[-2,2,0]);
+close(groupWorld.point([0,1,0]),[-5,0,0]);
+for(const mode of ['normal','wire'])close(rendered[0][mode].matrix.point([10,22,0]),[-2,0,0]);
 player.play();assert(player.running);assert.equal(frames.size,1);
 function frame(now){const [id,fn]=frames.entries().next().value;frames.delete(id);fn(now);}
 frame(100);frame(1100);assert.equal(player.time,3);
@@ -212,15 +228,15 @@ player.pause();assert.equal(frames.size,0);
 assert.throws(()=>player.configure(nested.replace('track parent\n','track missing\n'),meshes,rendered));
 assert.equal(player.time,1,'invalid edits preserve the current clip');
 player.reset();assert.equal(player.time,0);
-close(rendered[0].solid.matrix.point([10,22,0]),[10,22,0]);
+close(rendered[0].solid.matrix.point([10,22,0]),[0,0,0]);
 player.configure('',meshes,rendered);assert.equal(player.animation,null);
 close(player.groupMatrix(meshes[0].groupPath,groupWorld).point([0,0,0]),[10,22,0]);
 player.play();assert.equal(frames.size,0);
 assert.equal(requests,0);assert(draws>3);
 assert.throws(()=>A.bind(clip,meshes));
-assert.equal(A.bind(A.parse(nested.replace('track parent\n','track /parent\n')),meshes).size,2);
+assert.equal(A.bind(parseClip(nested.replace('track parent\n','track /parent\n')),meshes).size,2);
 const repeated=[{groupPath:[group('a'),group('child')]},{groupPath:[group('b'),group('child')]}];
-assert.throws(()=>A.bind(A.parse(nested.replace('track parent\n','track child\n')),repeated));
+assert.throws(()=>A.bind(parseClip(nested.replace('track parent\n','track child\n')),repeated));
 const quaternionRendered=[objects()];
 const quaternionMeshes=plain(meshes);
 quaternionMeshes[0].groupPath[0].quaternion=[0,0,Math.SQRT1_2,Math.SQRT1_2];
@@ -229,6 +245,58 @@ delete quaternionMeshes[0].groupPath[0].euler;
 const quaternionPlayer=new A.Player(THREE,()=>draws++);
 quaternionPlayer.configure(nested,quaternionMeshes,quaternionRendered);
 quaternionPlayer.seek(2);
-close(quaternionRendered[0].solid.matrix.point([10,22,0]),[7,24,0]);
-close(quaternionPlayer.groupMatrix(quaternionMeshes[0].groupPath,groupWorld).point([0,0,0]),[7,24,0]);
+close(quaternionRendered[0].solid.matrix.point([10,22,0]),[-2,0,0]);
+close(quaternionPlayer.groupMatrix(quaternionMeshes[0].groupPath,groupWorld).point([0,0,0]),[-2,0,0]);
 console.log('animation: parser, nested nonuniform transforms, playback, loop, pause, seek, reset, and zero geometry requests passed');
+
+// Clips overwrite local channels; switching restores every omitted channel.
+const multi=`animation move loop 4
+track rotor
+key 0 position 10 20 30
+key 4 position 50 20 30
+end
+end
+animation turn loop 2
+track rotor
+key 0 euler 0 0 0
+key 2 euler 0 0 180
+end
+end`;
+assert.deepEqual(plain(A.parse(multi).clips.map(c=>c.name)),['move','turn']);
+assert.throws(()=>A.parse(multi.replace('animation turn','animation move')),/duplicate clip/);
+assert.throws(()=>A.parse(multi.replace('animation turn loop 2','animation turn loop 0')),/duration/);
+assert.throws(()=>A.parse('animation 9bad loop 4\nend'),/expected animation \[name\]/);
+const unnamed=multi.replace('animation move loop','animation loop');
+assert.equal(A.parse(unnamed).clips[0].name,'main');
+assert.deepEqual(plain(A.parse(unnamed)),plain(A.parse(multi.replace('animation move loop','animation main loop'))));
+assert.doesNotThrow(()=>A.validate(unnamed));
+assert.throws(()=>A.parse(unnamed+'\n'+source),/duplicate clip name/);
+assert.throws(()=>A.parse(unnamed+'\n'+source.replace('animation main loop','animation loop')),/duplicate clip name/);
+assert.doesNotThrow(()=>A.validate(multi.replace('50 20 30','(base.position.x + 40) base.position.y base.position.z')));
+assert.throws(()=>A.validate(multi.replace('50 20 30','base.position.w 20 30')));
+assert.doesNotThrow(()=>A.validate(fs.readFileSync(require.resolve('../examples/animation_loop.anim'),'utf8')));
+const multiMeshes=[{groupPath:[group('rotor',[10,20,30],[0,0,90],[2,3,4])]}];
+const multiRendered=[objects()];
+const multiPlayer=new A.Player(THREE,()=>draws++);
+multiPlayer.configure(unnamed,multiMeshes,multiRendered);
+assert.equal(multiPlayer.animation.name,'main');
+multiPlayer.configure(multi,multiMeshes,multiRendered);
+multiPlayer.seek(2);
+close(multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix()).point([0,0,0]),[30,20,30]);
+multiPlayer.play();
+multiPlayer.select('turn');
+assert.equal(multiPlayer.running,false);
+assert.equal(multiPlayer.time,0);
+assert.equal(multiPlayer.animation.duration,2);
+const turned=multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix());
+close(turned.point([0,0,0]),[10,20,30]);
+close(turned.point([1,0,0]),[12,20,30]);
+multiPlayer.seek(1);
+close(multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix()).point([1,0,0]),[10,22,30]);
+multiPlayer.select('move');
+assert.equal(multiPlayer.time,0);
+close(multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix()).point([1,0,0]),[10,22,30]);
+assert.throws(()=>multiPlayer.select('missing'),/Unknown animation clip/);
+assert.equal(multiPlayer.animation.name,'move');
+assert.equal(requests,0);
+console.log('animation clips: direct override, selection, rest-pose restoration, independent durations, and base syntax passed');

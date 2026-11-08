@@ -5,13 +5,22 @@ animation loop 4
     key 4 euler 0 0 360
   end
   track slider
-    key 0 position 0 0 0
-    key 2 position 12 0 0
-    key 4 position 0 0 0
+    key 0 position base.position.x base.position.y base.position.z
+    key 2 position (base.position.x + 12) base.position.y base.position.z
+    key 4 position base.position.x base.position.y base.position.z
   end
   track indicator
     key 0 scale 1 1 1
     key 2 scale 1.6 1.6 1.6
     key 4 scale 1 1 1
+  end
+end
+
+# A separate two-second clip, selected independently of main.
+animation sway loop 2
+  track rotor
+    key 0 euler base.euler.x base.euler.y (base.euler.z - 30)
+    key 1 euler base.euler.x base.euler.y (base.euler.z + 30)
+    key 2 euler base.euler.x base.euler.y (base.euler.z - 30)
   end
 end

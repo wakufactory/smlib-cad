@@ -59,6 +59,7 @@ const ModelFile = (() => {
     const animationSource = document.animationSource === undefined ? '' : document.animationSource;
     if(typeof animationSource!=='string')throw Error('animationSource はテキストにしてください');
     if(validateAnimation)globalThis.ModelAnimation?.validate(animationSource);
+    if(document.animationClip!==undefined && typeof document.animationClip!=='string')throw Error('animationClip はテキストにしてください');
     const p = document.parameters;
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw Error('parameters が必要です');
     const finish = p.finish;
@@ -66,6 +67,7 @@ const ModelFile = (() => {
     return {
       format: 'smlib-model', version: 1, mode: document.mode, source: document.source,
       ...(document.animationSource === undefined ? {} : {animationSource}),
+      ...(document.animationClip === undefined ? {} : {animationClip:document.animationClip}),
       ...(document.chat === undefined ? {} : {chat:chat(document.chat)}),
       ...(document.objectTree === undefined ? {} : {objectTree:objectTree(document.objectTree)}),
       parameters: {
@@ -175,6 +177,22 @@ let resolvedAnimation = null;
 let animationApplyId = 0;
 function animationKey(){return JSON.stringify([$('mode').value,$('source').value,animationText()]);}
 function animationText(){return $('animation-source')?.value || '';}
+function selectedAnimationClip(){
+  if(!animationText().trim())return '';
+  const clips=ModelAnimation.parse(animationText(),true)?.clips||[];
+  return clips.find(clip=>clip.name===$('animation-clip').value)?.name||clips[0]?.name||'';
+}
+function updateClipOptions(clips,selected){
+  if(!clips.length){restoreClipSelection();return;}
+  $('animation-clip').replaceChildren(...clips.map(clip=>{
+    const option=document.createElement('option');option.value=clip.name;option.textContent=clip.name;return option;
+  }));
+  $('animation-clip').value=selected||'';
+}
+function restoreClipSelection(name=''){
+  const option=document.createElement('option');option.value=name||'';option.textContent=name||'なし';
+  $('animation-clip').replaceChildren(option);$('animation-clip').value=name||'';
+}
 function animationStatus(time,duration,running){
   $('animation-play').textContent=running?'一時停止':'再生';
   $('animation-seek').max=duration || 1;
@@ -198,7 +216,8 @@ async function applyAnimation(){
       resolvedAnimation={key,source:numericSource};
     }
   }
-  animationPlayer.configure(numericSource,currentMeshes,rendered);
+  animationPlayer.configure(numericSource,currentMeshes,rendered,$('animation-clip').value);
+  updateClipOptions(animationPlayer.collection?.clips||[],animationPlayer.animation?.name);
   appliedAnimationSource=source;
   return true;
 }
@@ -222,6 +241,9 @@ $('animation-play').onclick=async()=>{
   }catch(error){note(error.message,true);}
 };
 let appliedAnimationSource='';
+$('animation-clip').onchange=async()=>{
+  try{if($('preview-mode').value==='model'){saveDraft();await preview();}else{if(!await applyAnimation())return;saveDraft();}}catch(error){note(error.message,true);}
+};
 $('animation-reset').onclick=()=>animationPlayer?.reset();
 function seekAnimation(){
   // pause() refreshes the controls with the old playback time. Capture the
@@ -245,7 +267,7 @@ function saveDraft(){
     if(!window.localStorage)return;
     const fields=Object.fromEntries(draftFields.map(id=>[id,String($(id).value)]));
     const checks=Object.fromEntries(draftChecks.map(id=>[id,$(id).checked]));
-    window.localStorage.setItem(draftKey,JSON.stringify({version:1,fields,checks,animationSource:animationText()}));
+    window.localStorage.setItem(draftKey,JSON.stringify({version:1,fields,checks,animationSource:animationText(),animationClip:$('animation-clip').value}));
 //    note('ブラウザに自動保存済み');
   }catch(error){
     note('自動保存できません。JSONで保存してください',true);
@@ -266,6 +288,7 @@ function restoreDraft(){
     if(Object.entries(options).some(([id,values])=>draft.fields[id]!==undefined && !values.includes(draft.fields[id])))throw Error('Invalid draft option');
     if(draft.animationSource!==undefined && typeof draft.animationSource!=='string')throw Error('Invalid animation draft');
     $('animation-source').value=draft.animationSource || '';
+    restoreClipSelection(draft.animationClip);
     for(const id of draftFields)if(draft.fields[id]!==undefined)$(id).value=draft.fields[id];
     refreshSourceLines();
     for(const id of draftChecks)$(id).checked=draft.checks[id];
@@ -581,6 +604,14 @@ function show(meshes){
 }
 async function request(path,filename){
   const data={animationSource:animationText(),mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
+  data.animationClip=selectedAnimationClip();
+  if(path==='/animation/resolve'){
+    const paths=new Map(currentMeshes.map(mesh=>{
+      const groupPath=(mesh.groupPath||[]).map(({name,position,euler,scale,quaternion})=>({name,position,euler,scale,quaternion}));
+      return [JSON.stringify(groupPath.map(group=>group.name)),{groupPath}];
+    }));
+    data.animationGroups=[...paths.values()];
+  }
   if(filename)data.filename=filename;
   if(path==='/export' || path==='/export/usdz' || path==='/preview/usdz'){
     if(!$('export-scale').checkValidity() || $('export-scale').value.trim()==='')throw Error('保存時の座標倍率は正の数値にしてください');
@@ -673,6 +704,7 @@ async function preview(){
       usdModel.src=data.url;usdModel.hidden=false;modelStatus.textContent='USDZ を読み込み中…';
       if(usdModel.ready)await usdModel.ready;
       if(requestId!==previewRequestId)return;
+      if(data.animationClips)updateClipOptions(data.animationClips,data.animationClip);
       updateObjectTree(data.objects||[]);
       modelStatus.hidden=true;note('USDZ <model> プレビューを更新しました');
     }else{
@@ -715,7 +747,7 @@ function modelDocument(validateAnimation=true){
     if(!$(id).checkValidity() || $(id).value.trim()==='') throw Error(`${$(id).labels[0]?.textContent || id} の値が不正です`);
   }
   return ModelFile.validate({
-    format:'smlib-model',version:1,mode:$('mode').value,source:$('source').value,animationSource:animationText(),
+    format:'smlib-model',version:1,mode:$('mode').value,source:$('source').value,animationSource:animationText(),animationClip:validateAnimation?selectedAnimationClip():$('animation-clip').value,
     objectTree:currentObjectTree,
     parameters:{chord:Number($('chord').value),angle:Number($('angle').value),
       finish:$('finish').value,finishSize:Number($('finish-size').value),exportScale:Number($('export-scale').value)}
@@ -748,6 +780,7 @@ async function loadModel(file){
     globalThis.ModelChat?.assertIdle();
     animationPlayer?.clear();
     $('animation-source').value=data.animationSource || '';
+    restoreClipSelection(data.animationClip);
     $('mode').value=data.mode;$('sample').value='default';$('source').value=data.source;
     refreshSourceLines();
     $('chord').value=p.chord;$('angle').value=p.angle;
@@ -784,13 +817,13 @@ $('preview-mode').onchange=()=>{
   showPreviewMode();preview();
 };
 $('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
-$('mode').onchange=()=>{resetPreviewView=true;animationPlayer?.clear();$('animation-source').value='';$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
+$('mode').onchange=()=>{resetPreviewView=true;animationPlayer?.clear();restoreClipSelection();$('animation-source').value='';$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
 function clearModel(){
   // Invalidate pending previews so an older response cannot restore the model.
   ++previewRequestId;
   previewFailure=null;
   resetPreviewView=true;
-  animationPlayer?.clear();$('animation-source').value='';
+  animationPlayer?.clear();restoreClipSelection();$('animation-source').value='';
   $('source').value='';
   refreshSourceLines();
   currentMeshes=[];
@@ -814,7 +847,7 @@ $('example').onclick=()=>{
     : ['text','python'].find(mode=>typeof variants[mode]==='string');
   if(!mode){note('このサンプルはまだ読み込めません。',true);return;}
   resetPreviewView=true;
-  animationPlayer?.clear();$('animation-source').value=examples.animations?.[sample] || '';
+  animationPlayer?.clear();restoreClipSelection();$('animation-source').value=examples.animations?.[sample] || '';
   $('mode').value=mode;$('source').value=variants[mode];
   refreshSourceLines();
   $('export').disabled=true;$('export-usdz').disabled=true;

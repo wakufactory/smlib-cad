@@ -1259,6 +1259,6 @@ def to_glb(meshes, scale=1, animation_source=""):
     return encode(meshes, scale, animation_source)
 
 
-def to_usdz(meshes, scale=1, animation_source=""):
+def to_usdz(meshes, scale=1, animation_source="", animation_clip=None):
     from model_export import to_usdz as encode
-    return encode(meshes, scale, animation_source)
+    return encode(meshes, scale, animation_source, animation_clip)

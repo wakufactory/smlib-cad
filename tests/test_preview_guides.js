@@ -56,6 +56,8 @@ const context = vm.createContext({
   window: {}, location: {protocol: 'http:'},
   console
 });
+elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 context.THREE = THREE;
 vm.runInContext('THREE = globalThis.THREE; scene = globalThis.scene; camera = globalThis.camera; renderer = globalThis.renderer',

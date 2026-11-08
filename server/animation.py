@@ -1,7 +1,7 @@
 """Bounded TRS loop language and sampling shared by mesh export entry points.
 
-Transforms are relative to a group's static local frame (static TRS * animated
-TRS). Euler values are unwrapped degrees, interpolated component by component.
+Named clips overwrite a group's local transform channels. Euler values are
+unwrapped degrees, interpolated component by component.
 No native geometry is evaluated here.
 """
 
@@ -192,7 +192,90 @@ def _expand_animation_loops(lines, scope):
     return output
 
 
-def parse_animation(source="", *, scope=None):
+def _validate_expression(word, scope):
+    """Check expressions without substituting/evaluating an unknown initial pose."""
+    import ast
+    from modeler import _expression_tree, _EXPRESSION_CONSTANTS, _EXPRESSION_FUNCTIONS
+    expression = word[2:-1] if word.startswith("${") and word.endswith("}") else word
+    tree = _expression_tree(expression)
+    budget = 512
+    def visit(node, depth=0):
+        nonlocal budget
+        budget -= 1
+        if budget < 0 or depth > 32:
+            raise ValueError("expression limit exceeded")
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            if not math.isfinite(node.value):
+                raise ValueError("number must be finite")
+        elif isinstance(node, ast.Name):
+            if node.id not in (scope or {}) and node.id not in _EXPRESSION_CONSTANTS:
+                raise ValueError(f"unknown variable: {node.id}")
+        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            visit(node.operand, depth+1)
+        elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            visit(node.left, depth+1); visit(node.right, depth+1)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            name = node.func.id
+            functions = getattr(scope, "functions", {})
+            if name not in functions and name not in _EXPRESSION_FUNCTIONS:
+                raise ValueError(f"unknown function: {name}")
+            arity = len(functions[name][0]) if name in functions else _EXPRESSION_FUNCTIONS[name][1]
+            if node.keywords or len(node.args) != arity:
+                raise ValueError(f"{name}: expected {arity} positional argument(s)")
+            for arg in node.args:
+                visit(arg, depth+1)
+        else:
+            raise ValueError("only numeric expressions and approved math functions are allowed")
+    visit(tree)
+
+
+def _syntax_loop_lines(lines, scope):
+    """Validate loop bodies without evaluating ranges or initial-pose expressions."""
+    from modeler import _ExpressionScope, _range_expressions
+    output, stack = [], []
+    variables = _ExpressionScope(scope or {})
+    for n, words in lines:
+        inside = any(kind == "for" for kind, _ in stack)
+        if words[0] == "for":
+            if not any(kind == "track" for kind, _ in stack):
+                raise ValueError(f"Animation line {n}: for is only allowed inside a track")
+            match = re.fullmatch(r"for\s+([A-Za-z_][A-Za-z_0-9]*)\s+in\s+range\((.*)\)", " ".join(words))
+            if not match:
+                raise ValueError(f"Animation line {n}: expected for <name> in range(...)")
+            name = match[1]
+            if name in variables:
+                raise ValueError(f"Animation line {n}: loop variable already defined: {name}")
+            args = _range_expressions(match[2])
+            if not 1 <= len(args) <= 3:
+                raise ValueError(f"Animation line {n}: range needs one to three arguments")
+            for arg in args:
+                _validate_expression(arg, variables)
+            variables[name] = 1
+            stack.append(("for", name))
+            if sum(kind == "for" for kind, _ in stack) > 32:
+                raise ValueError(f"Animation line {n}: loop nesting limit exceeded (32)")
+        elif words == ["end"]:
+            kind, name = stack.pop() if stack else (None, None)
+            if kind == "for":
+                del variables[name]
+            else:
+                output.append((n, words))
+        else:
+            if inside and words[0] != "key":
+                raise ValueError(f"Animation line {n}: for body allows only key and nested for blocks")
+            if words[0] in ("animation", "track"):
+                stack.append((words[0], None))
+            if inside:
+                # Retain one symbolic iteration; actual expansion is done with real meshes.
+                loop_names = {name for kind, name in stack if kind == "for"}
+                words = [re.sub(r"\b[A-Za-z_][A-Za-z_0-9]*\b", lambda m: "1" if m[0] in loop_names else m[0], w) if i not in (0, 2) else w for i, w in enumerate(words)]
+            output.append((n, words))
+    if stack:
+        raise ValueError("close all blocks with end")
+    return output
+
+
+def _parse_clip(source="", *, scope=None, syntax_only=False):
     if not isinstance(source, str) or len(source) > 100_000:
         raise ValueError("animationSource must be text (at most 100000 characters)")
     lines = [(n, _animation_words(line.split("#", 1)[0], n)) for n, line in enumerate(source.splitlines(), 1)]
@@ -200,12 +283,18 @@ def parse_animation(source="", *, scope=None):
     if not lines:
         return None
     if any(words[0] == "for" for _, words in lines):
-        lines = _expand_animation_loops(lines, scope)
+        lines = _syntax_loop_lines(lines, scope) if syntax_only else _expand_animation_loops(lines, scope)
 
     def fail(n, message):
         raise ValueError(f"Animation line {n}: {message}")
 
     def number(word, n, *, angle=False):
+        if syntax_only:
+            try:
+                _validate_expression(word, scope)
+            except (ValueError, OverflowError) as exc:
+                fail(n, str(exc))
+            return 1.
         if scope is not None:
             from modeler import _number_expression
             expression = word[2:-1] if word.startswith("${") and word.endswith("}") else word
@@ -236,10 +325,12 @@ def parse_animation(source="", *, scope=None):
         return value
 
     n, words = lines[0]
-    if len(words) != 3 or words[:2] != ["animation", "loop"]:
-        fail(n, "expected animation loop <seconds>")
-    duration = number(words[2], n)
-    if not 0 < duration <= 1000:
+    if len(words) == 3 and words[:2] == ["animation", "loop"]:
+        words.insert(1, "main")
+    if len(words) != 4 or words[0] != "animation" or words[2] != "loop" or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9-]*", words[1]):
+        fail(n, "expected animation [name] loop <seconds>")
+    duration = number(words[3], n)
+    if not syntax_only and not 0 < duration <= 1000:
         fail(n, "duration must be greater than 0 and at most 1000 seconds")
     tracks, track, closed, key_count = [], None, False, 0
     for n, words in lines[1:]:
@@ -256,7 +347,7 @@ def parse_animation(source="", *, scope=None):
                         fail(n, f"{channel} cycle needs keys")
                 for channel, keys in track["channels"].items():
                     period = track.get("cycles", {}).get(channel, duration)
-                    if keys[0][0] != 0 or keys[-1][0] != period:
+                    if not syntax_only and (keys[0][0] != 0 or keys[-1][0] != period):
                         fail(n, f"{channel} needs keys at 0 and {period} seconds")
                 tracks.append(track)
                 track = None
@@ -270,19 +361,19 @@ def parse_animation(source="", *, scope=None):
             if channel in cycles:
                 fail(n, "duplicate channel cycle")
             period = number(words[2], n)
-            if not 0 < period <= duration:
+            if not syntax_only and not 0 < period <= duration:
                 fail(n, "cycle period must be greater than 0 and at most the loop duration")
             count = duration / period
-            if not math.isfinite(count) or count > MAX_SAMPLES or abs(count-round(count)) > 1e-9:
+            if not syntax_only and (not math.isfinite(count) or count > MAX_SAMPLES or abs(count-round(count)) > 1e-9):
                 fail(n, "loop duration must be a whole number of cycles (at most 120000)")
             cycles[channel] = period
         elif len(words) == 6 and words[0] == "key" and track is not None and words[2] in DEFAULTS:
             time = number(words[1], n)
             value = [number(word, n, angle=words[2] == "euler") for word in words[3:]]
             keys = track["channels"].setdefault(words[2], [])
-            if not 0 <= time <= duration or (keys and time <= keys[-1][0]):
+            if not syntax_only and (not 0 <= time <= duration or (keys and time <= keys[-1][0])):
                 fail(n, "channel key times must increase within the loop duration")
-            if words[2] == "scale" and min(value) <= 0:
+            if not syntax_only and words[2] == "scale" and min(value) <= 0:
                 fail(n, "scale must be positive")
             keys.append([time, value])
             key_count += 1
@@ -292,37 +383,122 @@ def parse_animation(source="", *, scope=None):
             fail(n, "expected track <group>, cycle position|euler|scale <seconds>, key <seconds> position|euler|scale x y z, or end")
     if not closed or track is not None or not tracks:
         fail(lines[-1][0], "close all blocks with end; at least one track is required")
-    animation = {"duration": duration, "tracks": tracks}
+    animation = {"name": lines[0][1][1], "duration": duration, "tracks": tracks}
     # Bound generated data before starting expensive work.
-    if sum(len(sample_times(t, duration)) for t in tracks) > MAX_SAMPLES:
+    if not syntax_only and sum(len(sample_times(t, duration)) for t in tracks) > MAX_SAMPLES:
         raise ValueError("Animation exceeds 120000 generated samples")
     return animation
 
 
-def resolve_animation_source(source, model_source="", mode="text"):
-    """Compile expressions to portable numeric keys; never evaluate Python models."""
+def parse_animation(source="", *, scope=None, syntax_only=False):
+    """Parse up to 64 named clips; keep original line numbers in errors."""
+    if not isinstance(source, str) or len(source) > 100_000:
+        raise ValueError("animationSource must be text (at most 100000 characters)")
+    clips, start, depth = [], 0, 0
+    lines = source.splitlines()
+    for index, line in enumerate(lines):
+        words = line.split("#", 1)[0].split()
+        if not words:
+            continue
+        if words[0] in ("animation", "track", "for"):
+            depth += 1
+        elif words == ["end"]:
+            depth -= 1
+        if depth <= 0:
+            clip = _parse_clip("\n" * start + "\n".join(lines[start:index+1]), scope=scope, syntax_only=syntax_only)
+            if clip:
+                if len(clips) >= 64 or any(c["name"] == clip["name"] for c in clips):
+                    raise ValueError("Animation: duplicate clip name or more than 64 clips")
+                clips.append(clip)
+            start = index+1
+    if depth or any(line.split("#", 1)[0].strip() for line in lines[start:]):
+        _parse_clip("\n" * start + "\n".join(lines[start:]), scope=scope, syntax_only=syntax_only)
+    if not syntax_only and sum(len(sample_times(t, c["duration"])) for c in clips for t in c["tracks"]) > MAX_SAMPLES:
+        raise ValueError("Animation exceeds 120000 generated samples")
+    return {"clips": clips} if clips else None
+
+
+def _base_pose(group):
+    from transforms import _quaternion_euler
+    pose = {key: list(group.get(key, value)) for key, value in DEFAULTS.items()}
+    if "quaternion" in group:
+        pose["quaternion"] = list(group["quaternion"])
+        pose["euler"] = list(_quaternion_euler(group["quaternion"]))
+    return pose
+
+
+def resolve_animation_source(source, model_source="", mode="text", meshes=None, *, syntax_only=False):
+    """Resolve root model expressions and each target's immutable initial TRS.
+
+    syntax_only validates saved text before geometry exists. Its numeric result
+    must never be used for playback/export; those callers supply evaluated meshes.
+    """
     from modeler import _ExpressionScope, text_calculation_scope
     if mode not in ("text", "python"):
         raise ValueError("mode must be text or python")
     if not isinstance(source, str) or len(source) > 100_000:
         raise ValueError("animationSource must be text (at most 100000 characters)")
-    if not source.strip():
-        return ""
     scope = text_calculation_scope(model_source) if mode == "text" else _ExpressionScope()
-    animation = parse_animation(source, scope=scope)
+    groups = {}
+    for mesh in meshes or []:
+        path = ()
+        for entry in mesh.get("groupPath", []):
+            path += (entry["name"],)
+            groups[path] = entry
+    base, expanded, track_depth = None, [], 0
+    for n, line in enumerate(source.splitlines(), 1):
+        line = line.split("#", 1)[0]
+        words = line.split()
+        if words == ["end"] and track_depth:
+            track_depth -= 1
+            if not track_depth:
+                base = None
+        if words and words[0] == "for" and track_depth:
+            track_depth += 1
+        if words and words[0] == "track" and len(words) == 2:
+            track_depth = 1
+            target = words[1]
+            matches = [entry for path, entry in groups.items()
+                       if ("/".join(path) == target.removeprefix("/") if "/" in target else path[-1] == target)]
+            base = _base_pose(matches[0]) if len(matches) == 1 else None
+        def reference(match):
+            if not track_depth:
+                raise ValueError(f"Animation line {n}: base is only available inside a track")
+            if base is None and not syntax_only:
+                raise ValueError(f"Animation line {n}: base requires an unambiguous evaluated target group")
+            channel, axis = match.groups()
+            return format((base or DEFAULTS)[channel]["xyz".index(axis)], ".17g")
+        line = re.sub(r"\bbase\.(position|euler|scale)\.([xyz])\b", reference, line)
+        expanded.append(line)
+    animation = parse_animation("\n".join(expanded), scope=scope, syntax_only=syntax_only)
     if animation is None:
         return ""
-    lines = [f'animation loop {animation["duration"]:.17g}']
-    for track in animation["tracks"]:
-        lines.append(f'track {track["target"]}')
-        for channel, period in track.get("cycles", {}).items():
-            lines.append(f'cycle {channel} {period:.17g}')
-        for channel, keys in track["channels"].items():
-            for time, values in keys:
-                lines.append(f'key {time:.17g} {channel} ' + ' '.join(f'{v:.17g}' for v in values))
+    lines = []
+    for clip in animation["clips"]:
+        lines.append(f'animation {clip["name"]} loop {clip["duration"]:.17g}')
+        for track in clip["tracks"]:
+            lines.append(f'track {track["target"]}')
+            for channel, period in track.get("cycles", {}).items():
+                lines.append(f'cycle {channel} {period:.17g}')
+            for channel, keys in track["channels"].items():
+                for time, values in keys:
+                    lines.append(f'key {time:.17g} {channel} ' + ' '.join(f'{v:.17g}' for v in values))
+            lines.append('end')
         lines.append('end')
-    lines.append('end')
     return '\n'.join(lines)
+
+
+def select_clip(animation, name=None):
+    if not animation:
+        if name:
+            raise ValueError(f"Unknown animation clip: {name}")
+        return None
+    if name is None or name == "":
+        return animation["clips"][0]
+    for clip in animation["clips"]:
+        if clip["name"] == name:
+            return clip
+    raise ValueError(f"Unknown animation clip: {name}")
 
 
 def bind_animation(animation, meshes):
@@ -343,17 +519,21 @@ def bind_animation(animation, meshes):
         path = matches[0]
         if path in bound:
             raise ValueError(f"Animation target {target}: duplicate group track")
-        bound[path] = track
+        entries = next(mesh["groupPath"] for mesh in meshes if tuple(e["name"] for e in mesh.get("groupPath", [])[:len(path)]) == path)
+        bound[path] = dict(track, base=_base_pose(entries[len(path)-1]))
     return bound
 
 
 def prepare_animation(source, meshes):
+    if isinstance(source, str) and re.search(r"\bbase\.", source):
+        source = resolve_animation_source(source, mode="python", meshes=meshes)
     animation = parse_animation(source)
-    return animation, bind_animation(animation, meshes)
+    clips = animation["clips"] if animation else []
+    return animation, [bind_animation(clip, meshes) for clip in clips]
 
 
 def sample_track(track, time):
-    result = {key: list(value) for key, value in DEFAULTS.items()}
+    result = dict(track.get("base", DEFAULTS))
     for channel, keys in track["channels"].items():
         period = track.get("cycles", {}).get(channel)
         turns = math.floor(time / period) if period else 0
@@ -370,6 +550,8 @@ def sample_track(track, time):
                     break
         if channel == "euler" and period:
             value = [v + turns * (b-a) for v, a, b in zip(value, keys[0][1], keys[-1][1])]
+        if channel == "euler":
+            result.pop("quaternion", None)
         result[channel] = value
     return result
 
@@ -403,30 +585,12 @@ def sample_times(track, duration):
 
 
 def animation_meshes(meshes, bound):
-    """Insert animation frames with scene-wide unique names for Apple importers.
-
-    Reuse the same frame name for every solid under the same animated group.
-    Different paths must not produce same-named animation nodes, even when
-    their leaf group names are identical or path components contain '__'.
-    """
-    reserved = {mesh["name"] for mesh in meshes}
-    reserved.update(entry["name"] for mesh in meshes for entry in mesh.get("groupPath", []))
-    reserved.update(("Model", "Geometry", "ModelContent", "Materials"))
-    frame_names = {}
-    for prefix in sorted(bound):
-        name = "Animation_" + "__".join(prefix)
-        while name in reserved:
-            name += "_"
-        reserved.add(name)
-        frame_names[prefix] = name
+    """Attach tracks directly to existing groups, without helper nodes."""
     output = []
     for mesh in meshes:
         prefix, path = (), []
-        original = mesh.get("groupPath", [])
-        for entry in original:
+        for entry in mesh.get("groupPath", []):
             prefix += (entry["name"],)
-            path.append(entry)
-            if prefix in bound:
-                path.append(dict(name=frame_names[prefix], **DEFAULTS, animation=bound[prefix]))
+            path.append(dict(entry, animation=bound[prefix]) if prefix in bound else entry)
         output.append(dict(mesh, groupPath=path))
     return output

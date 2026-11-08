@@ -27,7 +27,7 @@ class LanAccessTests(unittest.TestCase):
 
     def test_animation_resolution_worker_does_not_execute_geometry(self):
         request = {'mode': 'text', 'source': 'let rpm = 120\nfn angle(t) = 360*rpm*t/60\nnot_a_geometry_command\n',
-                   'animationSource': 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${angle(4)}\nend\nend'}
+                   'animationSource': 'animation main loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${angle(4)}\nend\nend'}
         data = json.loads(run_model_request(request, '/animation/resolve'))
         self.assertIn('key 4 euler 0 0 2880', data['resolvedAnimationSource'])
         request['mode'] = 'python'
@@ -275,7 +275,7 @@ class ModelProcessTests(unittest.TestCase):
 
     def test_animation_resolver_http_route(self):
         status, data = self.post({'mode': 'text', 'source': 'let turns = 2',
-                                  'animationSource': 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${turns*360}\nend\nend'},
+                                  'animationSource': 'animation main loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${turns*360}\nend\nend'},
                                  '/animation/resolve')
         self.assertEqual(status, 200)
         self.assertIn('key 4 euler 0 0 720', data['resolvedAnimationSource'])
@@ -283,7 +283,7 @@ class ModelProcessTests(unittest.TestCase):
     @unittest.skipUnless(importlib.util.find_spec("_smlib_core"), "native binding unavailable")
     def test_animation_model_references_reach_preview_and_exports(self):
         request = {'mode': 'text', 'source': 'let turns = 2\ngroup rotor\nbox body 0 0 0 1 1 1\nend',
-                   'animationSource': 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${turns*360}\nend\nend'}
+                   'animationSource': 'animation main loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${turns*360}\nend\nend'}
         status, data = self.post(request)
         self.assertEqual(status, 200)
         self.assertEqual(len(data['meshes']), 1)

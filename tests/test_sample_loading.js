@@ -12,11 +12,13 @@ const elements = {
   message: {style: {}}
 };
 const context = vm.createContext({
-  document: {getElementById: id => elements[id] ||= {addEventListener() {}, style: {}}},
+  document: {createElement:()=>({}),getElementById: id => elements[id] ||= {addEventListener() {}, style: {}}},
   window: {}, location: {protocol: 'http:'},
   ResizeObserver: class {observe() {}},
   fetch: () => new Promise(() => {}), console
 });
+elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 vm.runInContext(`
   preview = () => {};
@@ -26,7 +28,7 @@ vm.runInContext(`
     animation:{text:'animation geometry'},
     groups:{python:'groups python'},
     offsets:{text:'offsets text'}
-  }, animations:{animation:'animation loop text'}};
+  }, animations:{animation:'animation main loop text'}};
 `, context);
 function load(sample, mode, expectedMode, source) {
   elements.sample.value = sample;
@@ -38,7 +40,7 @@ function load(sample, mode, expectedMode, source) {
     source.split('\n').map((_, i) => i + 1).join('\n'));
 }
 load('animation', 'python', 'text', 'animation geometry');
-assert.equal(elements['animation-source'].value,'animation loop text');
+assert.equal(elements['animation-source'].value,'animation main loop text');
 load('gallery', 'python', 'python', 'gallery python\nsecond line');
 assert.equal(elements['animation-source'].value,'');
 load('gallery', 'text', 'text', 'gallery text');

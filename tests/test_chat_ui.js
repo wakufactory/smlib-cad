@@ -64,6 +64,8 @@ function $(id) { return elements[id]; }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 async function send(text) { elements['chat-input'].value = text; await elements['chat-send'].onclick(); }
 
+elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'),'utf8').split('const $ =')[0],context);
 vm.runInContext(fs.readFileSync(require.resolve('../html/chat.js'), 'utf8'), context);
 (async () => {
@@ -279,7 +281,7 @@ vm.runInContext(fs.readFileSync(require.resolve('../html/chat.js'), 'utf8'), con
   context.setTimeout=actualTimeout;
   // Animation context, independent edits, clear-vs-preserve semantics, and undo.
   context.ModelChat.restore(undefined);
-  const anim='animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend';
+  const anim='animation main loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend';
   elements['animation-source'].value=anim;
   responseSource=null;responseAnimation=anim.replace('360','720');
   calls=previewCalls;let animStart=animationCalls;

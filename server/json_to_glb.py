@@ -41,7 +41,9 @@ def validate_document(document: object) -> tuple[str, str, dict]:
     source = document.get("source")
     if not isinstance(source, str):
         raise ValueError("source must be text")
-    resolve_animation_source(document.get("animationSource", ""), source, document["mode"])
+    resolve_animation_source(document.get("animationSource", ""), source, document["mode"], syntax_only=True)
+    if document.get("animationClip") is not None and not isinstance(document["animationClip"], str):
+        raise ValueError("animationClip must be text")
     parameters = document.get("parameters")
     if not isinstance(parameters, dict):
         raise ValueError("parameters must be an object")
@@ -67,26 +69,31 @@ def build_meshes(document: object, sm):
 
 def build_glb(document: object, sm) -> bytes:
     _, _, parameters = validate_document(document)
-    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"])
-    return to_glb(build_meshes(document, sm), scale=parameters["exportScale"], animation_source=animation_source)
+    meshes = build_meshes(document, sm)
+    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"], meshes)
+    return to_glb(meshes, scale=parameters["exportScale"], animation_source=animation_source)
 
 
 def build_usdz(document: object, sm) -> bytes:
     _, _, parameters = validate_document(document)
-    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"])
-    return to_usdz(build_meshes(document, sm), scale=parameters["exportScale"], animation_source=animation_source)
+    meshes = build_meshes(document, sm)
+    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"], meshes)
+    return to_usdz(meshes, scale=parameters["exportScale"], animation_source=animation_source, animation_clip=document.get("animationClip"))
 
 
 def main(argv: list[str] | None = None, *, format: str = "glb") -> int:
     parser = argparse.ArgumentParser(description=f"Convert a saved SMLib Modeler JSON document to {format.upper()}.")
     parser.add_argument("input", type=Path, help="JSON model saved by the browser editor")
     parser.add_argument("-o", "--output", type=Path, help=f"output {format.upper()} path (default: input name with .{format})")
+    parser.add_argument("--clip", help="clip to export to USDZ (default: saved selection or first clip)")
     args = parser.parse_args(argv)
     output = args.output or args.input.with_suffix(f".{format}")
     try:
         if output.resolve() == args.input.resolve():
             raise ValueError("input and output paths must differ")
         document = json.loads(args.input.read_text(encoding="utf-8"))
+        if args.clip:
+            document["animationClip"] = args.clip
         validate_document(document)
         sys.path.insert(0, str(ROOT / ".build" / "smlib-core"))
         try:

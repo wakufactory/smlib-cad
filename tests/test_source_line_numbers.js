@@ -26,6 +26,8 @@ const context = vm.createContext({
   fetch: () => new Promise(() => {}),
   console
 });
+elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 
 const numbers = elements['source-line-numbers-inner'];
@@ -43,7 +45,7 @@ assert.equal(elements['source-line-numbers'].style.width, 'calc(2ch + 20px)');
 const animationNumbers=elements['animation-source-line-numbers-inner'];
 assert.match(html, /id="animation-source-line-numbers"[^>]*aria-hidden="true"/);
 assert.equal(animationNumbers.textContent,'1');
-elements['animation-source'].value='animation loop 4\n\nend\n';
+elements['animation-source'].value='animation main loop 4\n\nend\n';
 animationEvents.input();
 assert.equal(animationNumbers.textContent,'1\n2\n3\n4');
 assert.equal(numbers.textContent,'1','editor gutters are independent');

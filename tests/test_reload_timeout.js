@@ -12,7 +12,7 @@ const elements={canvas:{clientWidth:600,clientHeight:400,addEventListener(){}},
   'usd-model':{removeAttribute(){}}};
 const statusResolvers=[];
 const context=vm.createContext({
-  document:{getElementById:id=>elements[id] ||= {style:{},value:'',checked:true,addEventListener(){}}},
+  document:{createElement:()=>({}),getElementById:id=>elements[id] ||= {style:{},value:'',checked:true,addEventListener(){}}},
   window:{localStorage:{getItem:()=>draft,setItem(){}},addEventListener(){}},
   location:{protocol:'http:'},ResizeObserver:class{observe(){}},console,
   fetch:(path)=>{
@@ -22,6 +22,8 @@ const context=vm.createContext({
     throw Error(`Unexpected request: ${path}`);
   }
 });
+elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'),'utf8'),context);
 
 class Camera{

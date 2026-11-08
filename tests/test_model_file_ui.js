@@ -74,6 +74,8 @@ const context = vm.createContext({
     throw Error('No server request expected');
   }
 });
+elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
 vm.runInContext(fs.readFileSync(require.resolve('../html/animation.js'), 'utf8'), context);
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 const ModelFile = vm.runInContext('ModelFile', context);
@@ -124,10 +126,10 @@ for (const invalid of [
   {...document, parameters: {...document.parameters, exportScale: '2'}}
 ]) assert.throws(() => ModelFile.parse(JSON.stringify(invalid)));
 
-const unfinishedAnimation={...document,animationSource:'animation loop unfinished'};
+const unfinishedAnimation={...document,animationSource:'animation main loop unfinished'};
 assert.throws(()=>ModelFile.validate(unfinishedAnimation));
-assert.equal(ModelFile.validate(unfinishedAnimation,false).animationSource,'animation loop unfinished');
-const formulaAnimation='animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${angle(4)}\nend\nend';
+assert.equal(ModelFile.validate(unfinishedAnimation,false).animationSource,'animation main loop unfinished');
+const formulaAnimation='animation main loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 ${angle(4)}\nend\nend';
 assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formulaAnimation})).animationSource,formulaAnimation);
 
 (async () => {
@@ -215,7 +217,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   elements.mode.onchange();
   assert.equal(elements['save-model'].disabled, false);
   elements.source.value = pythonSource;
-  elements['animation-source'].value = "animation loop 4\ntrack assembly\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend";
+  elements['animation-source'].value = "animation main loop 4\ntrack assembly\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend";
   await elements['save-model'].onclick();
   const pythonJson = await savedBlob.text();
   assert.equal(JSON.parse(pythonJson).mode, 'python');
@@ -398,6 +400,26 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   context.request=actualRequest;
   elements.source.value=beforeFormula.source;
   elements.mode.value=beforeFormula.mode;
+  elements['animation-source'].value=beforeFormula.animation;
+  // Clip selection uses cached geometry and is retained in saved documents.
+  elements['animation-source'].value='animation move loop 4\ntrack rotor\nkey 0 position 10 0 0\nkey 4 position 20 0 0\nend\nend\nanimation turn loop 2\ntrack rotor\nkey 0 euler 0 0 0\nkey 2 euler 0 0 180\nend\nend';
+  vm.runInContext(`currentMeshKey=modelingKey();resolvedAnimation=null;
+    animationPlayer={configure(source,meshes,rendered,name){
+      this.collection=ModelAnimation.parse(source);
+      this.animation=this.collection.clips.find(c=>c.name===name)||this.collection.clips[0];
+      globalThis.chosenClip=this.animation.name;
+    }};`,context);
+  await context.applyAnimation();
+  assert.deepEqual(elements['animation-clip'].children.map(option=>option.value),['move','turn']);
+  elements['animation-clip'].value='turn';
+  await elements['animation-clip'].onchange();
+  assert.equal(context.chosenClip,'turn');
+  assert.equal(geometryFallbacks,2);
+  const selectedDocument=context.modelDocument();
+  assert.equal(selectedDocument.animationClip,'turn');
+  assert.equal(ModelFile.parse(JSON.stringify(selectedDocument)).animationClip,'turn');
+  elements['animation-clip'].value='removed';
+  assert.equal(context.modelDocument().animationClip,'move','unapplied edits fall back to the first available clip');
   elements['animation-source'].value=beforeFormula.animation;
   // Pausing updates the slider with the old time; preserve the user's target.
   vm.runInContext(`

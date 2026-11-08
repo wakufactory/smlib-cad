@@ -9,6 +9,8 @@ const context = vm.createContext({
   ResizeObserver: class {observe() {}},
   fetch: () => new Promise(() => {}), window: {}, location: {protocol: 'http:'}, console
 });
+elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
 vm.runInContext(fs.readFileSync(require.resolve('../html/app.js'), 'utf8'), context);
 vm.runInContext('draw = () => {};', context);
 const state = () => vm.runInContext('[yaw, pitch, zoom]', context);

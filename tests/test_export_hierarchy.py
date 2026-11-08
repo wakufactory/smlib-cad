@@ -121,7 +121,7 @@ quaternion 1 2 3 4
 box body 1 2 3 4 5 6
 end""", 'text', FakeBrep())
         meshes = tessellate(objects, FakeBrep(), materials=materials)
-        clip = "animation loop 2\ntrack g\nkey 0 euler 0 0 0\nkey 2 euler 0 0 360\nend\nend"
+        clip = "animation main loop 2\ntrack g\nkey 0 position 0 0 0\nkey 2 position 1 0 0\nend\nend"
         for animation in ('', clip):
             doc, _ = glb_world(to_glb(meshes, animation_source=animation))
             rotation = next(node for node in doc['nodes'] if node['name'] == 'g')['rotation']
@@ -135,7 +135,7 @@ end""", 'text', FakeBrep())
                 self.assertAlmostEqual(actual, expected / math.sqrt(30))
             self.assertIn('["xformOp:translate", "xformOp:orient", "xformOp:scale"]', stage)
             if animation:
-                self.assertIn('xformOp:rotateXYZ.timeSamples', stage)
+                self.assertIn('xformOp:translate.timeSamples', stage)
 
     def test_boolean_result_parent_and_pruning(self):
         for op in ('union', 'subtract', 'intersect'):

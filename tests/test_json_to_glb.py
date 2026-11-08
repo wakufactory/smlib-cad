@@ -22,7 +22,7 @@ class JsonToGlbTests(unittest.TestCase):
     def test_model_calculations_in_animation_export(self):
         source = ('let rpm = 120\nfn angle(t) = 360 * rpm * t / 60\n'
                   'group rotor\nbox body 0 0 0 1 1 1\nend\n')
-        animation = ('animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\n'
+        animation = ('animation main loop 4\ntrack rotor\nkey 0 euler 0 0 0\n'
                      'key 4 euler 0 0 ${angle(4)}\nend\nend')
         document = {**MODEL, 'source': source, 'animationSource': animation}
         numeric = {**document, 'animationSource': animation.replace('${angle(4)}', '2880')}

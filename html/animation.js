@@ -4,6 +4,10 @@
   const defaults = {position:[0,0,0], euler:[0,0,0], scale:[1,1,1]};
   function angleExpression(source,syntaxOnly=false){
     if(source.startsWith('${') && source.endsWith('}'))source=source.slice(2,-1);
+    if(/\bbase\./.test(source)){
+      if(!syntaxOnly){const error=Error('base references require model resolution');error.modelReference=true;throw error;}
+      source=source.replace(/\bbase\.(position|euler|scale)\.[xyz]\b/g,'1');
+    }
     const tokens=source.match(/(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[A-Za-z_][A-Za-z_0-9]*|\S/g)||[];
     if(!tokens.length || tokens.length>512)throw Error('angle expression must contain 1 to 512 tokens');
     let index=0;
@@ -103,7 +107,7 @@
     }
     return [...times].sort((a,b)=>a-b);
   }
-  function parse(source='',syntaxOnly=false) {
+  function parseClip(source='',syntaxOnly=false) {
     if(typeof source!=='string' || source.length>100000)throw Error('animationSource must be text (at most 100000 characters)');
     let lines=source.split(/\r?\n/).map((line,i)=>[i+1,animationWords(line.split('#')[0],i+1)]).filter(([,w])=>w.length);
     if(!lines.length)return null;
@@ -150,8 +154,9 @@
       return value;
     }
     const [n,w]=lines[0];
-    if(w.length!==3 || w[0]!=='animation' || w[1]!=='loop')fail(n,'expected animation loop <seconds>');
-    const duration=number(w[2],n);
+    if(w.length===3 && w[0]==='animation' && w[1]==='loop')w.splice(1,0,'main');
+    if(w.length!==4 || w[0]!=='animation' || w[2]!=='loop' || !/^[A-Za-z_][A-Za-z_0-9-]*$/.test(w[1]))fail(n,'expected animation [name] loop <seconds>');
+    const duration=number(w[3],n);
     if(!syntaxOnly && (duration<=0 || duration>1000))fail(n,'duration must be greater than 0 and at most 1000 seconds');
     const tracks=[];
     let track=null,closed=false,keyCount=0;
@@ -190,7 +195,29 @@
     }
     if(!closed || track || !tracks.length)fail(lines.at(-1)[0],'close all blocks with end; at least one track is required');
     if(!syntaxOnly && tracks.reduce((s,t)=>s+sampleTimes(t,duration).length,0)>120000)throw Error('Animation exceeds 120000 generated samples');
-    return {duration,tracks};
+    return {name:w[1],duration,tracks};
+  }
+  function parse(source='',syntaxOnly=false){
+    if(typeof source!=='string' || source.length>100000)throw Error('animationSource must be text (at most 100000 characters)');
+    const clips=[],lines=source.split(/\r?\n/);
+    let start=0,depth=0;
+    for(let i=0;i<lines.length;i++){
+      const words=lines[i].split('#')[0].trim().split(/\s+/);
+      if(!words[0])continue;
+      if(['animation','track','for'].includes(words[0]))depth++;
+      else if(words.length===1 && words[0]==='end')depth--;
+      if(depth<=0){
+        const clip=parseClip('\n'.repeat(start)+lines.slice(start,i+1).join('\n'),syntaxOnly);
+        if(clip){
+          if(clips.length>=64 || clips.some(c=>c.name===clip.name))throw Error('Animation: duplicate clip name or more than 64 clips');
+          clips.push(clip);
+        }
+        start=i+1;
+      }
+    }
+    if(depth || lines.slice(start).some(line=>line.split('#')[0].trim()))parseClip('\n'.repeat(start)+lines.slice(start).join('\n'),syntaxOnly);
+    if(!syntaxOnly && clips.reduce((n,c)=>n+c.tracks.reduce((m,t)=>m+sampleTimes(t,c.duration).length,0),0)>120000)throw Error('Animation exceeds 120000 generated samples');
+    return clips.length?{clips}:null;
   }
   function validate(source){
     try{parse(source);}catch(error){if(!error.modelReference)throw error;parse(source,true);}
@@ -199,19 +226,19 @@
     const paths=new Map(),bound=new Map();
     for(const mesh of meshes){
       const path=[];
-      for(const group of mesh.groupPath||[]){path.push(group.name);paths.set(path.join('/'),[...path]);}
+      for(const group of mesh.groupPath||[]){path.push(group.name);paths.set(path.join('/'),{names:[...path],group});}
     }
     for(const track of animation?.tracks||[]){
-      const matches=[...paths].filter(([path,names])=>track.target.includes('/')?path===track.target.replace(/^\//,''):names.at(-1)===track.target);
+      const matches=[...paths].filter(([path,{names}])=>track.target.includes('/')?path===track.target.replace(/^\//,''):names.at(-1)===track.target);
       if(matches.length!==1)throw Error(`Animation target ${track.target}: group missing, invisible, consumed by Boolean, or ambiguous; use a full group path`);
       const path=matches[0][0];
       if(bound.has(path))throw Error(`Animation target ${track.target}: duplicate group track`);
-      bound.set(path,track);
+      bound.set(path,{...track,base:matches[0][1].group});
     }
     return bound;
   }
   function sample(track,time){
-    const pose=Object.fromEntries(Object.entries(defaults).map(([k,v])=>[k,[...v]]));
+    const pose={...defaults,...track.base};
     for(const [channel,keys] of Object.entries(track.channels)){
       const period=track.cycles?.[channel],turns=period?Math.floor(time/period):0;
       const local=period?Math.max(0,Math.min(period,time-turns*period)):time;
@@ -222,6 +249,7 @@
         if(local<=b){const u=(local-a)/(b-a);value=av.map((v,j)=>v+(bv[j]-v)*u);break;}
       }
       if(channel==='euler' && period)value=value.map((v,i)=>v+turns*(keys.at(-1)[1][i]-keys[0][1][i]));
+      if(channel==='euler')delete pose.quaternion;
       pose[channel]=value;
     }
     return pose;
@@ -238,11 +266,7 @@
       return target.compose(this.vector,this.quat,this.scale);
     }
     appendFrame(target,matrix,track){
-      target.multiply(matrix);
-      this.applyTrack(target,track);
-    }
-    applyTrack(target,track){
-      if(track)target.multiply(this.matrix(sample(track,this.time),this.frameMatrix));
+      target.multiply(track?this.matrix(sample(track,this.time),this.frameMatrix):matrix);
     }
     groupMatrix(groups,target,local=this.groupFrameMatrix,{animated=true}={}){
       target.identity();
@@ -251,13 +275,17 @@
       for(const group of groups){
         path+=(path?'/':'')+group.name;
         this.matrix(group,local);
-        if(animated)this.applyTrack(local,this.tracks.get(path));
+        const track=animated && this.tracks.get(path);
+        if(track)this.matrix(sample(track,this.time),local);
         target.multiply(local);
       }
       return target;
     }
-    configure(source,meshes,rendered){
-      const animation=parse(source),bound=bind(animation,meshes); // Validate before replacing a running clip.
+    configure(source,meshes,rendered,name=this.animation?.name){
+      const collection=parse(source),clips=collection?.clips||[];
+      const bindings=clips.map(clip=>bind(clip,meshes));
+      const animation=clips.find(clip=>clip.name===name)||clips[0]||null;
+      const bound=bindings[clips.indexOf(animation)]||new Map(); // Validate all clips before replacing playback.
       const T=this.THREE;
       const records=meshes.map((mesh,i)=>{
         let path='';const base=new T.Matrix4();
@@ -268,7 +296,11 @@
         });
         return {frames,inverse:base.invert(),objects:[rendered[i].solid,rendered[i].normal,rendered[i].wire]};
       });
-      this.pause();this.animation=animation;this.records=records;this.tracks=bound;this.time=0;this.seek(0);
+      this.pause();this.collection=collection;this.meshes=meshes;this.rendered=rendered;this.source=source;this.animation=animation;this.records=records;this.tracks=bound;this.time=0;this.seek(0);
+    }
+    select(name){
+      if(!this.collection?.clips.some(clip=>clip.name===name))throw Error(`Unknown animation clip: ${name}`);
+      this.configure(this.source,this.meshes,this.rendered,name);
     }
     seek(time){
       this.time=this.animation?Math.max(0,Math.min(this.animation.duration,time)):0;
@@ -297,7 +329,7 @@
       this.handle=undefined;this.status?.(this.time,this.animation?.duration||0,false);
     }
     reset(){this.pause();this.seek(0);}
-    clear(){this.pause();this.records=[];this.tracks.clear();this.animation=null;this.time=0;this.status?.(0,0,false);}
+    clear(){this.pause();this.records=[];this.tracks.clear();this.animation=null;this.collection=null;this.time=0;this.status?.(0,0,false);}
   }
   globalThis.ModelAnimation={parse,validate,bind,sample,sampleTimes,quaternion,Player};
 })();

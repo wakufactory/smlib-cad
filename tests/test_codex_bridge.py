@@ -132,7 +132,7 @@ class BridgeTests(unittest.TestCase):
         self.assertIsNone(self.finish(session)["result"]["source"])
 
     def test_animation_roundtrip_and_partial_edits(self):
-        animation = 'animation loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend'
+        animation = 'animation main loop 4\ntrack rotor\nkey 0 euler 0 0 0\nkey 4 euler 0 0 360\nend\nend'
         for message in ('animation', 'both', 'clear animation', 'question', 'edit'):
             request = dict(message=message, mode='text', source='current model', animationSource=animation)
             result = self.finish(self.bridge.send(request)['sessionId'])['result']
@@ -334,7 +334,7 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("group", text)
         self.assertIn("source is null", text)
         self.assertIn('animationSource',text)
-        self.assertIn('animation loop 4',text)
+        self.assertIn('animation main loop 4',text)
         self.assertIn('null preserves it',text)
 
     def log_records(self, output, count=1):

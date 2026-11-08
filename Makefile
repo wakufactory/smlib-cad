@@ -51,7 +51,7 @@ glb: $(OUTPUT)
 	@$(PYTHON) server/json_to_glb.py "$(MODEL)" $(if $(GLB),-o "$(GLB)")
 
 usdz: $(OUTPUT)
-	@$(PYTHON) server/json_to_usdz.py "$(MODEL)" $(if $(USDZ),-o "$(USDZ)")
+	@$(PYTHON) server/json_to_usdz.py "$(MODEL)" $(if $(USDZ),-o "$(USDZ)") $(if $(CLIP),--clip "$(CLIP)")
 
 $(BUILD_DIR)/SMLib/%.o: usd-brep/source/SMLib/src/%.cpp
 	@mkdir -p $(@D)

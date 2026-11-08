@@ -12,15 +12,18 @@ function page() {
   const elements = Object.fromEntries(Object.entries(values).map(([id,value])=>[id,{value,addEventListener(){}}]));
   const window = {localStorage:{getItem:k=>storage.get(k) ?? null,setItem:(k,v)=>storage.set(k,v)}, addEventListener(name,fn){events[name]=fn;}};
   const context = vm.createContext({window, console, location:{protocol:'http:'},
-    document:{getElementById:id=>elements[id] ||= {style:{},checked:true,addEventListener(){},removeAttribute(){}},
+    document:{createElement:()=>({}),getElementById:id=>elements[id] ||= {style:{},checked:true,addEventListener(){},removeAttribute(){}},
       addEventListener(name,fn){events[name]=fn;}},
     ResizeObserver:class {observe(){}}, fetch:()=>new Promise(()=>{})});
-  vm.runInContext(source,context);
+  elements['animation-clip'] ||= {value:''};
+elements['animation-clip'].replaceChildren = function(...items){this.children=items;};
+vm.runInContext(source,context);
   return {context,elements,events,window};
 }
 const first = page();
 first.elements.source.value = 'box unfinished';
-first.elements['animation-source'].value = 'animation loop unfinished';
+first.elements['animation-clip'].value='sway';
+first.elements['animation-source'].value = 'animation main loop unfinished';
 first.elements.chord.value = ''; // Preserve incomplete input too.
 first.elements['file-name'].value = 'draft';
 first.elements['show-grid'].checked = false;
@@ -32,7 +35,8 @@ first.events.input({target:{id:'source'}});
 assert(storage.has(key));
 const reloaded = page();
 assert.equal(reloaded.elements.source.value, 'box unfinished');
-assert.equal(reloaded.elements['animation-source'].value,'animation loop unfinished');
+assert.equal(reloaded.elements['animation-clip'].value,'sway');
+assert.equal(reloaded.elements['animation-source'].value,'animation main loop unfinished');
 assert.equal(reloaded.elements.chord.value, '');
 assert.equal(reloaded.elements['file-name'].value, 'draft');
 assert.equal(reloaded.elements['show-grid'].checked, false);
@@ -51,6 +55,7 @@ assert.equal(migrated.elements['projection-mode'].value, 'orthographic');
 reloaded.context.clearModel();
 const cleared = page();
 assert.equal(cleared.elements.source.value, '');
+assert.equal(cleared.elements['animation-clip'].value,'');
 assert.equal(cleared.elements['animation-source'].value,'');
 assert.equal(vm.runInContext('restoredDraft',cleared.context),true);
 cleared.elements.source.value = 'latest edit';
