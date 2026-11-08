@@ -8,7 +8,7 @@ import math
 import sys
 from pathlib import Path
 
-from modeler import apply_finish, evaluate, tessellate
+from modeler import evaluate, tessellate
 from model_export import to_glb, to_usdz
 from animation import resolve_animation_source
 
@@ -47,14 +47,9 @@ def validate_document(document: object) -> tuple[str, str, dict]:
     parameters = document.get("parameters")
     if not isinstance(parameters, dict):
         raise ValueError("parameters must be an object")
-    finish = parameters.get("finish")
-    if finish not in ("none", "chamfer", "fillet"):
-        raise ValueError("finish must be none, chamfer, or fillet")
     return source, document["mode"], {
         "chord": _number(parameters.get("chord"), "chord", 0.001, 2),
         "angle": _number(parameters.get("angle"), "angle", 1, 90),
-        "finish": finish,
-        "finishSize": _number(parameters.get("finishSize"), "finishSize", 0.001),
         "exportScale": _scale(parameters.get("exportScale", 1)),
     }
 
@@ -62,7 +57,6 @@ def validate_document(document: object) -> tuple[str, str, dict]:
 def build_meshes(document: object, sm):
     source, mode, parameters = validate_document(document)
     objects, materials, _ = evaluate(source, mode, sm)
-    objects = apply_finish(objects, sm, parameters["finish"], parameters["finishSize"])
     meshes = tessellate(objects, sm, parameters["chord"], parameters["angle"], materials)
     return meshes
 

@@ -38,7 +38,7 @@ class JsonToGlbTests(unittest.TestCase):
     def test_document_parameters_reach_kernel_and_glb(self):
         sm = FakeBrep()
         glb = build_glb(MODEL, sm)
-        self.assertEqual(sm.last_chamfer[1], 0.5)
+        self.assertFalse(hasattr(sm, "last_chamfer"))
         self.assertEqual(sm.last_tessellation, {
             "chord_height_tolerance": 0.02,
             "curve_angle_tolerance_deg": 12,
@@ -59,7 +59,7 @@ class JsonToGlbTests(unittest.TestCase):
         sm = FakeBrep()
         glb = build_glb(python_model, sm)
         self.assertEqual(glb[:4], b"glTF")
-        self.assertEqual(sm.last_chamfer[1], 0.5)
+        self.assertFalse(hasattr(sm, "last_chamfer"))
         json_length = struct.unpack_from("<I", glb, 12)[0]
         scene = json.loads(glb[20:20 + json_length])
         self.assertEqual(scene["nodes"][0]["name"], "result")
@@ -83,6 +83,14 @@ class JsonToGlbTests(unittest.TestCase):
         original = first_position(default_glb)
         self.assertEqual(first_position(scaled_glb), tuple(value * 0.5 for value in original))
 
+    def test_legacy_finish_parameters_are_ignored(self):
+        clean = {**MODEL, "parameters": {"chord": 0.02, "angle": 12}}
+        for finish, size in (("fillet", 1000), ("other", None), ({}, True)):
+            legacy = {**MODEL, "parameters": {**clean["parameters"], "finish": finish, "finishSize": size}}
+            self.assertEqual(validate_document(legacy), validate_document(clean))
+            for build in (build_glb, build_usdz):
+                self.assertEqual(build(legacy, FakeBrep()), build(clean, FakeBrep()))
+
     def test_invalid_documents_are_rejected(self):
         cases = [
             {**MODEL, "version": 2},
@@ -90,8 +98,6 @@ class JsonToGlbTests(unittest.TestCase):
             {**MODEL, "source": 10},
             {**MODEL, "parameters": {**MODEL["parameters"], "chord": 0}},
             {**MODEL, "parameters": {**MODEL["parameters"], "angle": 91}},
-            {**MODEL, "parameters": {**MODEL["parameters"], "finish": "other"}},
-            {**MODEL, "parameters": {**MODEL["parameters"], "finishSize": True}},
             {**MODEL, "parameters": {**MODEL["parameters"], "exportScale": 0}},
             {**MODEL, "parameters": {**MODEL["parameters"], "exportScale": "2"}},
         ]

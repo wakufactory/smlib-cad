@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const fields = {source:'box body 0 0 0 1 1 1',mode:'text',sample:'default',chord:'0.08',angle:'20',
-  finish:'none','finish-size':'1','export-scale':'1','file-name':'model',
+  'export-scale':'1','file-name':'model',
   'shading-mode':'shading','preview-mode':'webgl','grid-spacing':'1','grid-plane':'xy',
   'grid-offset':'0','projection-mode':'orthographic'};
 const draft=JSON.stringify({version:1,fields,checks:{'show-axes':true,'show-grid':true}});

@@ -5,7 +5,7 @@ import math
 import struct
 import unittest
 
-from modeler import apply_finish, evaluate, tessellate, to_glb
+from modeler import evaluate, tessellate, to_glb
 
 try:
     import _smlib_core as sm
@@ -163,8 +163,7 @@ class PrimitiveIntegrationTests(unittest.TestCase):
                 self.assertEqual(doc["accessors"][0]["count"], len(mesh["positions"]) // 3)
 
                 objects, materials, _ = evaluate(
-                    "box left 0 0 0 10 10 10\nbox right 15 0 0 10 10 10", "text", sm)
-                apply_finish(objects, sm, command, 1)
+                    f"box left 0 0 0 10 10 10\nbox right 15 0 0 10 10 10\n{command} left 1\n{command} right 1", "text", sm)
                 global_meshes = tessellate(objects, sm, materials=materials)
                 self.assertEqual(len(global_meshes), 2)
                 self.assertTrue(all(len(part["positions"]) // 9 > 12 for part in global_meshes))

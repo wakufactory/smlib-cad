@@ -89,8 +89,7 @@ def run_model_request(request: dict, path: str, metadata: dict | None = None) ->
             failure = json.loads(error_path.read_text(encoding="utf-8"))
             raise ModelError(failure["error"], failure["traceback"])
         if completed.returncode or not output_path.exists():
-            hint = "全体加工の幅/半径を小さくして再試行してください。" if request.get("finish") != "none" else "入力形状を確認してください。"
-            raise ModelError(f"形状計算が異常終了しました。{hint}")
+            raise ModelError("形状計算が異常終了しました。入力形状を確認してください。")
         if metadata is not None:
             metadata.update(json.loads(Path(str(output_path) + ".json").read_text(encoding="utf-8")))
         return output_path.read_bytes()

@@ -6,8 +6,8 @@ const key = 'smlib-modeler.draft.v1';
 const storage = new Map();
 function page() {
   const events = {};
-  const values = {'animation-source':'', source:'', mode:'text', sample:'default', chord:'0.08', angle:'20', finish:'none',
-    'finish-size':'1', 'export-scale':'1', 'file-name':'model', 'shading-mode':'shading', 'preview-mode':'webgl',
+  const values = {'animation-source':'', source:'', mode:'text', sample:'default', chord:'0.08', angle:'20',
+    'export-scale':'1', 'file-name':'model', 'shading-mode':'shading', 'preview-mode':'webgl',
     'grid-spacing':'1', 'grid-plane':'xy', 'grid-offset':'0', 'projection-mode':'orthographic'};
   const elements = Object.fromEntries(Object.entries(values).map(([id,value])=>[id,{value,addEventListener(){}}]));
   const window = {localStorage:{getItem:k=>storage.get(k) ?? null,setItem:(k,v)=>storage.set(k,v)}, addEventListener(name,fn){events[name]=fn;}};
@@ -33,6 +33,10 @@ first.elements['grid-offset'].value = '-3';
 first.elements['projection-mode'].value = 'orthographic';
 first.events.input({target:{id:'source'}});
 assert(storage.has(key));
+const legacyDraft = JSON.parse(storage.get(key));
+legacyDraft.fields.finish = 'fillet';
+legacyDraft.fields['finish-size'] = '1000';
+storage.set(key, JSON.stringify(legacyDraft));
 const reloaded = page();
 assert.equal(reloaded.elements.source.value, 'box unfinished');
 assert.equal(reloaded.elements['animation-clip'].value,'sway');

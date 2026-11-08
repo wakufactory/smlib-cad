@@ -318,15 +318,19 @@ class ModelProcessTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["timeout"], 60)
 
     @unittest.skipUnless(importlib.util.find_spec("_smlib_core"), "native binding unavailable")
-    def test_bad_finish_does_not_prevent_next_preview(self):
+    def test_legacy_finish_is_ignored(self):
         request = {"source": "box body 0 0 0 10 10 10", "mode": "text",
                    "finish": "chamfer", "finishSize": 10}
-        status, failure = self.post(request)
-        self.assertEqual(status, 400)
-        self.assertIn("異常終了", failure["error"])
-        request["finishSize"] = 1
+        status, legacy = self.post(request)
+        self.assertEqual(status, 200)
+        del request["finish"]
+        del request["finishSize"]
         status, result = self.post(request)
         self.assertEqual(status, 200)
+        self.assertEqual(legacy, result)
+        for path in ("/export", "/export/usdz", "/preview/usdz"):
+            self.assertEqual(run_model_request({**request, "finish": "fillet", "finishSize": None}, path),
+                             run_model_request(request, path))
         self.assertEqual(len(result["meshes"]), 1)
         self.assertGreater(len(result["meshes"][0]["positions"]), 0)
         self.assertEqual(run_model_request(request, "/export")[:4], b"glTF")

@@ -1040,23 +1040,6 @@ def evaluate(source: str, mode: str, sm):
     return objects, normalize_materials(namespace.get("materials", {}), objects), output.getvalue()
 
 
-def apply_finish(objects, sm, finish: str = "none", size: float = 1.0):
-    """Apply one all-edge operation to every result solid before tessellation."""
-    if finish == "none":
-        return objects
-    if finish not in ("chamfer", "fillet"):
-        raise ValueError("finish must be none, chamfer, or fillet")
-    if isinstance(size, bool) or not isinstance(size, (int, float)) or not math.isfinite(size) or size <= 0:
-        raise ValueError("finish width/radius must be finite and positive")
-    fn = sm.chamfer_fillet if finish == "chamfer" else sm.circular_fillet
-    for name, solid in objects.items():
-        try:
-            objects[name] = fn(solid, float(size))
-        except RuntimeError as exc:
-            raise RuntimeError(f"{name}: {exc}") from exc
-    return objects
-
-
 def _improve_triangle_angles(triangles, points, cross, winding, eps):
     """Flip interior diagonals only when the pair's smallest 3D angle grows.
 

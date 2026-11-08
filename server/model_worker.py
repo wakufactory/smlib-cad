@@ -7,7 +7,7 @@ import sys
 import traceback
 from pathlib import Path
 
-from modeler import apply_finish, evaluate, tessellate
+from modeler import evaluate, tessellate
 from model_export import to_glb, to_usdz
 from animation import prepare_animation, resolve_animation_source, select_clip
 
@@ -23,7 +23,6 @@ def main(request_path: str, output_path: str, error_path: str) -> None:
         import _smlib_core as sm
 
         objects, materials, log = evaluate(request["source"], request.get("mode", "python"), sm)
-        objects = apply_finish(objects, sm, request.get("finish", "none"), request.get("finishSize", 1))
         meshes = tessellate(objects, sm, float(request.get("chord", 0.08)),
                             angle=float(request.get("angle", 20)), materials=materials)
         animation_source = resolve_animation_source(request.get("animationSource", ""),

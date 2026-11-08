@@ -3,7 +3,7 @@ import math
 import struct
 import unittest
 
-from modeler import _number_expression, apply_finish, evaluate, tessellate, to_glb
+from modeler import _number_expression, evaluate, tessellate, to_glb
 
 
 class Solid:
@@ -307,9 +307,6 @@ end
         self.assertEqual(set(objects), {"combined", "nested", "shown"})
         self.assertEqual(len(sm.booleans), 1)
         self.assertIn((objects["combined"], (1, 1, 1), (0, 0, 0), (4, 0, 0)), sm.transforms)
-        with patch.object(sm, "circular_fillet", wraps=sm.circular_fillet) as finish:
-            apply_finish(objects, sm, "fillet", 0.1)
-        self.assertEqual([call.args[0] for call in finish.call_args_list], list(objects.values()))
         with patch.object(sm, "tessellate", wraps=sm.tessellate) as render:
             meshes = tessellate(objects, sm, materials=materials)
         self.assertEqual([mesh["name"] for mesh in meshes], ["shown"])
@@ -390,8 +387,7 @@ end
         objects, materials, _ = evaluate(
             "sphere fine 0 0 0 4\ntessellation fine 0.01 5\n"
             "sphere normal 10 0 0 4\nsphere partial 20 0 0 4\n"
-            "tessellation partial default 10", "text", sm)
-        objects = apply_finish(objects, sm, "fillet", 0.1)
+            "tessellation partial default 10\nfillet fine 0.1", "text", sm)
         tessellate(objects, sm, 0.08, 20, materials)
         self.assertEqual([(c["chord_height_tolerance"], c["curve_angle_tolerance_deg"],
                            c["surface_angle_tolerance_deg"]) for c in calls],
@@ -1033,17 +1029,6 @@ end
         for command in ("chamfer missing 1", "chamfer a 0", "fillet a -1", "fillet a nan"):
             with self.subTest(command=command), self.assertRaisesRegex(ValueError, "Line 2"):
                 evaluate("box a 0 0 0 10 10 10\n" + command, "text", sm)
-
-        objects, _, _ = evaluate("box a 0 0 0 10 10 10\nbox b 15 0 0 10 10 10", "text", sm)
-        original = tuple(objects.values())
-        self.assertIs(apply_finish(objects, sm, "none", 0), objects)
-        self.assertEqual(tuple(objects.values()), original)
-        self.assertIs(apply_finish(objects, sm, "fillet", 0.5), objects)
-        self.assertEqual(tuple(objects.values()), original)
-        self.assertEqual(sm.last_fillet[1], 0.5)
-        for finish, size in (("unknown", 1), ("chamfer", 0), ("fillet", float("nan"))):
-            with self.subTest(finish=finish, size=size), self.assertRaises(ValueError):
-                apply_finish(objects, sm, finish, size)
 
     def test_python_material_and_invalid_values(self):
         source = ("result = sm.create_box((0,0,0), 1, 2, 3)\n"

@@ -8,7 +8,7 @@ import struct
 import unittest
 import zipfile
 
-from modeler import apply_finish, evaluate, tessellate, to_glb, to_usdz
+from modeler import evaluate, tessellate, to_glb, to_usdz
 from test_modeler import FakeBrep
 
 try:
@@ -259,7 +259,9 @@ end'''
             if finish == 'fillet':
                 text = text.replace('sphere ball 0 0 0 1\n', '')
             objects, materials, _ = evaluate(text, 'text', native_sm)
-            apply_finish(objects, native_sm, finish, 0.1)
+            if finish == 'fillet':
+                for solid in objects.values():
+                    native_sm.circular_fillet(solid, 0.1)
             meshes = tessellate(objects, native_sm, materials=materials)
             for scale in (1, 0.001):
                 _, glb = glb_world(to_glb(meshes, scale))

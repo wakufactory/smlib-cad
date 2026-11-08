@@ -62,8 +62,6 @@ const ModelFile = (() => {
     if(document.animationClip!==undefined && typeof document.animationClip!=='string')throw Error('animationClip はテキストにしてください');
     const p = document.parameters;
     if (!p || typeof p !== 'object' || Array.isArray(p)) throw Error('parameters が必要です');
-    const finish = p.finish;
-    if (!['none', 'chamfer', 'fillet'].includes(finish)) throw Error('全体加工の種類が不正です');
     return {
       format: 'smlib-model', version: 1, mode: document.mode, source: document.source,
       ...(document.animationSource === undefined ? {} : {animationSource}),
@@ -73,8 +71,6 @@ const ModelFile = (() => {
       parameters: {
         chord: number(p.chord, '曲面精度', 0.001, 2),
         angle: number(p.angle, '角度条件', 1, 90),
-        finish,
-        finishSize: number(p.finishSize, '幅/半径', 0.001),
         exportScale: exportScale(p.exportScale === undefined ? 1 : p.exportScale)
       }
     };
@@ -171,7 +167,7 @@ function previewNodeKeys(mesh){
     JSON.stringify([...path,['solid',mesh.name]])];
 }
 let currentMeshKey=null;
-function modelingKey(){return JSON.stringify(['source','mode','chord','angle','finish','finish-size'].map(id=>$(id).value));}
+function modelingKey(){return JSON.stringify(['source','mode','chord','angle'].map(id=>$(id).value));}
 let animationPlayer = null;
 let resolvedAnimation = null;
 let animationApplyId = 0;
@@ -259,7 +255,7 @@ const cameraLightDirection = [-0.6, 0.8, 0.8]; // left, up, toward viewer
 function note(text, error = false) { message.textContent = text; message.style.color = error ? '#ff9b93' : '#9dd9c5'; }
 const draftKey='smlib-modeler.draft.v1';
 let draftEdited=false;
-const draftFields=['source','mode','sample','chord','angle','finish','finish-size','export-scale','file-name','shading-mode','preview-mode','grid-spacing','grid-plane','grid-offset','projection-mode'];
+const draftFields=['source','mode','sample','chord','angle','export-scale','file-name','shading-mode','preview-mode','grid-spacing','grid-plane','grid-offset','projection-mode'];
 const draftChecks=['show-axes','show-grid'];
 function saveDraft(){
   draftEdited=true;
@@ -283,7 +279,7 @@ function restoreDraft(){
        !draftFields.slice(-4).every(id=>draft.fields[id]===undefined || typeof draft.fields[id]==='string') ||
        !draftChecks.every(id=>typeof draft.checks[id]==='boolean'))throw Error('Invalid draft');
     const options={mode:['text','python'],sample:['clear','default','gallery','circular','sweeps','offsets','functions','groups','animation'],
-      finish:['none','chamfer','fillet'],'shading-mode':['shading','wireframe','normal'],'preview-mode':['webgl','model'],
+      'shading-mode':['shading','wireframe','normal'],'preview-mode':['webgl','model'],
       'grid-plane':['xy','yz','zx'],'projection-mode':['perspective','orthographic']};
     if(Object.entries(options).some(([id,values])=>draft.fields[id]!==undefined && !values.includes(draft.fields[id])))throw Error('Invalid draft option');
     if(draft.animationSource!==undefined && typeof draft.animationSource!=='string')throw Error('Invalid animation draft');
@@ -292,7 +288,6 @@ function restoreDraft(){
     for(const id of draftFields)if(draft.fields[id]!==undefined)$(id).value=draft.fields[id];
     refreshSourceLines();
     for(const id of draftChecks)$(id).checked=draft.checks[id];
-    $('finish-size').disabled=$('finish').value==='none';
     if($('preview-mode').value==='model' && modelModeError())$('preview-mode').value='webgl';
     note('前回の編集内容を復元しました');
     return true;
@@ -321,7 +316,6 @@ function showPreviewMode(){
   $('shading-mode').hidden=native;
   $('projection-mode').hidden=native;
   $('view-controls').hidden=native;
-  $('hint').hidden=native;
   if(!native)draw();
 }
 function setupRenderer(){
@@ -603,7 +597,7 @@ function show(meshes){
   draw();
 }
 async function request(path,filename){
-  const data={animationSource:animationText(),mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value),finish:$('finish').value,finishSize:Number($('finish-size').value)};
+  const data={animationSource:animationText(),mode:$('mode').value,source:$('source').value,chord:Number($('chord').value),angle:Number($('angle').value)};
   data.animationClip=selectedAnimationClip();
   if(path==='/animation/resolve'){
     const paths=new Map(currentMeshes.map(mesh=>{
@@ -738,19 +732,19 @@ async function exportFile(format){
   try{const name=saveFileName(format),response=await request(format==='usdz'?'/export/usdz':'/export',name),blob=await response.blob(),url=URL.createObjectURL(blob);
     const meshCount=response.headers.get('X-Mesh-Count'),materialCount=response.headers.get('X-Material-Count');
     const counts=`mesh数 ${meshCount===null?'—':Number(meshCount).toLocaleString()} / material数 ${materialCount===null?'—':Number(materialCount).toLocaleString()}`;
-    const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);$('export-stats-'+format).textContent=`${format.toUpperCase()}: ${counts}`;
+    const a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     note(`${name} (${(blob.size/1024).toFixed(1)} KiB) を保存しました · ${counts}`);
   }catch(e){note(e.message,true);}finally{$(id).disabled=false;}
 }
 function modelDocument(validateAnimation=true){
-  for(const id of ['chord','angle','finish-size','export-scale']){
+  for(const id of ['chord','angle','export-scale']){
     if(!$(id).checkValidity() || $(id).value.trim()==='') throw Error(`${$(id).labels[0]?.textContent || id} の値が不正です`);
   }
   return ModelFile.validate({
     format:'smlib-model',version:1,mode:$('mode').value,source:$('source').value,animationSource:animationText(),animationClip:validateAnimation?selectedAnimationClip():$('animation-clip').value,
     objectTree:currentObjectTree,
     parameters:{chord:Number($('chord').value),angle:Number($('angle').value),
-      finish:$('finish').value,finishSize:Number($('finish-size').value),exportScale:Number($('export-scale').value)}
+      exportScale:Number($('export-scale').value)}
   },validateAnimation);
 }
 async function saveModel(){
@@ -784,9 +778,9 @@ async function loadModel(file){
     $('mode').value=data.mode;$('sample').value='default';$('source').value=data.source;
     refreshSourceLines();
     $('chord').value=p.chord;$('angle').value=p.angle;
-    $('finish').value=p.finish;$('finish-size').value=p.finishSize;$('export-scale').value=p.exportScale;
+    $('export-scale').value=p.exportScale;
     if(file.name && /\.json$/i.test(file.name))$('file-name').value=file.name.replace(/\.json$/i,'');
-    $('finish-size').disabled=p.finish==='none';$('save-model').disabled=false;
+    $('save-model').disabled=false;
     $('export').disabled=true;$('export-usdz').disabled=true;
     globalThis.ModelChat?.restore(data.chat);
     renderObjectTree(data.objectTree||[]);
@@ -816,7 +810,6 @@ $('preview-mode').onchange=()=>{
   }
   showPreviewMode();preview();
 };
-$('finish').onchange=()=>$('finish-size').disabled=$('finish').value==='none';
 $('mode').onchange=()=>{resetPreviewView=true;animationPlayer?.clear();restoreClipSelection();$('animation-source').value='';$('sample').value='default';$('source').value=examples[$('mode').value]||'';refreshSourceLines();$('export').disabled=true;$('export-usdz').disabled=true;saveDraft();};
 function clearModel(){
   // Invalidate pending previews so an older response cannot restore the model.

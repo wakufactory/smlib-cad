@@ -5,7 +5,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from modeler import apply_finish, evaluate, tessellate, to_glb, to_usdz
+from modeler import evaluate, tessellate, to_glb, to_usdz
 from test_modeler import FakeBrep
 
 try:
@@ -110,7 +110,6 @@ materials = {'assembly': {'baseColor': [1,0,0], 'metallic': 0.5}}
             (objects['bolt'], (1, 1, 1), (0, 0, 0), (0, 0, 2)),
             (objects['body'], (2, 1, 1), (0, 0, 90), (10, 0, 0)),
             (objects['bolt'], (2, 1, 1), (0, 0, 90), (10, 0, 0))])
-        apply_finish(objects, sm, 'fillet', 0.1)
         meshes = tessellate(objects, sm, materials=materials)
         self.assertEqual([mesh['group'] for mesh in meshes], ['assembly', 'assembly', 'plain'])
         data = to_glb(meshes)

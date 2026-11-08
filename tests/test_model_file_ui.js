@@ -13,11 +13,12 @@ for(const id of ['animation-controls','animation-apply','animation-play','animat
   assert(leftPane.includes(`id="${id}"`), `${id} belongs in the left settings pane`);
   assert(!viewport.includes(`id="${id}"`));
 }
+assert.doesNotMatch(html, /id="finish(?:-size)?"/);
 assert.match(viewport, /id="projection-mode"[^>]*><option value="orthographic">平行投影<\/option>/);
 
 const values = {
   mode: 'text', source: 'box first 0 0 0 1 1 1', chord: '0.08', angle: '20',
-  finish: 'none', 'finish-size': '1', sample: 'default', 'file-name': 'model',
+  sample: 'default', 'file-name': 'model',
   'export-scale': '1', 'grid-spacing':'1', 'grid-plane':'xy', 'grid-offset':'0', 'projection-mode':'orthographic'
 };
 const elements = Object.fromEntries(Object.entries(values).map(([id, value]) =>
@@ -110,7 +111,7 @@ previewCalls = 0;
 const document = {
   format: 'smlib-model', version: 1, mode: 'text',
   source: 'box body 0 0 0 10 10 10\n',
-  parameters: {chord: 0.02, angle: 12, finish: 'fillet', finishSize: 0.5, exportScale: 2.5}
+  parameters: {chord: 0.02, angle: 12, exportScale: 2.5}
 };
 assert.equal(JSON.stringify(ModelFile.parse(JSON.stringify(document))), JSON.stringify(document));
 assert.equal(ModelFile.parse(JSON.stringify({...document, parameters: {...document.parameters, exportScale: undefined}})).parameters.exportScale, 1);
@@ -120,11 +121,14 @@ for (const invalid of [
   {...document, source: 5},
   {...document, parameters: {...document.parameters, chord: 0}},
   {...document, parameters: {...document.parameters, angle: 91}},
-  {...document, parameters: {...document.parameters, finish: 'other'}},
-  {...document, parameters: {...document.parameters, finishSize: null}},
   {...document, parameters: {...document.parameters, exportScale: 0}},
   {...document, parameters: {...document.parameters, exportScale: '2'}}
 ]) assert.throws(() => ModelFile.parse(JSON.stringify(invalid)));
+
+for (const legacy of [{finish:'fillet',finishSize:1000}, {finish:'other',finishSize:null}]) {
+  assert.equal(JSON.stringify(ModelFile.validate({...document,parameters:{...document.parameters,...legacy}})),JSON.stringify(document));
+}
+
 
 const unfinishedAnimation={...document,animationSource:'animation main loop unfinished'};
 assert.throws(()=>ModelFile.validate(unfinishedAnimation));
@@ -135,8 +139,6 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
 (async () => {
   elements.chord.value = '0.02';
   elements.angle.value = '12';
-  elements.finish.value = 'fillet';
-  elements['finish-size'].value = '0.5';
   elements['export-scale'].value = '2.5';
   await elements['save-model'].onclick();
   assert.equal(downloadName, 'model.json');
@@ -159,7 +161,6 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(downloadName, 'engine block.glb');
   assert.equal(requestBody.filename,'engine block.glb');
-  assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   assert.match(elements.message.textContent, /mesh数 3 \/ material数 2/);
   await elements['export-usdz'].onclick();
   assert.equal(exportPath, '/export/usdz');
@@ -167,14 +168,11 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(requestBody.animationSource,elements['animation-source'].value);
   assert.equal(downloadName, 'engine block.usdz');
   assert.equal(requestBody.filename,'engine block.usdz');
-  assert.equal(elements['export-stats-usdz'].textContent, 'USDZ: mesh数 3 / material数 1');
-  assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   elements['export-scale'].value = '0';
   exportPath = undefined;
   await elements.export.onclick();
   assert.equal(exportPath, undefined);
   assert.match(elements.message.textContent, /座標倍率/);
-  assert.equal(elements['export-stats-glb'].textContent, 'GLB: mesh数 3 / material数 2');
   elements['export-scale'].value = '2.5';
   elements['file-name'].value = '  ';
   exportPath = undefined;
@@ -194,10 +192,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(elements.source.value, values.source);
   assert.equal(elements.chord.value, 0.02);
   assert.equal(elements.angle.value, 12);
-  assert.equal(elements.finish.value, 'fillet');
-  assert.equal(elements['finish-size'].value, 0.5);
   assert.equal(elements['export-scale'].value, 2.5);
-  assert.equal(elements['finish-size'].disabled, false);
   assert.equal(elements['file-name'].value, 'model');
 
   const beforeInvalid=elements.source.value, previewsBeforeInvalid=previewCalls;
@@ -212,7 +207,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   assert.equal(ModelFile.parse(JSON.stringify({...document,source:propertySource})).source,propertySource);
 
   const pythonSource = 'result = sm.create_box((0, 0, 0), 2, 3, 4)\n';
-  for (const id of ['chord', 'angle', 'finish-size', 'export-scale']) elements[id].value = String(elements[id].value);
+  for (const id of ['chord', 'angle', 'export-scale']) elements[id].value = String(elements[id].value);
   elements.mode.value = 'python';
   elements.mode.onchange();
   assert.equal(elements['save-model'].disabled, false);
@@ -270,7 +265,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   const chat = {version:1,messages:[{role:'user',text:'幅を2にして',images:[image]}, {role:'assistant',text:'幅を変更しました。'}, {role:'system',text:'計算エラー',error:true}]};
   let restored, blocked = false;
   context.ModelChat = {snapshot:()=>chat, restore:value=>{restored=value;}, assertIdle:()=>{if(blocked)throw Error('応答待ち');}};
-  for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
+  for(const id of ['chord','angle','export-scale'])elements[id].value=String(elements[id].value);
   await elements['save-model'].onclick();
   const savedChatJson = await savedBlob.text();
   assert.deepEqual(JSON.parse(savedChatJson).chat, chat);
@@ -317,7 +312,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   await oldPreview;
   assert.equal(elements['object-tree'].textContent,'└─ newest');
   context.updateObjectTree(treeMeshes);
-  for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
+  for(const id of ['chord','angle','export-scale'])elements[id].value=String(elements[id].value);
   const expectedTree=[
     {type:'group',name:'assembly',children:[
       {type:'solid',name:'body'},
@@ -348,7 +343,7 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   const legacyJson=JSON.stringify(document);
   await context.loadModel({size:legacyJson.length,text:async()=>legacyJson});
   assert.equal(elements['object-tree'].textContent,'オブジェクトはありません');
-  for(const id of ['chord','angle','finish-size','export-scale'])elements[id].value=String(elements[id].value);
+  for(const id of ['chord','angle','export-scale'])elements[id].value=String(elements[id].value);
   await elements['save-model'].onclick();
   assert.deepEqual(JSON.parse(await savedBlob.text()).objectTree,[]);
   // Reuse geometry only when it belongs to the current modeling inputs.
