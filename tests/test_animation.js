@@ -73,7 +73,7 @@ for(const expression of ['1/0','1e308*10','360**2','0x168','Math.sin(0)',
   assert.throws(()=>parseClip(rotationClip(0,expression)),/Animation line 4:/);
 }
 for(const bad of [source.replace('loop 4','loop 0'),
-  source.replace('key 4 euler','key 3 euler'),source.replace('1.6 1.6 1.6','0 1 1'),
+  source.replace('key 4 euler','key 0 euler'),source.replace('1.6 1.6 1.6','0 1 1'),
   source.replace('key 2 position','key 0 position'),source+'\nend',source.replace('loop 4','loop 0x4'),
   source.replace('0 0 360','0 0 360000000')])assert.throws(()=>parseClip(bad));
 
@@ -99,13 +99,33 @@ const cycleTimes=A.sampleTimes(cyclic,120);
 for(const t of [0,1.5,3,118.5,120])assert(cycleTimes.includes(t));
 assert.doesNotThrow(()=>A.validate(cycles.replace('cycle euler 2','cycle euler (period * 1)')));
 for(const bad of [cycles.replace('cycle euler 2','cycle euler 0'),
-  cycles.replace('cycle euler 2','cycle euler 7'),
   cycles.replace('cycle euler 2','cycle euler 121'),
   cycles.replace('cycle euler 2','cycle euler 2\ncycle euler 2'),
   cycles.replace('cycle euler 2','cycle scale 2'),
   cycles.replace('key 2 euler','key 120 euler'),
   cycles.replace('cycle euler 2','cycle euler 0.00000001'),
   cycles.replace('0 0 -720','0 0 360000')])assert.throws(()=>parseClip(bad));
+
+const remainderSource=`animation loop 5
+track rotor
+key 0 position 0 0 0
+key 2 position 20 0 0
+key 0 euler 0 0 0
+key 3 euler 0 0 90
+end
+end`;
+const remainder=parseClip(remainderSource).tracks[0];
+assert.deepEqual(plain(A.sample(remainder,2).position),[0,0,0]);
+assert.deepEqual(plain(A.sample(remainder,3).euler),[0,0,0]);
+assert.deepEqual(plain(A.sample(remainder,5).position),[10,0,0]);
+assert.deepEqual(plain(A.sample(remainder,5).euler),[0,0,60]);
+const seamTimes=A.sampleTimes(remainder,5);
+assert.equal(seamTimes.at(-1),5);
+assert(seamTimes.some(t=>t>1.99999 && t<2));
+const explicit=parseClip(remainderSource.replace('track rotor','track rotor\ncycle euler 3')).tracks[0];
+assert.deepEqual(plain(A.sample(explicit,5).euler),[0,0,150]);
+const shortDecimal=parseClip(remainderSource.replace('loop 5','loop 0.3').replace('key 2 position','key 0.1 position').replace('key 3 euler','key 0.3 euler')).tracks[0];
+assert.deepEqual(plain(A.sample(shortDecimal,0.3).position),[0,0,0]);
 
 const decimal=parseClip(`animation main loop 1
 track rotor
@@ -249,7 +269,7 @@ close(quaternionRendered[0].solid.matrix.point([10,22,0]),[-2,0,0]);
 close(quaternionPlayer.groupMatrix(quaternionMeshes[0].groupPath,groupWorld).point([0,0,0]),[-2,0,0]);
 console.log('animation: parser, nested nonuniform transforms, playback, loop, pause, seek, reset, and zero geometry requests passed');
 
-// Clips overwrite local channels; switching restores every omitted channel.
+// Clip switches update only authored channels and retain each timeline position.
 const multi=`animation move loop 4
 track rotor
 key 0 position 10 20 30
@@ -289,14 +309,74 @@ assert.equal(multiPlayer.running,false);
 assert.equal(multiPlayer.time,0);
 assert.equal(multiPlayer.animation.duration,2);
 const turned=multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix());
-close(turned.point([0,0,0]),[10,20,30]);
-close(turned.point([1,0,0]),[12,20,30]);
+close(turned.point([0,0,0]),[30,20,30]);
+close(turned.point([1,0,0]),[32,20,30]);
 multiPlayer.seek(1);
-close(multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix()).point([1,0,0]),[10,22,30]);
+close(multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix()).point([1,0,0]),[30,22,30]);
 multiPlayer.select('move');
-assert.equal(multiPlayer.time,0);
-close(multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix()).point([1,0,0]),[10,22,30]);
+assert.equal(multiPlayer.time,2);
+close(multiPlayer.groupMatrix(multiMeshes[0].groupPath,new Matrix()).point([1,0,0]),[30,22,30]);
 assert.throws(()=>multiPlayer.select('missing'),/Unknown animation clip/);
 assert.equal(multiPlayer.animation.name,'move');
+multiPlayer.select('turn');
+assert.equal(multiPlayer.time,1);
 assert.equal(requests,0);
-console.log('animation clips: direct override, selection, rest-pose restoration, independent durations, and base syntax passed');
+console.log('animation clips: direct override, selection, retained channels and timeline positions, independent durations, and base syntax passed');
+
+// Entire untargeted groups, scales, and quaternion rotations remain frozen.
+const retainedMeshes=[
+  {groupPath:[group('rotor',[10,0,0],[0,0,90],[2,3,4])]},
+  {groupPath:[{...group('other',[0,5,0]),quaternion:[0,0,Math.SQRT1_2,Math.SQRT1_2]}]}
+];
+const retainedRendered=[objects(),objects()];
+const retainedSource=multi+`\nanimation grow loop 3
+track other
+key 0 scale 1 1 1
+key 3 scale 4 4 4
+end
+end`;
+let reported;
+const retained=new A.Player(THREE,()=>draws++,(time,duration,running)=>{reported={time,duration,running};});
+const localOrigin=index=>retained.groupMatrix(retainedMeshes[index].groupPath,new Matrix()).point([0,0,0]);
+const localX=index=>retained.groupMatrix(retainedMeshes[index].groupPath,new Matrix()).point([1,0,0]);
+retained.configure(retainedSource,retainedMeshes,retainedRendered);
+retained.seek(3);
+retained.select('grow');retained.seek(2);
+close(localOrigin(0),[40,20,30]);
+close(localX(1),[0,8,0]);
+retained.select('turn');retained.seek(1.25);
+close(localOrigin(0),[40,20,30]);
+close(localX(1),[0,8,0]);
+for(const mode of ['solid','normal','wire']){
+  close(retainedRendered[1][mode].matrix.point([0,6,0]),[0,8,0]);
+}
+retained.select('move');
+assert.equal(retained.time,3);
+assert.deepEqual(reported,{time:3,duration:4,running:false});
+retained.reset();
+assert.equal(retained.time,0);
+close(localOrigin(0),[10,20,30]);
+close(localX(1),[0,8,0]);
+retained.select('grow');
+assert.deepEqual(reported,{time:2,duration:3,running:false});
+retained.select('turn');
+assert.deepEqual(reported,{time:1.25,duration:2,running:false});
+// Rest-pose queries for local grids must continue to ignore retained animation.
+close(retained.groupMatrix(retainedMeshes[0].groupPath,new Matrix(),undefined,{animated:false}).point([0,0,0]),[10,0,0]);
+// Reapplying on the same cached geometry keeps time; shorter edited clips clamp it.
+retained.configure(retainedSource,retainedMeshes,retainedRendered,'turn');
+assert.equal(retained.time,1.25);
+const shorter=retainedSource.replace('animation turn loop 2','animation turn loop 1').replace('key 2 euler 0 0 180','key 1 euler 0 0 180');
+retained.configure(shorter,retainedMeshes,retainedRendered,'turn');
+assert.equal(retained.time,1);
+close(localX(1),[0,8,0]);
+// New geometry and explicit clearing start a new session with initial transforms.
+retained.configure(retainedSource,plain(retainedMeshes),[objects(),objects()],'turn');
+assert.equal(retained.time,0);
+assert.equal(retained.clipTimes.size,1);
+close(retained.groupMatrix(retained.meshes[1].groupPath,new Matrix()).point([1,0,0]),[0,6,0]);
+retained.clear();
+assert.equal(retained.poses.size,0);
+assert.equal(retained.clipTimes.size,0);
+assert.equal(requests,0);
+console.log('clip state: untouched groups/channels, quaternion, per-clip seek/status/reset, edited duration, and geometry reset passed');

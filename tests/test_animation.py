@@ -156,7 +156,6 @@ class AnimationTests(unittest.TestCase):
         resolved = resolve_animation_source(source.replace('cycle euler 2', 'cycle euler (period * 1)'), model)
         self.assertEqual(parse_clip(resolved), parse_clip(source))
         for bad in [source.replace('cycle euler 2','cycle euler 0'),
-                    source.replace('cycle euler 2','cycle euler 3'),
                     source.replace('cycle euler 2','cycle euler 5'),
                     source.replace('cycle euler 2','cycle euler 2\ncycle euler 2'),
                     source.replace('cycle euler 2','cycle scale 2'),
@@ -250,6 +249,49 @@ class AnimationTests(unittest.TestCase):
             with self.subTest(expression=expression), self.assertRaisesRegex(ValueError, 'Animation line 5:'):
                 parse_clip(clip(last=f'0 0 {expression}'))
 
+    def test_short_keys_repeat_with_remainder_in_preview_and_exports(self):
+        source = ('animation loop 5\ntrack rotor\n'
+                  'key 0 position 0 0 0\nkey 2 position 20 0 0\n'
+                  'key 0 euler 0 0 0\nkey 3 euler 0 0 90\nend\nend')
+        track = parse_clip(source)['tracks'][0]
+        self.assertEqual(sample_track(track, 2)['position'], [0, 0, 0])
+        self.assertEqual(sample_track(track, 3)['euler'], [0, 0, 0])
+        self.assertEqual(sample_track(track, 5)['position'], [10, 0, 0])
+        self.assertEqual(sample_track(track, 5)['euler'], [0, 0, 60])
+        self.assertEqual(parse_clip(resolve_animation_source(source)), parse_clip(source))
+
+        doc, read = decode_glb(to_glb([mesh()], animation_source=source))
+        animation = doc['animations'][0]
+        channel = next(c for c in animation['channels'] if c['target']['path'] == 'translation')
+        sampler = animation['samplers'][channel['sampler']]
+        times = read(sampler['input'])
+        values = read(sampler['output'])[::3]
+        seam = times.index(2)
+        self.assertTrue(1.99999 < times[seam-1] < 2)
+        self.assertAlmostEqual(values[seam-1], 20, places=5)
+        self.assertEqual(values[seam], 0)
+        self.assertEqual((times[-1], values[-1]), (5, 10))
+
+        with zipfile.ZipFile(io.BytesIO(to_usdz([mesh()], animation_source=source))) as archive:
+            stage = archive.read('model.usda').decode()
+        self.assertIn('120: (0, 0, 0)', stage)
+        self.assertIn('300: (10, 0, 0)', stage)
+        self.assertIn('300: (0, 0, 60)', stage)
+
+        explicit = source.replace('track rotor', 'track rotor\ncycle euler 3')
+        self.assertEqual(sample_track(parse_clip(explicit)['tracks'][0], 5)['euler'], [0, 0, 150])
+
+    def test_decimal_implicit_cycles_land_on_exact_boundaries(self):
+        source = ('animation loop 0.6\ntrack rotor\n'
+                  'key 0 position 0 0 0\nkey 0.1 position 10 0 0\n'
+                  'key 0 scale 1 1 1\nkey 0.3 scale 2 2 2\nend\nend')
+        track = parse_clip(source)['tracks'][0]
+        for time in (0.3, 0.6):
+            self.assertEqual(sample_track(track, time)['position'], [0, 0, 0])
+            self.assertEqual(sample_track(track, time)['scale'], [1, 1, 1])
+        # The independently repeated channels share seams such as 0.1*3 and 0.3.
+        self.assertTrue(to_glb([mesh()], animation_source=source))
+
     def test_open_loop_endpoints(self):
         for channel, first, last in [('position', '0 0 0', '12 0 0'),
                                      ('euler', '0 0 0', '0 0 180'),
@@ -274,7 +316,7 @@ class AnimationTests(unittest.TestCase):
         invalid = [None, 1, 'x'*100001, 'animation main loop 0\nend', 'animation main loop 601\nend',
                    clip('scale',last='1 1 1',first='0 1 1'), clip(first='NaN 0 0'),
                    clip(middle='key 0 euler 0 0 90'), clip(middle='key 5 euler 0 0 90'),
-                   clip().replace('key 0','key 1'), clip().replace('key 4','key 3'),
+                   clip().replace('key 0','key 1'), clip().replace('key 4','key 0'),
                    clip()+'\nend', clip().removesuffix('\nend'), 'animation main loop 4\nend',
                    clip(last='0 0 1000000080')]
         for source in invalid:

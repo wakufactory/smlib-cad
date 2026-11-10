@@ -81,10 +81,27 @@
     const sx=Math.sin(x),sy=Math.sin(y),sz=Math.sin(z),cx=Math.cos(x),cy=Math.cos(y),cz=Math.cos(z);
     return [sx*cy*cz-cx*sy*sz,cx*sy*cz+sx*cy*sz,cx*cy*sz-sx*sy*cz,cx*cy*cz+sx*sy*sz];
   }
+  function channelPeriod(track,channel){
+    return track.cycles?.[channel]??track.implicit_cycles?.[channel];
+  }
+  function cycleRatio(time,period){
+    const ratio=time/period,nearest=Math.round(ratio);
+    return Math.abs(ratio-nearest)<=4*Number.EPSILON*ratio?nearest:ratio;
+  }
+  const seamTime=new DataView(new ArrayBuffer(4));
+  function beforeSeam(time){
+    seamTime.setFloat32(0,time);
+    seamTime.setUint32(0,Math.max(0,seamTime.getUint32(0)-1));
+    return seamTime.getFloat32(0);
+  }
   function sampleTimes(track, duration) {
     const times=new Set([0,duration]);
     for(const [channel,keys] of Object.entries(track.channels)){
-      const period=track.cycles?.[channel]??duration,count=Math.round(duration/period),steps=[];
+      const repeat=channelPeriod(track,channel),period=repeat??duration;
+      const ratio=cycleRatio(duration,period),count=Math.ceil(ratio),steps=[];
+      const jumps=repeat!==undefined && !(channel==='euler' && track.cycles?.[channel])
+        && keys[0][1].some((v,i)=>v!==keys.at(-1)[1][i]);
+      if(!Number.isFinite(ratio) || ratio>120000)throw Error('Animation exceeds 120000 generated samples');
       for(let i=1;i<keys.length;i++){
         const [a,av]=keys[i-1],[b,bv]=keys[i];
         let subdivisions=1;
@@ -96,16 +113,27 @@
         }
         steps.push(subdivisions);
       }
-      if(count*steps.reduce((s,v)=>s+v,0)+1>120000)throw Error('Animation exceeds 120000 generated samples');
+      if(count*steps.reduce((s,v)=>s+v,0)+(jumps?Math.floor(ratio):0)+1>120000)throw Error('Animation exceeds 120000 generated samples');
       for(let cycle=0;cycle<count;cycle++){
         for(let i=1;i<keys.length;i++){
           const a=keys[i-1][0],b=keys[i][0],subdivisions=steps[i-1];
           for(let j=0;j<subdivisions;j++)times.add(Math.min(duration,cycle*period+a+(b-a)*j/subdivisions));
         }
+        if(jumps && cycle+1<=ratio){
+          const seam=cycle+1===ratio?duration:(cycle+1)*period;
+          times.add(beforeSeam(seam));times.add(seam);
+        }
         if(times.size>120000)throw Error('Animation exceeds 120000 generated samples');
       }
     }
-    return [...times].sort((a,b)=>a-b);
+    const ordered=[...times].sort((a,b)=>a-b);
+    if(!track.cycles && !track.implicit_cycles)return ordered;
+    const merged=[];
+    for(const time of ordered){
+      if(merged.length && time-merged.at(-1)<=4*Number.EPSILON*time)merged[merged.length-1]=time;
+      else merged.push(time);
+    }
+    return merged;
   }
   function parseClip(source='',syntaxOnly=false) {
     if(typeof source!=='string' || source.length>100000)throw Error('animationSource must be text (at most 100000 characters)');
@@ -170,8 +198,10 @@
         }
         for(const [channel,keys] of Object.entries(track.channels)){
           if(syntaxOnly)continue;
-          const period=track.cycles?.[channel]??duration;
-          if(keys[0][0]!==0 || keys.at(-1)[0]!==period)fail(n,`${channel} needs keys at 0 and ${period} seconds`);
+          const end=keys.at(-1)[0],period=track.cycles?.[channel];
+          if(keys[0][0]!==0 || end<=0)fail(n,`${channel} needs keys at 0 and a positive end time`);
+          if(period!==undefined && end!==period)fail(n,`${channel} needs keys at 0 and ${period} seconds`);
+          if(period===undefined && end<duration)(track.implicit_cycles ||= {})[channel]=end;
         }
         tracks.push(track);track=null;
       }else if(w.length===2 && w[0]==='track' && !track){
@@ -180,9 +210,8 @@
       }else if(w.length===3 && w[0]==='cycle' && track && Object.hasOwn(defaults,w[1])){
         const channel=w[1],cycles=track.cycles ||= {};
         if(Object.hasOwn(cycles,channel))fail(n,'duplicate channel cycle');
-        const period=number(w[2],n),count=duration/period;
+        const period=number(w[2],n);
         if(!syntaxOnly && !(period>0 && period<=duration))fail(n,'cycle period must be greater than 0 and at most the loop duration');
-        if(!syntaxOnly && (!Number.isFinite(count) || count>120000 || Math.abs(count-Math.round(count))>1e-9))fail(n,'loop duration must be a whole number of cycles (at most 120000)');
         cycles[channel]=period;
       }else if(w.length===6 && w[0]==='key' && track && Object.hasOwn(defaults,w[2])){
         const time=number(w[1],n),value=w.slice(3).map(v=>number(v,n,w[2]==='euler'));
@@ -240,15 +269,15 @@
   function sample(track,time){
     const pose={...defaults,...track.base};
     for(const [channel,keys] of Object.entries(track.channels)){
-      const period=track.cycles?.[channel],turns=period?Math.floor(time/period):0;
-      const local=period?Math.max(0,Math.min(period,time-turns*period)):time;
+      const period=channelPeriod(track,channel),ratio=period?cycleRatio(time,period):0;
+      const turns=Math.floor(ratio),local=period?(ratio===turns?0:time-turns*period):time;
       let value=[...keys.at(-1)[1]];
       if(local<=keys[0][0])value=[...keys[0][1]];
       else for(let i=1;i<keys.length;i++){
         const [a,av]=keys[i-1],[b,bv]=keys[i];
         if(local<=b){const u=(local-a)/(b-a);value=av.map((v,j)=>v+(bv[j]-v)*u);break;}
       }
-      if(channel==='euler' && period)value=value.map((v,i)=>v+turns*(keys.at(-1)[1][i]-keys[0][1][i]));
+      if(channel==='euler' && track.cycles?.[channel])value=value.map((v,i)=>v+turns*(keys.at(-1)[1][i]-keys[0][1][i]));
       if(channel==='euler')delete pose.quaternion;
       pose[channel]=value;
     }
@@ -259,14 +288,15 @@
       this.THREE=THREE;this.draw=draw;this.status=status;this.records=[];this.time=0;this.running=false;
       this.vector=new THREE.Vector3();this.quat=new THREE.Quaternion();this.scale=new THREE.Vector3();
       this.frameMatrix=new THREE.Matrix4();this.groupFrameMatrix=new THREE.Matrix4();this.world=new THREE.Matrix4();
-      this.tracks=new Map();
+      this.tracks=new Map();this.poses=new Map();this.clipTimes=new Map();
     }
     matrix(pose,target){
       this.vector.set(...pose.position);this.quat.set(...(pose.quaternion||quaternion(pose.euler)));this.scale.set(...pose.scale);
       return target.compose(this.vector,this.quat,this.scale);
     }
-    appendFrame(target,matrix,track){
-      target.multiply(track?this.matrix(sample(track,this.time),this.frameMatrix):matrix);
+    appendFrame(target,matrix,path){
+      const pose=this.poses.get(path);
+      target.multiply(pose?this.matrix(pose,this.frameMatrix):matrix);
     }
     groupMatrix(groups,target,local=this.groupFrameMatrix,{animated=true}={}){
       target.identity();
@@ -275,8 +305,8 @@
       for(const group of groups){
         path+=(path?'/':'')+group.name;
         this.matrix(group,local);
-        const track=animated && this.tracks.get(path);
-        if(track)this.matrix(sample(track,this.time),local);
+        const pose=animated && this.poses.get(path);
+        if(pose)this.matrix(pose,local);
         target.multiply(local);
       }
       return target;
@@ -286,17 +316,21 @@
       const bindings=clips.map(clip=>bind(clip,meshes));
       const animation=clips.find(clip=>clip.name===name)||clips[0]||null;
       const bound=bindings[clips.indexOf(animation)]||new Map(); // Validate all clips before replacing playback.
+      const preserve=!!collection && meshes===this.meshes && rendered===this.rendered;
+      const poses=preserve?new Map(this.poses):new Map();
+      const clipTimes=preserve?new Map(clips.map(clip=>[clip.name,Math.min(clip.duration,this.clipTimes.get(clip.name)||0)])):new Map();
       const T=this.THREE;
       const records=meshes.map((mesh,i)=>{
         let path='';const base=new T.Matrix4();
         const frames=(mesh.groupPath||[]).map(group=>{
           path+=(path?'/':'')+group.name;
           const matrix=this.matrix(group,new T.Matrix4());base.multiply(matrix);
-          return {matrix,track:bound.get(path)};
+          if(!poses.has(path))poses.set(path,{...defaults,...group});
+          return {matrix,path};
         });
         return {frames,inverse:base.invert(),objects:[rendered[i].solid,rendered[i].normal,rendered[i].wire]};
       });
-      this.pause();this.collection=collection;this.meshes=meshes;this.rendered=rendered;this.source=source;this.animation=animation;this.records=records;this.tracks=bound;this.time=0;this.seek(0);
+      this.pause();this.collection=collection;this.meshes=meshes;this.rendered=rendered;this.source=source;this.animation=animation;this.records=records;this.tracks=bound;this.poses=poses;this.clipTimes=clipTimes;this.seek(animation?clipTimes.get(animation.name)||0:0);
     }
     select(name){
       if(!this.collection?.clips.some(clip=>clip.name===name))throw Error(`Unknown animation clip: ${name}`);
@@ -304,9 +338,19 @@
     }
     seek(time){
       this.time=this.animation?Math.max(0,Math.min(this.animation.duration,time)):0;
+      if(this.animation)this.clipTimes.set(this.animation.name,this.time);
+      // Only active channels change; all other groups/channels keep their last pose.
+      for(const [path,track] of this.tracks){
+        const pose={...this.poses.get(path)},sampled=sample(track,this.time);
+        for(const channel of Object.keys(track.channels)){
+          if(channel==='euler')delete pose.quaternion;
+          pose[channel]=sampled[channel];
+        }
+        this.poses.set(path,pose);
+      }
       for(const record of this.records){
         this.world.identity();
-        for(const frame of record.frames)this.appendFrame(this.world,frame.matrix,frame.track);
+        for(const frame of record.frames)this.appendFrame(this.world,frame.matrix,frame.path);
         this.world.multiply(record.inverse);
         for(const object of record.objects){object.matrixAutoUpdate=false;object.matrix.copy(this.world);object.matrixWorldNeedsUpdate=true;}
       }
@@ -329,7 +373,7 @@
       this.handle=undefined;this.status?.(this.time,this.animation?.duration||0,false);
     }
     reset(){this.pause();this.seek(0);}
-    clear(){this.pause();this.records=[];this.tracks.clear();this.animation=null;this.collection=null;this.time=0;this.status?.(0,0,false);}
+    clear(){this.pause();this.records=[];this.tracks.clear();this.poses.clear();this.clipTimes.clear();this.meshes=null;this.rendered=null;this.animation=null;this.collection=null;this.time=0;this.status?.(0,0,false);}
   }
   globalThis.ModelAnimation={parse,validate,bind,sample,sampleTimes,quaternion,Player};
 })();

@@ -7,6 +7,7 @@ No native geometry is evaluated here.
 
 import math
 import re
+import struct
 
 DEFAULTS = {"position": [0., 0., 0.], "euler": [0., 0., 0.], "scale": [1., 1., 1.]}
 MAX_SAMPLES = 120_000
@@ -346,9 +347,16 @@ def _parse_clip(source="", *, scope=None, syntax_only=False):
                     if channel not in track["channels"]:
                         fail(n, f"{channel} cycle needs keys")
                 for channel, keys in track["channels"].items():
-                    period = track.get("cycles", {}).get(channel, duration)
-                    if not syntax_only and (keys[0][0] != 0 or keys[-1][0] != period):
+                    if syntax_only:
+                        continue
+                    end = keys[-1][0]
+                    if keys[0][0] != 0 or end <= 0:
+                        fail(n, f"{channel} needs keys at 0 and a positive end time")
+                    period = track.get("cycles", {}).get(channel)
+                    if period is not None and end != period:
                         fail(n, f"{channel} needs keys at 0 and {period} seconds")
+                    if period is None and end < duration:
+                        track.setdefault("implicit_cycles", {})[channel] = end
                 tracks.append(track)
                 track = None
         elif len(words) == 2 and words[0] == "track" and track is None:
@@ -363,9 +371,6 @@ def _parse_clip(source="", *, scope=None, syntax_only=False):
             period = number(words[2], n)
             if not syntax_only and not 0 < period <= duration:
                 fail(n, "cycle period must be greater than 0 and at most the loop duration")
-            count = duration / period
-            if not syntax_only and (not math.isfinite(count) or count > MAX_SAMPLES or abs(count-round(count)) > 1e-9):
-                fail(n, "loop duration must be a whole number of cycles (at most 120000)")
             cycles[channel] = period
         elif len(words) == 6 and words[0] == "key" and track is not None and words[2] in DEFAULTS:
             time = number(words[1], n)
@@ -532,13 +537,32 @@ def prepare_animation(source, meshes):
     return animation, [bind_animation(clip, meshes) for clip in clips]
 
 
+def _channel_period(track, channel):
+    return track.get("cycles", {}).get(channel) or track.get("implicit_cycles", {}).get(channel)
+
+
+def _cycle_ratio(time, period):
+    ratio = time / period
+    if math.isfinite(ratio):
+        nearest = round(ratio)
+        if math.isclose(ratio, nearest, rel_tol=4 * math.ulp(1.)):
+            return nearest
+    return ratio
+
+
+def _before_seam(time):
+    # Keep the pre-jump sample distinct after GLB stores timestamps as float32.
+    bits, = struct.unpack("<I", struct.pack("<f", time))
+    return struct.unpack("<f", struct.pack("<I", max(0, bits - 1)))[0]
+
+
 def sample_track(track, time):
     result = dict(track.get("base", DEFAULTS))
     for channel, keys in track["channels"].items():
-        period = track.get("cycles", {}).get(channel)
-        turns = math.floor(time / period) if period else 0
-        # Derive phase from the same quotient: modulo can disagree at decimal seams.
-        local = max(0., min(period, time - turns * period)) if period else time
+        period = _channel_period(track, channel)
+        ratio = _cycle_ratio(time, period) if period else 0
+        turns = math.floor(ratio)
+        local = (0. if ratio == turns else time - turns * period) if period else time
         value = list(keys[-1][1])
         if local <= keys[0][0]:
             value = list(keys[0][1])
@@ -548,7 +572,7 @@ def sample_track(track, time):
                     alpha = (local-a)/(b-a)
                     value = [x+(y-x)*alpha for x, y in zip(av, bv)]
                     break
-        if channel == "euler" and period:
+        if channel == "euler" and channel in track.get("cycles", {}):
             value = [v + turns * (b-a) for v, a, b in zip(value, keys[0][1], keys[-1][1])]
         if channel == "euler":
             result.pop("quaternion", None)
@@ -560,8 +584,14 @@ def sample_times(track, duration):
     # Expand cycles only for portable export; playback uses modular time.
     times = {0., duration}
     for channel, keys in track["channels"].items():
-        period = track.get("cycles", {}).get(channel, duration)
-        count = round(duration / period)
+        repeat = _channel_period(track, channel)
+        period = repeat or duration
+        ratio = _cycle_ratio(duration, period)
+        if not math.isfinite(ratio) or ratio > MAX_SAMPLES:
+            raise ValueError("Animation exceeds 120000 generated samples")
+        count = math.ceil(ratio)
+        jumps = (repeat is not None and keys[0][1] != keys[-1][1]
+                 and not (channel == "euler" and channel in track.get("cycles", {})))
         steps = []
         for (a, av), (b, bv) in zip(keys, keys[1:]):
             subdivisions = 1
@@ -573,15 +603,28 @@ def sample_times(track, duration):
                 if sum(delta != 0 for delta in changes) > 1:
                     subdivisions = max(subdivisions, math.ceil((b-a)*60))
             steps.append(subdivisions)
-        if count * sum(steps) + 1 > MAX_SAMPLES:
+        if count * sum(steps) + (math.floor(ratio) if jumps else 0) + 1 > MAX_SAMPLES:
             raise ValueError("Animation exceeds 120000 generated samples")
         for cycle in range(count):
             offset = cycle * period
             for ((a,_),(b,_)), subdivisions in zip(zip(keys,keys[1:]), steps):
                 times.update(min(duration, offset + a + (b-a)*i/subdivisions) for i in range(subdivisions))
+            if jumps and cycle + 1 <= ratio:
+                seam = duration if cycle + 1 == ratio else (cycle + 1) * period
+                times.update((_before_seam(seam), seam))
             if len(times) > MAX_SAMPLES:
                 raise ValueError("Animation exceeds 120000 generated samples")
-    return sorted(times)
+    ordered = sorted(times)
+    if not (track.get("cycles") or track.get("implicit_cycles")):
+        return ordered
+    # Repeated channels can reach the same timestamp via different arithmetic.
+    merged = []
+    for time in ordered:
+        if merged and math.isclose(time, merged[-1], rel_tol=4 * math.ulp(1.)):
+            merged[-1] = time
+        else:
+            merged.append(time)
+    return merged
 
 
 def animation_meshes(meshes, bound):
