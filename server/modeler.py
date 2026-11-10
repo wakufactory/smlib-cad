@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import io
-import ast
 import json
 import math
 import re
 from contextlib import redirect_stdout
+from dataclasses import dataclass, field
 
-from transforms import _normalize_quaternion, _quaternion_euler, _degree_quaternion
+from model_syntax import (IDENTIFIER, ExpansionBudget, ModelProgram, expression_arguments,
+                          number_argument, quaternion_expression)
+from transforms import _normalize_quaternion, _quaternion_euler
 
 
 EXAMPLE_SCRIPT = """# _smlib_core is available as sm. Assign the finished solid to result.
@@ -103,374 +105,6 @@ def normalize_materials(materials, objects):
     return {name: normalize_material(value) for name, value in materials.items()}
 
 
-_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z_0-9]*\Z")
-_INTERPOLATION = re.compile(r"\$\{([^{}]+)\}")
-_EXPRESSION_CONSTANTS = {"pi": math.pi, "e": math.e}
-_EXPRESSION_FUNCTIONS = {
-    "sin": (math.sin, 1), "cos": (math.cos, 1), "tan": (math.tan, 1),
-    "asin": (math.asin, 1), "acos": (math.acos, 1), "atan": (math.atan, 1),
-    "atan2": (math.atan2, 2), "exp": (math.exp, 1), "log": (math.log, 1),
-    "sqrt": (math.sqrt, 1), "abs": (abs, 1),
-    "radians": (math.radians, 1), "degrees": (math.degrees, 1),
-}
-
-
-class _ExpressionScope(dict):
-    """Numeric bindings and calculation functions travel together through CAD scopes."""
-
-    def __init__(self, inherited=()):
-        super().__init__(inherited)
-        self.functions = dict(getattr(inherited, "functions", {}))
-
-
-def _expression_tree(source):
-    try:
-        return ast.parse(source, mode="eval").body
-    except (SyntaxError, RecursionError) as exc:
-        raise ValueError(f"invalid expression: {source}") from exc
-
-
-def _number_expression(source, variables):
-    """Evaluate the small numeric expression language without Python eval."""
-    budget = [10000]
-
-    def visit(node, bindings, depth=0):
-        budget[0] -= 1
-        if budget[0] < 0:
-            raise ValueError("expression evaluation limit exceeded (10000)")
-        if depth > 32:
-            raise ValueError("expression is too deeply nested")
-        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
-            value = node.value
-        elif isinstance(node, ast.Name):
-            if node.id in bindings:
-                value = bindings[node.id]
-            elif node.id in _EXPRESSION_CONSTANTS:
-                value = _EXPRESSION_CONSTANTS[node.id]
-            else:
-                raise ValueError(f"unknown variable: {node.id}")
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            name = node.func.id
-            functions = getattr(bindings, "functions", {})
-            if name not in _EXPRESSION_FUNCTIONS and name not in functions:
-                raise ValueError(f"unknown function: {name}")
-            arity = (len(functions[name][0]) if name in functions
-                     else _EXPRESSION_FUNCTIONS[name][1])
-            if node.keywords or len(node.args) != arity:
-                raise ValueError(f"{name}: expected {arity} positional argument(s)")
-            arguments = [visit(argument, bindings, depth + 1) for argument in node.args]
-            if name in functions:
-                parameters, body, captured, line = functions[name]
-                local = _ExpressionScope(captured)
-                local.update(zip(parameters, arguments))
-                try:
-                    return visit(body, local, depth + 1)
-                except ValueError as exc:
-                    raise ValueError(f"{name} (defined at Line {line}): {exc}") from exc
-            function = _EXPRESSION_FUNCTIONS[name][0]
-            try:
-                value = function(*arguments)
-            except (ValueError, OverflowError, ZeroDivisionError) as exc:
-                raise ValueError(f"{name}: invalid argument or result: {exc}") from exc
-        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-            value = visit(node.operand, bindings, depth + 1)
-            if isinstance(node.op, ast.USub):
-                value = -value
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
-            left, right = visit(node.left, bindings, depth + 1), visit(node.right, bindings, depth + 1)
-            try:
-                value = {ast.Add: lambda: left + right, ast.Sub: lambda: left - right,
-                         ast.Mult: lambda: left * right, ast.Div: lambda: left / right}[type(node.op)]()
-            except (ZeroDivisionError, OverflowError) as exc:
-                raise ValueError(f"invalid arithmetic: {exc}") from exc
-        else:
-            raise ValueError("only numeric expressions and approved math functions are allowed")
-        try:
-            finite = math.isfinite(value)
-        except OverflowError:
-            finite = False
-        if not finite:
-            raise ValueError("expression result must be finite")
-        return value
-
-    return visit(_expression_tree(source), variables)
-
-
-def _quaternion_expression(source, variables):
-    """Read dquaternion(axis x, y, z, degrees) with bounded numeric arguments."""
-    call = _expression_tree(source)
-    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-            and call.func.id == "dquaternion" and not call.keywords and len(call.args) == 4):
-        raise ValueError("dquaternion: expected four positional arguments x, y, z, degrees")
-    return _degree_quaternion(*[_number_expression(ast.unparse(arg), variables) for arg in call.args])
-
-
-def _define_calculation(line, scope, line_number):
-    match = re.fullmatch(r"fn\s+([A-Za-z_][A-Za-z_0-9]*)\s*\(([^()]*)\)\s*=\s*(.+)", line, re.I)
-    if not match:
-        raise ValueError("fn: expected name(parameters) = expression")
-    name, arguments, source = match.groups()
-    parameters = [item.strip() for item in arguments.split(",")] if arguments.strip() else []
-    if any(not _IDENTIFIER.fullmatch(item) for item in parameters):
-        raise ValueError("fn: parameters must be identifiers")
-    if len(parameters) != len(set(parameters)):
-        raise ValueError("fn: duplicate parameter")
-    if name in _EXPRESSION_FUNCTIONS or name in _EXPRESSION_CONSTANTS:
-        raise ValueError(f"fn: reserved name: {name}")
-    body = _expression_tree(source)
-    # Validate even unused definitions, without evaluating parameter-dependent domains.
-    def validate(node, depth=0):
-        if depth > 32:
-            raise ValueError("expression is too deeply nested")
-        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
-            try:
-                finite = math.isfinite(node.value)
-            except OverflowError:
-                finite = False
-            if not finite:
-                raise ValueError("expression result must be finite")
-        elif isinstance(node, ast.Name):
-            if node.id not in parameters and node.id not in scope and node.id not in _EXPRESSION_CONSTANTS:
-                raise ValueError(f"unknown variable: {node.id}")
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            called = node.func.id
-            if called not in scope.functions and called not in _EXPRESSION_FUNCTIONS:
-                raise ValueError(f"unknown function: {called} (forward and recursive calls are unsupported)")
-            arity = (len(scope.functions[called][0]) if called in scope.functions
-                     else _EXPRESSION_FUNCTIONS[called][1])
-            if node.keywords or len(node.args) != arity:
-                raise ValueError(f"{called}: expected {arity} positional argument(s)")
-            for argument in node.args:
-                validate(argument, depth + 1)
-        elif isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-            validate(node.operand, depth + 1)
-        elif isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
-            validate(node.left, depth + 1)
-            validate(node.right, depth + 1)
-        else:
-            raise ValueError("only numeric expressions and approved math functions are allowed")
-    validate(body)
-    return name, (parameters, body, _ExpressionScope(scope), line_number)
-
-
-def _range_expressions(source):
-    """Split range arguments at AST call boundaries, preserving nested call commas."""
-    call = _expression_tree(f"range({source})")
-    if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Name) or call.func.id != "range" or call.keywords:
-        raise ValueError("range arguments must be one to three integers")
-    return [ast.unparse(argument) for argument in call.args]
-
-
-_RAW_PROPERTY_PREFIX = re.compile(r"\s*property\s+\S+\s+`", re.I)
-
-
-def _split_comment(line):
-    """Keep # inside quoted property strings, including escaped quotes."""
-    raw_property = _RAW_PROPERTY_PREFIX.match(line)
-    raw_start = raw_property.end() - 1 if raw_property else -1
-    quote, escaped = None, False
-    for index, char in enumerate(line):
-        if escaped:
-            escaped = False
-        elif quote in ('"', "'") and char == "\\":
-            escaped = True
-        elif char == quote:
-            quote = None
-        elif not quote and (char in ('"', "'") or index == raw_start):
-            quote = char
-        elif not quote and char == "#":
-            return line[:index], line[index:]
-    return line, ""
-
-
-def _expand_text(line, variables):
-    def replace(match):
-        expression = match.group(1).strip()
-        if re.match(r"dquaternion\s*\(", expression):
-            return " ".join(format(v, ".17g") for v in _quaternion_expression(expression, variables))
-        value = _number_expression(expression, variables)
-        return str(int(value)) if isinstance(value, int) or value.is_integer() else format(value, ".15g")
-    code, comment = _split_comment(line)
-    raw_property = _RAW_PROPERTY_PREFIX.match(code)
-    literal = ""
-    if raw_property:
-        raw_start = raw_property.end() - 1
-        code, literal = code[:raw_start], code[raw_start:]
-    result = _INTERPOLATION.sub(replace, code)
-    if "${" in result:
-        raise ValueError("unclosed or nested ${expression}")
-    return result + literal + comment
-
-
-def _block_end(records, start, opener):
-    """Locate an end for a preprocessing block, including nested CAD blocks."""
-    depth = 0
-    for index in range(start + 1, len(records)):
-        words = records[index][1].partition("#")[0].split()
-        op = words[0].lower() if words else ""
-        if op in ("for", "if", "group", "profile"):
-            depth += 1
-        elif op == "end":
-            if len(words) != 1:
-                raise ValueError(f"Line {records[index][0]}: end takes no arguments")
-            if depth == 0:
-                return index
-            depth -= 1
-    raise ValueError(f"Line {records[start][0]}: {opener} has no end")
-
-
-def _expand_commands(records, inherited, counter, depth=0, final_scope=None):
-    """Expand variables, loops, and conditions with source line metadata."""
-    if depth > 32:
-        raise ValueError("control block nesting limit exceeded (32)")
-    output = []
-    scopes = [_ExpressionScope(inherited)]
-    definitions = [set()]
-    blocks = []
-    index = 0
-    while index < len(records):
-        line_number, raw = records[index]
-        line = _split_comment(raw)[0].strip()
-        words = line.split(None, 1)
-        op = words[0].lower() if words else ""
-        try:
-            if op == "fn":
-                name, function = _define_calculation(line, scopes[-1], line_number)
-                if name in definitions[-1]:
-                    raise ValueError(f"duplicate function or variable: {name}")
-                scopes[-1].functions[name] = function
-                definitions[-1].add(name)
-            elif op == "let":
-                match = re.fullmatch(r"let\s+([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.+)", line, re.I)
-                if not match:
-                    raise ValueError("let: expected name = expression")
-                name = match.group(1)
-                if name in definitions[-1]:
-                    raise ValueError(f"duplicate variable: {name}")
-                scopes[-1][name] = _number_expression(match.group(2), scopes[-1])
-                definitions[-1].add(name)
-            elif op == "for":
-                match = re.fullmatch(r"for\s+([A-Za-z_][A-Za-z_0-9]*)\s+in\s+range\((.*)\)", line, re.I)
-                if not match:
-                    raise ValueError("for: expected name in range(count) or range(start, stop[, step])")
-                name = match.group(1)
-                if name in scopes[-1]:
-                    raise ValueError(f"loop variable already defined: {name}")
-                values = [_number_expression(part, scopes[-1]) for part in _range_expressions(match.group(2))]
-                if not 1 <= len(values) <= 3 or any(not float(value).is_integer() for value in values):
-                    raise ValueError("range arguments must be one to three integers")
-                if len(values) == 1:
-                    start, stop, step = 0, int(values[0]), 1
-                elif len(values) == 2:
-                    start, stop, step = int(values[0]), int(values[1]), 1
-                else:
-                    start, stop, step = map(int, values)
-                if step == 0:
-                    raise ValueError("range step must not be zero")
-                iteration = range(start, stop, step)
-                try:
-                    iteration_count = len(iteration)
-                except OverflowError:
-                    iteration_count = 513
-                if iteration_count > 512:
-                    raise ValueError("loop iteration limit exceeded (512)")
-                end = _block_end(records, index, "for")
-                body = records[index + 1:end]
-                for value in iteration:
-                    nested = _ExpressionScope(scopes[-1])
-                    nested[name] = value
-                    try:
-                        output.extend(_expand_commands(body, nested, counter, depth + 1))
-                    except ValueError as exc:
-                        raise ValueError(f"for {name}={value}: {exc}") from exc
-                index = end
-            elif op == "if":
-                if len(words) != 2:
-                    raise ValueError("if: expected a numeric expression")
-                condition = _number_expression(words[1], scopes[-1])
-                end = _block_end(records, index, "if")
-                if condition != 0:
-                    output.extend(_expand_commands(records[index + 1:end], scopes[-1], counter, depth + 1))
-                index = end
-            else:
-                expanded = _expand_text(raw, scopes[-1])
-                output.append((line_number, expanded, _ExpressionScope(scopes[-1])))
-                counter["commands"] += 1
-                if counter["commands"] > 20000:
-                    raise ValueError("expanded line limit exceeded (20000)")
-                if op in ("group", "profile"):
-                    blocks.append(op)
-                    scopes.append(_ExpressionScope(scopes[-1]))
-                    definitions.append(set())
-                elif op == "end" and blocks:
-                    blocks.pop()
-                    scopes.pop()
-                    definitions.pop()
-        except ValueError as exc:
-            if str(exc).startswith("Line "):
-                raise
-            raise ValueError(f"Line {line_number}: {exc}") from exc
-        index += 1
-    if final_scope is not None:
-        final_scope.update(scopes[0])
-        final_scope.functions.update(scopes[0].functions)
-    return output
-
-
-def text_calculation_scope(source):
-    """Resolve root let/fn bindings without constructing native geometry."""
-    scope = _ExpressionScope()
-    records = _extract_parts(_command_records(source, 0), {}, False)
-    _expand_commands(records, {}, {"commands": 0}, final_scope=scope)
-    return scope
-
-
-def _extract_parts(lines, parts, in_part):
-    """Collect root-level part bodies while keeping original line numbers."""
-    commands = list(lines)
-    group_depth = 0
-    index = 0
-    while index < len(lines):
-        words = lines[index][1].partition("#")[0].split()
-        op = words[0].lower() if words else ""
-        if op in ("group", "profile", "for", "if"):
-            group_depth += 1
-        elif op == "end":
-            group_depth -= 1
-        elif op == "part":
-            line_number = lines[index][0]
-            if in_part or group_depth != 0:
-                raise ValueError(f"Line {line_number}: part definitions must be at the root level")
-            if len(words) != 2 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", words[1]):
-                raise ValueError(f"Line {line_number}: part: one valid part name required")
-            name = words[1]
-            if name in parts:
-                raise ValueError(f"Line {line_number}: duplicate part name: {name}")
-            end = index + 1
-            nested_groups = 0
-            while end < len(lines):
-                inner_words = lines[end][1].partition("#")[0].split()
-                inner_op = inner_words[0].lower() if inner_words else ""
-                if inner_op == "part":
-                    raise ValueError(f"Line {lines[end][0]}: part definitions cannot be nested")
-                if inner_op in ("group", "profile", "for", "if"):
-                    nested_groups += 1
-                elif inner_op == "end":
-                    if nested_groups == 0:
-                        if len(inner_words) != 1:
-                            raise ValueError(f"Line {lines[end][0]}: end takes no arguments")
-                        break
-                    nested_groups -= 1
-                end += 1
-            if end == len(lines):
-                raise ValueError(f"Line {line_number}: part {name} has no end")
-            parts[name] = lines[index + 1:end]
-            commands[index:end + 1] = [(number, "") for number, _ in lines[index:end + 1]]
-            index = end
-        index += 1
-    return commands
-
-
 class SolidObjects(dict):
     """Named BReps with meshing settings and recursive export group transforms."""
 
@@ -522,7 +156,7 @@ def _python_objects(roots, materials, sm):
         if not isinstance(children, dict):
             raise ValueError("objects must be a dictionary keyed by solid or group name")
         for name, value in children.items():
-            if not isinstance(name, str) or not _IDENTIFIER.fullmatch(name):
+            if not isinstance(name, str) or not IDENTIFIER.fullmatch(name):
                 raise ValueError("solid and group names must be valid identifiers")
             if name in names:
                 raise ValueError(f"duplicate solid or group name: {name}")
@@ -580,439 +214,584 @@ def _python_objects(roots, materials, sm):
     return objects, resolved
 
 
-def _command_records(source, line_offset):
-    """Join backslash-continued physical lines and retain the first line number."""
-    records = []
-    fragments = []
-    start_line = None
-    for line_number, raw in enumerate(source.splitlines(), line_offset + 1):
-        if start_line is None:
-            start_line = line_number
-        stripped = raw.rstrip()
-        continued = not _split_comment(stripped)[1] and stripped.endswith("\\")
-        fragments.append(stripped[:-1].rstrip() if continued else raw)
-        if continued:
-            continue
-        records.append((start_line, " ".join(fragments)))
-        fragments = []
-        start_line = None
-    if fragments:
-        raise ValueError(f"Line {start_line}: trailing backslash requires a following line")
-    return records
+@dataclass
+class _CommandFrame:
+    name: str | None = None
+    depth: int = 0
+    objects: SolidObjects = field(default_factory=SolidObjects)
+    materials: dict = field(default_factory=dict)
+    material_priority: dict = field(default_factory=dict)
+    profiles: dict = field(default_factory=dict)
+    groups: dict = field(default_factory=dict)
+    group_depths: dict = field(default_factory=dict)
+    group_parents: dict = field(default_factory=dict)
+    group_material: dict | None = None
+    scale: tuple = (1.0, 1.0, 1.0)
+    euler: tuple = (0.0, 0.0, 0.0)
+    position: tuple = (0.0, 0.0, 0.0)
+    quaternion: tuple | None = None
+    rotation_command: str | None = None
+    invisible: bool = False
+    properties: dict = field(default_factory=dict)
 
 
-def parse_commands(source: str, sm, _parts=None, _stack=(), _counter=None, _line_offset=0, _profiles=None,
-                   _variables=None):
-    """Evaluate text commands; each use builds fresh BReps from a part body."""
-    parts = {} if _parts is None else _parts
-    counter = {"expansions": 0, "names": {}, "commands": 0} if _counter is None else _counter
-    records = (_command_records(source, _line_offset)
-               if isinstance(source, str) else source)
-    commands = _expand_commands(_extract_parts(records, parts, bool(_stack)),
-                                {} if _variables is None else _variables, counter)
-    frames = [{"name": None, "line": 0, "objects": SolidObjects(), "materials": {}, "material_priority": {},
-               "profiles": {}, "groups": {}, "group_depths": {}, "group_parents": {}, "depth": 0,
-               "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
-               "position": (0.0, 0.0, 0.0)}]
-    profile_block = None
-    inherited_profiles = {} if _profiles is None else _profiles
-    for line_number, raw, variables in commands:
-        line = _split_comment(raw)[0].strip()
-        if not line:
-            continue
-        words = line.split()
-        op, args = words[0].lower(), words[1:]
-        frame = frames[-1]
-        objects, materials = frame["objects"], frame["materials"]
-        groups = frame["groups"]
+@dataclass
+class _ProfileBlock:
+    name: str
+    points: list | None = None
+    kind: str | None = None
+
+
+@dataclass
+class _PartInstances:
+    count: int = 0
+    names: dict = field(default_factory=dict)
+
+
+class _TextEvaluator:
+    """Apply expanded commands in order to native BReps and their metadata."""
+
+    def __init__(self, sm, program, budget, instances, *, stack=(), profiles=None):
+        self.sm = sm
+        self.program = program
+        self.budget = budget
+        self.instances = instances
+        self.stack = stack
+        self.inherited_profiles = {} if profiles is None else profiles
+        self.frames = [_CommandFrame()]
+        self.profile = None
+
+    @property
+    def frame(self):
+        return self.frames[-1]
+
+    def visible_profiles(self):
+        profiles = dict(self.inherited_profiles)
+        for frame in self.frames:
+            profiles.update(frame.profiles)
+        return profiles
+
+    def check_solid_name(self, name, *, consumed=(), consumed_groups=()):
+        if not IDENTIFIER.fullmatch(name):
+            raise ValueError("output name must be a valid identifier")
+        if name in self.frame.groups and name not in consumed_groups:
+            raise ValueError(f"name already used by group: {name}")
+        if name in self.frame.objects and name not in consumed:
+            raise ValueError(f"duplicate solid name: {name}")
+
+    def run(self, variables=()):
+        part = self.stack[-1] if self.stack else None
+        commands = self.program.expand(self.budget, part=part, inherited=variables)
+        for command, scope in commands:
+            try:
+                if self.profile is not None:
+                    self.profile_body(command, scope)
+                else:
+                    handler = _TEXT_HANDLERS.get(command.op)
+                    if handler is None:
+                        raise ValueError(f"unknown command: {command.op}")
+                    handler(self, command, scope)
+            except (ValueError, KeyError, RuntimeError) as exc:
+                raise command.error(str(exc)) from exc
+        objects, materials = self.frame.objects, self.frame.materials
+        if not objects:
+            raise ValueError("No solid was created")
+        return objects, materials
+
+    def profile_body(self, command, variables):
+        op = command.op
+        args = expression_arguments(command.tail)
+        sm = self.sm
+        frame = self.frame
+        profile_block = self.profile
+        if op == "polygon":
+            if profile_block.points is not None or len(args) < 6 or len(args) % 2:
+                raise ValueError("profile requires one polygon with at least three u v pairs")
+            values = [number_argument(x, variables) for x in args]
+            profile_block.points = list(zip(values[::2], values[1::2]))
+            profile_block.kind = "polygon"
+        elif op == "spline":
+            if (profile_block.points is not None or len(args) < 10 or
+                    args[0].lower() != "through" or args[-1].lower() != "closed" or
+                    (len(args) - 2) % 2):
+                raise ValueError("profile spline requires: spline through u1 v1 ... u4 v4 closed")
+            values = [number_argument(x, variables) for x in args[1:-1]]
+            profile_block.points = list(zip(values[::2], values[1::2]))
+            profile_block.kind = "spline"
+        elif op == "end" and not args:
+            if profile_block.points is None:
+                raise ValueError("profile requires a polygon or spline")
+            constructor = sm.create_spline_profile if profile_block.kind == "spline" else sm.create_profile
+            frame.profiles[profile_block.name] = constructor(profile_block.points)
+            self.profile = None
+        else:
+            raise ValueError("only polygon, spline, and end are allowed inside a profile")
+
+    def open_profile(self, command, _):
+        args = command.tail.split()
+        frame = self.frame
+        if len(args) != 1 or not IDENTIFIER.fullmatch(args[0]):
+            raise ValueError("profile: one valid profile name required")
+        if args[0] in frame.profiles:
+            raise ValueError(f"duplicate profile name: {args[0]}")
+        self.profile = _ProfileBlock(args[0])
+
+    def sweep(self, command, variables):
+        op = command.op
+        args = expression_arguments(command.tail)
+        sm = self.sm
+        objects = self.frame.objects
+        has_draft = op == "extrude" and len(args) >= 2 and args[-2].lower() == "draft"
+        sweep_args = args[:-2] if has_draft else args
+        if len(sweep_args) not in (7, 10, 13):
+            raise ValueError(f"{op}: name profile x y z start end [dx dy dz [ux uy uz]]"
+                             + (" [draft angle] required" if op == "extrude" else " required"))
+        self.check_solid_name(args[0])
+        profiles = self.visible_profiles()
+        if args[1] not in profiles:
+            raise ValueError(f"unknown profile: {args[1]}")
+        values = tuple(number_argument(x, variables) for x in sweep_args[2:])
+        if not all(math.isfinite(x) for x in values):
+            raise ValueError("coordinates, range, axis, and xdir must be finite")
+        options = {}
+        if len(values) >= 8:
+            options["axis"] = values[5:8]
+        if len(values) == 11:
+            options["xdir"] = values[8:11]
+        if has_draft:
+            draft_angle = number_argument(args[-1], variables)
+            if not math.isfinite(draft_angle) or abs(draft_angle) >= 90:
+                raise ValueError("draft angle must be finite and between -90 and 90 degrees")
+            options["draft_angle"] = draft_angle
+        objects[args[0]] = getattr(sm, f"create_{op}")(
+            profiles[args[1]], values[:3], values[3], values[4], **options)
+
+    def use_part(self, command, variables):
+        args = command.tail.split()
+        frame = self.frame
+        objects = frame.objects
+        groups = frame.groups
+        materials = frame.materials
+        if len(args) not in (1, 2) or any(not IDENTIFIER.fullmatch(x) for x in args):
+            raise ValueError("use: part name and optional instance name required")
+        part_name = args[0]
+        if part_name not in self.program.parts:
+            raise ValueError(f"unknown part: {part_name}")
+        if part_name in self.stack:
+            raise ValueError(f"recursive part use: {' -> '.join((*self.stack, part_name))}")
+        if len(self.stack) >= 32 or self.instances.count >= 512:
+            raise ValueError("part expansion limit exceeded")
+        self.instances.count += 1
+        if len(args) == 2:
+            instance_name = args[1]
+        else:
+            names_used = self.instances.names
+            names_used[part_name] = names_used.get(part_name, 0) + 1
+            instance_name = f"{part_name}_{names_used[part_name]}"
+        profiles = self.visible_profiles()
         try:
-            if op in (*PRIMITIVE_ARGUMENTS, "extrude", "revolve") and args and args[0] in groups:
-                raise ValueError(f"name already used by group: {args[0]}")
-            if profile_block is not None:
-                if op == "polygon":
-                    if profile_block["points"] is not None or len(args) < 6 or len(args) % 2:
-                        raise ValueError("profile requires one polygon with at least three u v pairs")
-                    values = [float(x) for x in args]
-                    profile_block["points"] = list(zip(values[::2], values[1::2]))
-                    profile_block["kind"] = "polygon"
-                elif op == "spline":
-                    if (profile_block["points"] is not None or len(args) < 10 or
-                            args[0].lower() != "through" or args[-1].lower() != "closed" or
-                            (len(args) - 2) % 2):
-                        raise ValueError("profile spline requires: spline through u1 v1 ... u4 v4 closed")
-                    values = [float(x) for x in args[1:-1]]
-                    profile_block["points"] = list(zip(values[::2], values[1::2]))
-                    profile_block["kind"] = "spline"
-                elif op == "end" and not args:
-                    if profile_block["points"] is None:
-                        raise ValueError("profile requires a polygon or spline")
-                    constructor = sm.create_spline_profile if profile_block["kind"] == "spline" else sm.create_profile
-                    frame["profiles"][profile_block["name"]] = constructor(profile_block["points"])
-                    profile_block = None
-                else:
-                    raise ValueError("only polygon, spline, and end are allowed inside a profile")
-            elif op == "profile":
-                if len(args) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
-                    raise ValueError("profile: one valid profile name required")
-                if args[0] in frame["profiles"]:
-                    raise ValueError(f"duplicate profile name: {args[0]}")
-                profile_block = {"name": args[0], "line": line_number, "points": None, "kind": None}
-            elif op in ("extrude", "revolve"):
-                has_draft = op == "extrude" and len(args) >= 2 and args[-2].lower() == "draft"
-                sweep_args = args[:-2] if has_draft else args
-                if (len(sweep_args) not in (7, 10, 13) or not sweep_args or
-                        not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", sweep_args[0])):
-                    raise ValueError(f"{op}: name profile x y z start end [dx dy dz [ux uy uz]]"
-                                     + (" [draft angle] required" if op == "extrude" else " required"))
-                if args[0] in objects:
-                    raise ValueError(f"duplicate solid name: {args[0]}")
-                profiles = dict(inherited_profiles)
-                for scope in frames:
-                    profiles.update(scope["profiles"])
-                if args[1] not in profiles:
-                    raise ValueError(f"unknown profile: {args[1]}")
-                values = tuple(float(x) for x in sweep_args[2:])
-                if not all(math.isfinite(x) for x in values):
-                    raise ValueError("coordinates, range, axis, and xdir must be finite")
-                options = {}
-                if len(values) >= 8:
-                    options["axis"] = values[5:8]
-                if len(values) == 11:
-                    options["xdir"] = values[8:11]
-                if has_draft:
-                    draft_angle = float(args[-1])
-                    if not math.isfinite(draft_angle) or abs(draft_angle) >= 90:
-                        raise ValueError("draft angle must be finite and between -90 and 90 degrees")
-                    options["draft_angle"] = draft_angle
-                objects[args[0]] = getattr(sm, f"create_{op}")(
-                    profiles[args[1]], values[:3], values[3], values[4], **options)
-            elif op == "use":
-                if len(args) not in (1, 2) or any(not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", x) for x in args):
-                    raise ValueError("use: part name and optional instance name required")
-                part_name = args[0]
-                if part_name not in parts:
-                    raise ValueError(f"unknown part: {part_name}")
-                if part_name in _stack:
-                    raise ValueError(f"recursive part use: {' -> '.join((*_stack, part_name))}")
-                if len(_stack) >= 32 or counter["expansions"] >= 512:
-                    raise ValueError("part expansion limit exceeded")
-                counter["expansions"] += 1
-                if len(args) == 2:
-                    instance_name = args[1]
-                else:
-                    names_used = counter["names"]
-                    names_used[part_name] = names_used.get(part_name, 0) + 1
-                    instance_name = f"{part_name}_{names_used[part_name]}"
-                body = parts[part_name]
-                profiles = dict(inherited_profiles)
-                for scope in frames:
-                    profiles.update(scope["profiles"])
-                try:
-                    members, member_materials = parse_commands(
-                        body, sm, parts, (*_stack, part_name), counter, 0, profiles, variables)
-                except ValueError as exc:
-                    raise ValueError(f"use {part_name}: {exc}") from exc
-                names = {name: f"{instance_name}__{name}" for name in members}
-                collisions = set(names.values()) & (set(objects) | set(groups))
-                if collisions:
-                    raise ValueError(f"use {part_name}: duplicate solid name: {', '.join(sorted(collisions))}")
-                objects.update((names[name], solid) for name, solid in members.items())
-                objects.tessellation.update((names[name], settings)
-                                            for name, settings in members.tessellation.items())
-                objects.top_groups.update((names[name], f"{instance_name}__{group_name}")
-                                          for name, group_name in members.top_groups.items())
-                objects.group_paths.update(
-                    (names[name], [dict(group, name=f"{instance_name}__{group['name']}")
-                                   for group in path])
-                    for name, path in members.group_paths.items())
-                materials.update((names[name], material) for name, material in member_materials.items())
-                frame["material_priority"].update((names[name], float("inf")) for name in member_materials)
-            elif op == "include":
-                if len(frames) == 1 or len(args) != 1 or not _IDENTIFIER.fullmatch(args[0]):
-                    raise ValueError("include: one existing group name inside a group required")
-                name = args[0]
-                if any(scope["name"] == name for scope in frames):
-                    raise ValueError(f"include: cannot include an open group: {name}")
-                if name in groups:
-                    raise ValueError(f"include: group already belongs to this group: {name}")
-                owner = next((scope for scope in reversed(frames[:-1]) if name in scope["groups"]), None)
-                if owner is None:
-                    raise ValueError(f"include: unknown group: {name}")
-                if owner["group_parents"].get(name) is not None:
-                    raise ValueError(f"include: group must be directly inside an open scope: {name}")
-                # Move the completed subtree. Its local transforms are already
-                # baked into the BReps; the new parent's transform runs at end.
-                moved_groups = {name}
-                for candidate in owner["groups"]:
-                    ancestor = owner["group_parents"].get(candidate)
-                    while ancestor is not None:
-                        if ancestor == name:
-                            moved_groups.add(candidate)
-                            break
-                        ancestor = owner["group_parents"].get(ancestor)
-                members = owner["groups"][name]
-                occupied = set(objects) | set(groups) | {scope["name"] for scope in frames[1:]}
-                collisions = (members | moved_groups) & occupied
-                if collisions:
-                    raise ValueError(f"include: duplicate solid or group name: {', '.join(sorted(collisions))}")
-                depth_delta = frame["depth"] - owner["depth"]
-                source_objects = owner["objects"]
-                for member in list(source_objects):
-                    if member not in members:
-                        continue
-                    objects[member] = source_objects.pop(member)
-                    for field in ("tessellation", "group_paths"):
-                        source_values = getattr(source_objects, field)
-                        if member in source_values:
-                            getattr(objects, field)[member] = source_values.pop(member)
-                    source_objects.top_groups.pop(member, None)
-                    if member in owner["materials"]:
-                        materials[member] = owner["materials"].pop(member)
-                    if member in owner["material_priority"]:
-                        frame["material_priority"][member] = owner["material_priority"].pop(member) + depth_delta
-                for group in moved_groups:
-                    groups[group] = owner["groups"].pop(group)
-                    frame["group_depths"][group] = owner["group_depths"].pop(group) + depth_delta
-                    frame["group_parents"][group] = owner["group_parents"].pop(group)
-            elif op == "group":
-                if len(args) != 1 or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
-                    raise ValueError("group: one valid group name required")
-                if args[0] in objects or args[0] in groups:
-                    raise ValueError(f"duplicate group name: {args[0]}")
-                frames.append({"name": args[0], "line": line_number, "objects": SolidObjects(), "materials": {},
-                               "material_priority": {}, "profiles": {}, "groups": {}, "group_depths": {}, "group_parents": {},
-                               "depth": len(frames), "group_material": None,
-                               "scale": (1.0, 1.0, 1.0), "euler": (0.0, 0.0, 0.0),
-                               "position": (0.0, 0.0, 0.0)})
-            elif op == "end":
-                if args or len(frames) == 1:
-                    raise ValueError("end: no arguments and an open group required")
-                parent = frames[-2]
-                collisions = set(objects) & set(parent["objects"])
-                if collisions:
-                    raise ValueError(f"group {frame['name']}: duplicate solid name: {', '.join(sorted(collisions))}")
-                if (set(objects) & set(parent["groups"]) or
-                        (set(groups) | {frame["name"]}) & (set(parent["objects"]) | set(parent["groups"])) or
-                        frame["name"] in objects or frame["name"] in groups):
-                    raise ValueError(f"group {frame['name']}: duplicate group or solid name")
-                for name, solid in objects.items():
-                    try:
-                        sm.transform_brep(solid, frame["scale"], frame["euler"], frame["position"])
-                    except (ValueError, RuntimeError) as exc:
-                        raise ValueError(f"group {frame['name']}, solid {name}: {exc}") from exc
-                if frame["group_material"] is not None:
-                    for name in objects:
-                        if frame["material_priority"].get(name, -1) <= frame["depth"]:
-                            materials[name] = frame["group_material"]
-                            frame["material_priority"][name] = frame["depth"]
-                frames.pop()
-                parent["objects"].update(objects)
-                parent["objects"].tessellation.update(objects.tessellation)
-                transform = {key: frame[key] for key in ("name", "scale", "euler", "position")}
-                if "quaternion" in frame:
-                    transform["quaternion"] = frame["quaternion"]
-                if frame.get("invisible", False):
-                    transform["invisible"] = True
-                if frame.get("properties"):
-                    transform["properties"] = dict(frame["properties"])
-                parent["objects"].group_paths.update(
-                    (name, [transform, *objects.group_paths.get(name, [])]) for name in objects)
-                parent["objects"].top_groups.update(objects.top_groups)
-                if len(frames) == 1:
-                    parent["objects"].top_groups.update((name, frame["name"]) for name in objects)
-                parent["materials"].update(materials)
-                parent["material_priority"].update(frame["material_priority"])
-                parent["groups"].update(groups)
-                parent["groups"][frame["name"]] = set(objects)
-                parent["group_depths"].update(frame["group_depths"])
-                parent["group_depths"][frame["name"]] = frame["depth"]
-                parent["group_parents"].update(
-                    (name, ancestor if ancestor is not None else frame["name"])
-                    for name, ancestor in frame["group_parents"].items() if name in groups)
-                parent["group_parents"][frame["name"]] = None
-            elif op == "property":
-                fields = line.split(None, 2)
-                if len(frames) == 1 or len(fields) != 3:
-                    raise ValueError("property: key and value inside a group required")
-                literal = fields[2]
-                if literal.startswith("`"):
-                    if not literal.endswith("`") or literal.count("`") != 2:
-                        raise ValueError("property: expected a single backtick-delimited string")
-                    value = literal[1:-1]
-                else:
-                    try:
-                        value = json.loads(literal)
-                        # json.loads accepts NaN/Infinity, but glTF requires JSON numbers.
-                        json.dumps(value, allow_nan=False)
-                    except (ValueError, OverflowError) as exc:
-                        raise ValueError("property: value must be valid JSON with finite numbers") from exc
-                frame.setdefault("properties", {})[fields[1]] = value
-            elif op == "invisible":
-                if len(frames) == 1 or args:
-                    raise ValueError("invisible: no arguments inside a group required")
-                frame["invisible"] = True
-            elif op == "quaternion":
-                expression = line.split(None, 1)[1] if args else ""
-                axis_angle = bool(re.match(r"dquaternion\s*\(", expression))
-                if len(frames) == 1 or (not axis_angle and len(args) != 4):
-                    raise ValueError("quaternion: four numbers x y z w or dquaternion(x,y,z,degrees) inside a group required")
-                if frame.get("rotation_command") == "euler":
-                    raise ValueError("quaternion and euler are mutually exclusive in the same group")
-                values = (_quaternion_expression(expression, variables) if axis_angle
-                          else _normalize_quaternion(tuple(float(x) for x in args)))
-                frame["quaternion"] = values
-                frame["euler"] = _quaternion_euler(values)
-                frame["rotation_command"] = "quaternion"
-            elif op in ("scale", "euler", "position"):
-                if len(frames) == 1 or len(args) != 3:
-                    raise ValueError(f"{op}: three numbers inside a group required")
-                values = tuple(float(x) for x in args)
-                if not all(math.isfinite(x) for x in values):
-                    raise ValueError(f"{op}: values must be finite")
-                if op == "scale" and any(x <= 0 for x in values):
-                    raise ValueError("scale: factors must be positive")
-                if op == "euler":
-                    if frame.get("rotation_command") == "quaternion":
-                        raise ValueError("quaternion and euler are mutually exclusive in the same group")
-                    frame["rotation_command"] = "euler"
-                frame[op] = values
-            elif op in PRIMITIVE_ARGUMENTS:
-                count = PRIMITIVE_ARGUMENTS[op]
-                allowed = (count + 1, count + 4) if op in AXIAL_PRIMITIVES else (count + 1,)
-                if len(args) not in allowed or not args or not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", args[0]):
-                    suffix = " (optionally followed by axis dx dy dz)" if op in AXIAL_PRIMITIVES else ""
-                    raise ValueError(f"{op}: name and {count} numbers required{suffix}")
-                values = tuple(float(x) for x in args[1:])
-                if not all(math.isfinite(x) for x in values):
-                    raise ValueError("coordinates, dimensions, and axis must be finite")
-                dimensions = values[:count]
-                axis = values[count:]
-                validate_primitive(op, dimensions)
-                if axis and not any(axis):
-                    raise ValueError("axis must be nonzero")
-                extra = (axis,) if axis else ()
-                objects[args[0]] = getattr(sm, f"create_{op}")(dimensions[:3], *dimensions[3:], *extra)
-                objects.tessellation.pop(args[0], None)
-            elif op in ("union", "subtract", "intersect"):
-                if len(args) != 3 or any(name not in objects and name not in groups for name in args[1:]):
-                    raise ValueError(f"{op}: output and two existing object or group names required")
-                if args[1] == args[2]:
-                    raise ValueError("Boolean operands must differ")
-                operands = [{name} if name in objects else set(groups[name]) for name in args[1:]]
-                if not all(operands):
-                    raise ValueError("Boolean group operands must not be empty")
-                if operands[0] & operands[1]:
-                    raise ValueError("Boolean operands must not share group members")
-                consumed = operands[0] | operands[1]
-                paths = [objects.group_paths.get(name, []) for name in consumed]
-                common_path = []
-                for entries in zip(*paths):
-                    if any(entry != entries[0] for entry in entries[1:]):
-                        break
-                    # A group explicitly used as an operand is consumed.
-                    if entries[0]["name"] in args[1:]:
-                        break
-                    common_path.append(entries[0])
-                if args[0] in groups and args[0] not in args[1:]:
-                    raise ValueError(f"output name already used by group: {args[0]}")
-                if args[0] in objects and args[0] not in consumed:
-                    raise ValueError(f"duplicate solid name: {args[0]}")
-                fn = {"union": sm.boolean_union, "subtract": sm.boolean_difference,
-                      "intersect": sm.boolean_intersection}[op]
-                def take_operand(members):
-                    names = [name for name in objects if name in members]
-                    solid = objects.pop(names[0])
-                    for name in names[1:]:
-                        solid = sm.boolean_union(solid, objects.pop(name))
-                    return solid
-                left, right = (take_operand(members) for members in operands)
-                for name in consumed:
-                    materials.pop(name, None)
-                    frame["material_priority"].pop(name, None)
-                    objects.tessellation.pop(name, None)
-                    objects.top_groups.pop(name, None)
-                    objects.group_paths.pop(name, None)
-                for name, members in list(groups.items()):
-                    if name in args[1:]:
-                        del groups[name]
-                    else:
-                        contained = consumed <= members
-                        members.difference_update(consumed)
-                        if contained:
-                            members.add(args[0])
-                objects[args[0]] = fn(left, right)
-                objects.group_paths[args[0]] = common_path
-                if common_path:
-                    objects.top_groups[args[0]] = common_path[0]["name"]
-            elif op == "faces":
-                if len(args) != 1 or args[0] not in objects:
-                    raise ValueError("faces: existing solid name required")
-                print(f"{args[0]} faces: {json.dumps(sm.face_info(objects[args[0]]))}")
-            elif op in ("offset", "shell"):
-                if len(args) < 2 or args[0] not in objects or (op == "offset" and len(args) != 2):
-                    raise ValueError(f"{op}: existing solid name and distance"
-                                     + (" followed by optional face indices required" if op == "shell" else " required"))
-                distance = float(args[1])
-                if not math.isfinite(distance) or distance == 0:
-                    raise ValueError("distance must be finite and nonzero")
-                options = {"faces_to_shell": [int(x) for x in args[2:]]} if op == "shell" else {}
-                objects[args[0]] = getattr(sm, f"{op}_brep")(objects[args[0]], distance, **options)
-            elif op in ("chamfer", "fillet"):
-                if len(args) != 2 or args[0] not in objects:
-                    raise ValueError(f"{op}: existing solid name and positive width/radius required")
-                size = float(args[1])
-                if not math.isfinite(size) or size <= 0:
-                    raise ValueError(f"{op}: width/radius must be finite and positive")
-                fn = sm.chamfer_fillet if op == "chamfer" else sm.circular_fillet
-                objects[args[0]] = fn(objects[args[0]], size)
-            elif op == "tessellation":
-                if len(args) != 3 or args[0] not in objects:
-                    raise ValueError("tessellation: existing solid name, chord and angle required")
-                chord, angle = (None if value.lower() == "default" else float(value)
-                                for value in args[1:])
-                if chord is not None and not 0.001 <= chord <= 2:
-                    raise ValueError("chord must be between 0.001 and 2")
-                if angle is not None and not 1 <= angle <= 90:
-                    raise ValueError("angle must be between 1 and 90 degrees")
-                objects.tessellation[args[0]] = (chord, angle)
-            elif op == "material":
-                if len(args) != 6 or (args[0] not in objects and args[0] not in groups and
-                                       args[0] != frame["name"]):
-                    raise ValueError("material: existing solid or group name and five numbers required")
-                material = normalize_material({
-                    "baseColor": [float(x) for x in args[1:4]],
-                    "metallic": float(args[4]), "roughness": float(args[5])})
-                if args[0] in objects:
-                    materials[args[0]] = material
-                    frame["material_priority"][args[0]] = float("inf")
-                elif args[0] == frame["name"]:
-                    frame["group_material"] = material
-                else:
-                    depth = frame["group_depths"][args[0]]
-                    for name in groups[args[0]]:
-                        if frame["material_priority"].get(name, -1) <= depth:
-                            materials[name] = material
-                            frame["material_priority"][name] = depth
+            evaluator = _TextEvaluator(self.sm, self.program, self.budget, self.instances,
+                                       stack=(*self.stack, part_name), profiles=profiles)
+            members, member_materials = evaluator.run(variables)
+        except ValueError as exc:
+            raise ValueError(f"use {part_name}: {exc}") from exc
+        names = {name: f"{instance_name}__{name}" for name in members}
+        collisions = set(names.values()) & (set(objects) | set(groups))
+        if collisions:
+            raise ValueError(f"use {part_name}: duplicate solid name: {', '.join(sorted(collisions))}")
+        objects.update((names[name], solid) for name, solid in members.items())
+        objects.tessellation.update((names[name], settings)
+                                    for name, settings in members.tessellation.items())
+        objects.top_groups.update((names[name], f"{instance_name}__{group_name}")
+                                  for name, group_name in members.top_groups.items())
+        objects.group_paths.update(
+            (names[name], [dict(group, name=f"{instance_name}__{group['name']}")
+                           for group in path])
+            for name, path in members.group_paths.items())
+        materials.update((names[name], material) for name, material in member_materials.items())
+        frame.material_priority.update((names[name], float("inf")) for name in member_materials)
+
+    def include_group(self, command, _):
+        args = command.tail.split()
+        frame = self.frame
+        objects = frame.objects
+        groups = frame.groups
+        materials = frame.materials
+        frames = self.frames
+        if len(frames) == 1 or len(args) != 1 or not IDENTIFIER.fullmatch(args[0]):
+            raise ValueError("include: one existing group name inside a group required")
+        name = args[0]
+        if any(scope.name == name for scope in frames):
+            raise ValueError(f"include: cannot include an open group: {name}")
+        if name in groups:
+            raise ValueError(f"include: group already belongs to this group: {name}")
+        owner = next((scope for scope in reversed(frames[:-1]) if name in scope.groups), None)
+        if owner is None:
+            raise ValueError(f"include: unknown group: {name}")
+        if owner.group_parents.get(name) is not None:
+            raise ValueError(f"include: group must be directly inside an open scope: {name}")
+        # Move the completed subtree. Its local transforms are already
+        # baked into the BReps; the new parent's transform runs at end.
+        moved_groups = {name}
+        for candidate in owner.groups:
+            ancestor = owner.group_parents.get(candidate)
+            while ancestor is not None:
+                if ancestor == name:
+                    moved_groups.add(candidate)
+                    break
+                ancestor = owner.group_parents.get(ancestor)
+        members = owner.groups[name]
+        occupied = set(objects) | set(groups) | {scope.name for scope in frames[1:]}
+        collisions = (members | moved_groups) & occupied
+        if collisions:
+            raise ValueError(f"include: duplicate solid or group name: {', '.join(sorted(collisions))}")
+        depth_delta = frame.depth - owner.depth
+        source_objects = owner.objects
+        for member in list(source_objects):
+            if member not in members:
+                continue
+            objects[member] = source_objects.pop(member)
+            for field in ("tessellation", "group_paths"):
+                source_values = getattr(source_objects, field)
+                if member in source_values:
+                    getattr(objects, field)[member] = source_values.pop(member)
+            source_objects.top_groups.pop(member, None)
+            if member in owner.materials:
+                materials[member] = owner.materials.pop(member)
+            if member in owner.material_priority:
+                frame.material_priority[member] = owner.material_priority.pop(member) + depth_delta
+        for group in moved_groups:
+            groups[group] = owner.groups.pop(group)
+            frame.group_depths[group] = owner.group_depths.pop(group) + depth_delta
+            frame.group_parents[group] = owner.group_parents.pop(group)
+
+    def open_group(self, command, _):
+        args = command.tail.split()
+        frame = self.frame
+        objects = frame.objects
+        groups = frame.groups
+        frames = self.frames
+        if len(args) != 1 or not IDENTIFIER.fullmatch(args[0]):
+            raise ValueError("group: one valid group name required")
+        if args[0] in objects or args[0] in groups:
+            raise ValueError(f"duplicate group name: {args[0]}")
+        frames.append(_CommandFrame(name=args[0], depth=len(frames)))
+
+    def close_group(self, command, _):
+        sm = self.sm
+        frame = self.frame
+        objects = frame.objects
+        groups = frame.groups
+        materials = frame.materials
+        frames = self.frames
+        parent = frames[-2]
+        collisions = set(objects) & set(parent.objects)
+        if collisions:
+            raise ValueError(f"group {frame.name}: duplicate solid name: {', '.join(sorted(collisions))}")
+        if (set(objects) & set(parent.groups) or
+                (set(groups) | {frame.name}) & (set(parent.objects) | set(parent.groups)) or
+                frame.name in objects or frame.name in groups):
+            raise ValueError(f"group {frame.name}: duplicate group or solid name")
+        for name, solid in objects.items():
+            try:
+                sm.transform_brep(solid, frame.scale, frame.euler, frame.position)
+            except (ValueError, RuntimeError) as exc:
+                raise ValueError(f"group {frame.name}, solid {name}: {exc}") from exc
+        if frame.group_material is not None:
+            for name in objects:
+                if frame.material_priority.get(name, -1) <= frame.depth:
+                    materials[name] = frame.group_material
+                    frame.material_priority[name] = frame.depth
+        frames.pop()
+        parent.objects.update(objects)
+        parent.objects.tessellation.update(objects.tessellation)
+        transform = {key: getattr(frame, key) for key in ("name", "scale", "euler", "position")}
+        if frame.quaternion is not None:
+            transform["quaternion"] = frame.quaternion
+        if frame.invisible:
+            transform["invisible"] = True
+        if frame.properties:
+            transform["properties"] = dict(frame.properties)
+        parent.objects.group_paths.update(
+            (name, [transform, *objects.group_paths.get(name, [])]) for name in objects)
+        parent.objects.top_groups.update(objects.top_groups)
+        if len(frames) == 1:
+            parent.objects.top_groups.update((name, frame.name) for name in objects)
+        parent.materials.update(materials)
+        parent.material_priority.update(frame.material_priority)
+        parent.groups.update(groups)
+        parent.groups[frame.name] = set(objects)
+        parent.group_depths.update(frame.group_depths)
+        parent.group_depths[frame.name] = frame.depth
+        parent.group_parents.update(
+            (name, ancestor if ancestor is not None else frame.name)
+            for name, ancestor in frame.group_parents.items() if name in groups)
+        parent.group_parents[frame.name] = None
+
+    def set_property(self, command, _):
+        frame = self.frame
+        frames = self.frames
+        fields = command.tail.split(None, 1)
+        if len(frames) == 1 or len(fields) != 2:
+            raise ValueError("property: key and value inside a group required")
+        literal = fields[1]
+        if literal.startswith("`"):
+            if not literal.endswith("`") or literal.count("`") != 2:
+                raise ValueError("property: expected a single backtick-delimited string")
+            value = literal[1:-1]
+        else:
+            try:
+                value = json.loads(literal)
+                # json.loads accepts NaN/Infinity, but glTF requires JSON numbers.
+                json.dumps(value, allow_nan=False)
+            except (ValueError, OverflowError) as exc:
+                raise ValueError("property: value must be valid JSON with finite numbers") from exc
+        frame.properties[fields[0]] = value
+
+    def set_invisible(self, command, _):
+        args = command.tail.split()
+        frame = self.frame
+        frames = self.frames
+        if len(frames) == 1 or args:
+            raise ValueError("invisible: no arguments inside a group required")
+        frame.invisible = True
+
+    def set_quaternion(self, command, variables):
+        args = expression_arguments(command.tail)
+        frame = self.frame
+        frames = self.frames
+        expression = command.tail
+        axis_angle = bool(re.match(r"dquaternion\s*\(", expression))
+        if len(frames) == 1 or (not axis_angle and len(args) != 4):
+            raise ValueError("quaternion: four numbers x y z w or dquaternion(x,y,z,degrees) inside a group required")
+        if frame.rotation_command == "euler":
+            raise ValueError("quaternion and euler are mutually exclusive in the same group")
+        if axis_angle:
+            values = quaternion_expression(expression, variables)
+        else:
+            try:
+                components = tuple(number_argument(x, variables) for x in args)
+            except ValueError as exc:
+                raise ValueError(f"quaternion: {exc}") from exc
+            values = _normalize_quaternion(components)
+        frame.quaternion = values
+        frame.euler = _quaternion_euler(values)
+        frame.rotation_command = "quaternion"
+
+    def set_transform(self, command, variables):
+        op = command.op
+        args = expression_arguments(command.tail)
+        frame = self.frame
+        frames = self.frames
+        if len(frames) == 1 or len(args) != 3:
+            raise ValueError(f"{op}: three numbers inside a group required")
+        try:
+            values = tuple(number_argument(x, variables) for x in args)
+        except ValueError as exc:
+            raise ValueError(f"{op}: {exc}") from exc
+        if op == "scale" and any(x <= 0 for x in values):
+            raise ValueError("scale: factors must be positive")
+        if op == "euler":
+            if frame.rotation_command == "quaternion":
+                raise ValueError("quaternion and euler are mutually exclusive in the same group")
+            frame.rotation_command = "euler"
+        setattr(frame, op, values)
+
+    def primitive(self, command, variables):
+        op = command.op
+        args = expression_arguments(command.tail)
+        sm = self.sm
+        objects = self.frame.objects
+        count = PRIMITIVE_ARGUMENTS[op]
+        allowed = (count + 1, count + 4) if op in AXIAL_PRIMITIVES else (count + 1,)
+        if len(args) not in allowed:
+            suffix = " (optionally followed by axis dx dy dz)" if op in AXIAL_PRIMITIVES else ""
+            raise ValueError(f"{op}: name and {count} numbers required{suffix}")
+        self.check_solid_name(args[0])
+        values = tuple(number_argument(x, variables) for x in args[1:])
+        if not all(math.isfinite(x) for x in values):
+            raise ValueError("coordinates, dimensions, and axis must be finite")
+        dimensions = values[:count]
+        axis = values[count:]
+        validate_primitive(op, dimensions)
+        if axis and not any(axis):
+            raise ValueError("axis must be nonzero")
+        extra = (axis,) if axis else ()
+        objects[args[0]] = getattr(sm, f"create_{op}")(dimensions[:3], *dimensions[3:], *extra)
+
+    def boolean(self, command, _):
+        op = command.op
+        args = command.tail.split()
+        sm = self.sm
+        frame = self.frame
+        objects = frame.objects
+        groups = frame.groups
+        materials = frame.materials
+        if len(args) != 3 or any(name not in objects and name not in groups for name in args[1:]):
+            raise ValueError(f"{op}: output and two existing object or group names required")
+        if args[1] == args[2]:
+            raise ValueError("Boolean operands must differ")
+        operands = [{name} if name in objects else set(groups[name]) for name in args[1:]]
+        if not all(operands):
+            raise ValueError("Boolean group operands must not be empty")
+        if operands[0] & operands[1]:
+            raise ValueError("Boolean operands must not share group members")
+        consumed = operands[0] | operands[1]
+        self.check_solid_name(args[0], consumed=consumed, consumed_groups=args[1:])
+        paths = [objects.group_paths.get(name, []) for name in consumed]
+        common_path = []
+        for entries in zip(*paths):
+            if any(entry != entries[0] for entry in entries[1:]):
+                break
+            # A group explicitly used as an operand is consumed.
+            if entries[0]["name"] in args[1:]:
+                break
+            common_path.append(entries[0])
+        fn = {"union": sm.boolean_union, "subtract": sm.boolean_difference,
+              "intersect": sm.boolean_intersection}[op]
+        def take_operand(members):
+            names = [name for name in objects if name in members]
+            solid = objects.pop(names[0])
+            for name in names[1:]:
+                solid = sm.boolean_union(solid, objects.pop(name))
+            return solid
+        left, right = (take_operand(members) for members in operands)
+        for name in consumed:
+            materials.pop(name, None)
+            frame.material_priority.pop(name, None)
+            objects.tessellation.pop(name, None)
+            objects.top_groups.pop(name, None)
+            objects.group_paths.pop(name, None)
+        for name, members in list(groups.items()):
+            if name in args[1:]:
+                del groups[name]
             else:
-                raise ValueError(f"unknown command: {op}")
-        except (ValueError, KeyError, RuntimeError) as exc:
-            raise ValueError(f"Line {line_number}: {exc}") from exc
-    if profile_block is not None:
-        raise ValueError(f"Line {profile_block['line']}: profile {profile_block['name']} has no end")
-    if len(frames) != 1:
-        frame = frames[-1]
-        raise ValueError(f"Line {frame['line']}: group {frame['name']} has no end")
-    objects, materials = frames[0]["objects"], frames[0]["materials"]
-    if not objects:
-        raise ValueError("No solid was created")
-    return objects, materials
+                contained = consumed <= members
+                members.difference_update(consumed)
+                if contained:
+                    members.add(args[0])
+        objects[args[0]] = fn(left, right)
+        objects.group_paths[args[0]] = common_path
+        if common_path:
+            objects.top_groups[args[0]] = common_path[0]["name"]
+
+    def print_faces(self, command, _):
+        args = command.tail.split()
+        sm = self.sm
+        objects = self.frame.objects
+        if len(args) != 1 or args[0] not in objects:
+            raise ValueError("faces: existing solid name required")
+        print(f"{args[0]} faces: {json.dumps(sm.face_info(objects[args[0]]))}")
+
+    def offset_or_shell(self, command, variables):
+        op = command.op
+        args = expression_arguments(command.tail)
+        sm = self.sm
+        objects = self.frame.objects
+        if len(args) < 2 or args[0] not in objects or (op == "offset" and len(args) != 2):
+            raise ValueError(f"{op}: existing solid name and distance"
+                             + (" followed by optional face indices required" if op == "shell" else " required"))
+        distance = number_argument(args[1], variables)
+        if not math.isfinite(distance) or distance == 0:
+            raise ValueError("distance must be finite and nonzero")
+        options = {}
+        if op == "shell":
+            faces = [number_argument(x, variables) for x in args[2:]]
+            if not all(face.is_integer() for face in faces):
+                raise ValueError("shell: face indices must be integers")
+            options["faces_to_shell"] = list(map(int, faces))
+        objects[args[0]] = getattr(sm, f"{op}_brep")(objects[args[0]], distance, **options)
+
+    def finish_edges(self, command, variables):
+        op = command.op
+        args = expression_arguments(command.tail)
+        sm = self.sm
+        objects = self.frame.objects
+        if len(args) != 2 or args[0] not in objects:
+            raise ValueError(f"{op}: existing solid name and positive width/radius required")
+        size = number_argument(args[1], variables)
+        if not math.isfinite(size) or size <= 0:
+            raise ValueError(f"{op}: width/radius must be finite and positive")
+        fn = sm.chamfer_fillet if op == "chamfer" else sm.circular_fillet
+        objects[args[0]] = fn(objects[args[0]], size)
+
+    def set_tessellation(self, command, variables):
+        args = expression_arguments(command.tail)
+        objects = self.frame.objects
+        if len(args) != 3 or args[0] not in objects:
+            raise ValueError("tessellation: existing solid name, chord and angle required")
+        chord, angle = (None if value.lower() == "default" else number_argument(value, variables)
+                        for value in args[1:])
+        if chord is not None and not 0.001 <= chord <= 2:
+            raise ValueError("chord must be between 0.001 and 2")
+        if angle is not None and not 1 <= angle <= 90:
+            raise ValueError("angle must be between 1 and 90 degrees")
+        objects.tessellation[args[0]] = (chord, angle)
+
+    def set_material(self, command, variables):
+        args = expression_arguments(command.tail)
+        frame = self.frame
+        objects = frame.objects
+        groups = frame.groups
+        materials = frame.materials
+        if len(args) != 6 or (args[0] not in objects and args[0] not in groups and
+                               args[0] != frame.name):
+            raise ValueError("material: existing solid or group name and five numbers required")
+        material = normalize_material({
+            "baseColor": [number_argument(x, variables) for x in args[1:4]],
+            "metallic": number_argument(args[4], variables), "roughness": number_argument(args[5], variables)})
+        if args[0] in objects:
+            materials[args[0]] = material
+            frame.material_priority[args[0]] = float("inf")
+        elif args[0] == frame.name:
+            frame.group_material = material
+        else:
+            depth = frame.group_depths[args[0]]
+            for name in groups[args[0]]:
+                if frame.material_priority.get(name, -1) <= depth:
+                    materials[name] = material
+                    frame.material_priority[name] = depth
 
 
-def evaluate(source: str, mode: str, sm):
+_TEXT_HANDLERS = {
+    "profile": _TextEvaluator.open_profile,
+    "extrude": _TextEvaluator.sweep,
+    "revolve": _TextEvaluator.sweep,
+    "use": _TextEvaluator.use_part,
+    "include": _TextEvaluator.include_group,
+    "group": _TextEvaluator.open_group,
+    "end": _TextEvaluator.close_group,
+    "property": _TextEvaluator.set_property,
+    "invisible": _TextEvaluator.set_invisible,
+    "quaternion": _TextEvaluator.set_quaternion,
+    "scale": _TextEvaluator.set_transform,
+    "euler": _TextEvaluator.set_transform,
+    "position": _TextEvaluator.set_transform,
+    "union": _TextEvaluator.boolean,
+    "subtract": _TextEvaluator.boolean,
+    "intersect": _TextEvaluator.boolean,
+    "faces": _TextEvaluator.print_faces,
+    "offset": _TextEvaluator.offset_or_shell,
+    "shell": _TextEvaluator.offset_or_shell,
+    "chamfer": _TextEvaluator.finish_edges,
+    "fillet": _TextEvaluator.finish_edges,
+    "tessellation": _TextEvaluator.set_tessellation,
+    "material": _TextEvaluator.set_material,
+    **dict.fromkeys(PRIMITIVE_ARGUMENTS, _TextEvaluator.primitive),
+}
+
+
+def parse_commands(source: str | ModelProgram, sm, *, variables=()):
+    """Evaluate a text model; every use builds fresh BReps from its part body."""
+    program = ModelProgram(source) if isinstance(source, str) else source
+    return _TextEvaluator(sm, program, ExpansionBudget(), _PartInstances()).run(variables)
+
+
+def evaluate(source: str | ModelProgram, mode: str, sm, *, variables=()):
     if mode == "text":
         output = io.StringIO()
         with redirect_stdout(output):
-            objects, materials = parse_commands(source, sm)
+            objects, materials = parse_commands(source, sm, variables=variables)
         return objects, materials, output.getvalue()
     if mode != "python":
         raise ValueError("mode must be text or python")

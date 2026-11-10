@@ -65,10 +65,10 @@ def _mesh_group_key(mesh, material_key):
     return ("name", mesh.get("group", mesh["name"]))
 
 
-def to_glb(meshes, scale=1, animation_source=""):
+def to_glb(meshes, scale=1, animation_source="", *, resolved_animation=None):
     """Encode recursive group TRS and merge sibling meshes by material."""
     scale = _export_scale(scale)
-    animation, bound = prepare_animation(animation_source, meshes)
+    animation, bound = prepare_animation(animation_source, meshes, resolved=resolved_animation)
     meshes = _export_meshes(meshes)
     if not meshes:
         doc = {"asset": {"version": "2.0", "generator": "USD BRep Modeler"},
@@ -226,10 +226,10 @@ def to_glb(meshes, scale=1, animation_source=""):
             struct.pack("<I4s", len(blob), b"BIN\0") + blob)
 
 
-def to_usdz(meshes, scale=1, animation_source="", animation_clip=None):
+def to_usdz(meshes, scale=1, animation_source="", animation_clip=None, *, resolved_animation=None):
     """Package recursive Xforms and solid meshes as a Z-up USD stage."""
     scale = _export_scale(scale)
-    collection, bindings = prepare_animation(animation_source, meshes)
+    collection, bindings = prepare_animation(animation_source, meshes, resolved=resolved_animation)
     animation = select_clip(collection, animation_clip)
     bound = bindings[collection["clips"].index(animation)] if animation else {}
     meshes = animation_meshes(_export_meshes(meshes), bound) if bound else _export_meshes(meshes)

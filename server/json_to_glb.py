@@ -10,7 +10,7 @@ from pathlib import Path
 
 from modeler import evaluate, tessellate
 from model_export import to_glb, to_usdz
-from animation import resolve_animation_source
+from animation import ModelAnimationSources, resolve_animation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -31,8 +31,7 @@ def _scale(value) -> float:
     return float(value)
 
 
-def validate_document(document: object) -> tuple[str, str, dict]:
-    """Validate the version 1 document written by the browser editor."""
+def _document_fields(document):
     if not isinstance(document, dict):
         raise ValueError("model JSON must be an object")
     if (document.get("format") != "smlib-model" or type(document.get("version")) is not int
@@ -41,7 +40,6 @@ def validate_document(document: object) -> tuple[str, str, dict]:
     source = document.get("source")
     if not isinstance(source, str):
         raise ValueError("source must be text")
-    resolve_animation_source(document.get("animationSource", ""), source, document["mode"], syntax_only=True)
     if document.get("animationClip") is not None and not isinstance(document["animationClip"], str):
         raise ValueError("animationClip must be text")
     parameters = document.get("parameters")
@@ -54,25 +52,36 @@ def validate_document(document: object) -> tuple[str, str, dict]:
     }
 
 
-def build_meshes(document: object, sm):
-    source, mode, parameters = validate_document(document)
-    objects, materials, _ = evaluate(source, mode, sm)
+def validate_document(document: object) -> tuple[str, str, dict]:
+    """Validate the version 1 document written by the browser editor."""
+    source, mode, parameters = _document_fields(document)
+    resolve_animation(document.get("animationSource", ""), source, mode, syntax_only=True)
+    return source, mode, parameters
+
+
+def _evaluate_document(document, sm):
+    source, mode, parameters = _document_fields(document)
+    sources = ModelAnimationSources(source, mode, document.get("animationSource", ""))
+    objects, materials, _ = evaluate(sources.model, mode, sm, variables=sources.model_variables())
     meshes = tessellate(objects, sm, parameters["chord"], parameters["angle"], materials)
-    return meshes
+    return meshes, parameters, sources
+
+
+def build_meshes(document: object, sm):
+    return _evaluate_document(document, sm)[0]
 
 
 def build_glb(document: object, sm) -> bytes:
-    _, _, parameters = validate_document(document)
-    meshes = build_meshes(document, sm)
-    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"], meshes)
-    return to_glb(meshes, scale=parameters["exportScale"], animation_source=animation_source)
+    meshes, parameters, sources = _evaluate_document(document, sm)
+    animation = sources.resolve(meshes)
+    return to_glb(meshes, scale=parameters["exportScale"], resolved_animation=animation)
 
 
 def build_usdz(document: object, sm) -> bytes:
-    _, _, parameters = validate_document(document)
-    meshes = build_meshes(document, sm)
-    animation_source = resolve_animation_source(document.get("animationSource", ""), document["source"], document["mode"], meshes)
-    return to_usdz(meshes, scale=parameters["exportScale"], animation_source=animation_source, animation_clip=document.get("animationClip"))
+    meshes, parameters, sources = _evaluate_document(document, sm)
+    animation = sources.resolve(meshes)
+    return to_usdz(meshes, scale=parameters["exportScale"], resolved_animation=animation,
+                   animation_clip=document.get("animationClip"))
 
 
 def main(argv: list[str] | None = None, *, format: str = "glb") -> int:

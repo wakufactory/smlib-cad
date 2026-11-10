@@ -2,7 +2,8 @@
 (() => {
   'use strict';
   const defaults = {position:[0,0,0], euler:[0,0,0], scale:[1,1,1]};
-  function angleExpression(source,syntaxOnly=false){
+  const decimal = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/;
+  function angleExpression(source,syntaxOnly=false,rangeHeader=false){
     if(source.startsWith('${') && source.endsWith('}'))source=source.slice(2,-1);
     if(/\bbase\./.test(source)){
       if(!syntaxOnly){const error=Error('base references require model resolution');error.modelReference=true;throw error;}
@@ -41,16 +42,23 @@
         if(!syntaxOnly){const error=Error('expression requires model definitions');error.modelReference=true;throw error;}
         if(tokens[index]==='('){
           index++;
+          let argumentsCount=0;
           if(tokens[index]!==')'){
             expression(depth+1);
-            while(tokens[index]===','){index++;expression(depth+1);}
+            argumentsCount++;
+            while(tokens[index]===','){index++;expression(depth+1);argumentsCount++;}
           }
           if(tokens[index++]!==')')throw Error('angle expression: expected closing parenthesis');
+          if(rangeHeader && depth===0 && token==='range' && (argumentsCount<1 || argumentsCount>3)){
+            throw Error('range arguments must be one to three integers');
+          }
         }
         return 1;
       }
       if(!/^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(token))throw Error('angle expression: expected a finite number or parenthesized expression');
-      return finite(Number(token));
+      const value=Number(token);
+      if(!Number.isFinite(value))throw Error('angle expression result must be finite');
+      return value;
     }
     const value=expression();
     if(index!==tokens.length)throw Error('angle expression: unexpected token');
@@ -58,7 +66,7 @@
   }
   function animationWords(line,n){
     const simple=line.trim().split(/\s+/).filter(Boolean);
-    if(simple[0]!=='key' && simple[0]!=='animation' && simple[0]!=='cycle')return simple;
+    if(!['key','animation','track','cycle'].includes(simple[0]?.toLowerCase()))return simple;
     const words=[],stack=[];
     let word='';
     for(const char of line){
@@ -75,6 +83,102 @@
     if(stack.length)throw Error(`Animation line ${n}: unmatched expression delimiter`);
     if(word)words.push(word);
     return words;
+  }
+  function logicalLines(source,strict=true){
+    const lines=[];
+    let fragments=[],start=1;
+    const physical=source.split(/\r\n|\r|\n/);
+    if(physical.at(-1)==='')physical.pop();
+    for(const [i,raw] of physical.entries()){
+      if(!fragments.length)start=i+1;
+      const code=raw.split('#')[0].trimEnd();
+      if(!raw.includes('#') && code.endsWith('\\')){
+        fragments.push(code.slice(0,-1).trimEnd());
+        continue;
+      }
+      const text=[...fragments,code].join(' ').trim();
+      if(text)lines.push([start,text]);
+      fragments=[];
+    }
+    if(fragments.length){
+      if(strict)throw Error(`Animation line ${start}: trailing backslash requires a following line`);
+      lines.push([start,fragments.join(' ').trim()]);
+    }
+    return lines;
+  }
+  function globalDefinitions(source){
+    // Changing a shared definition invalidates a cached text model.
+    return logicalLines(source,false).map(([,text])=>text.match(/^let\s+(.*)$/i)?.[1]).filter(text=>text!==undefined);
+  }
+  function normalizeWords(words){
+    words[0]=words[0].toLowerCase();
+    if(words[0]==='key' && words[2])words[2]=words[2].toLowerCase();
+    if(words[0]==='cycle' && words[1])words[1]=words[1].toLowerCase();
+    if(words[0]==='animation'){
+      const loopIndex=words.length===3?1:2;
+      if(words[loopIndex])words[loopIndex]=words[loopIndex].toLowerCase();
+    }
+    return words;
+  }
+  function validateExpression(word,n,allowBase=false,rangeHeader=false){
+    if(!allowBase && /\bbase\./.test(word))throw Error(`Animation line ${n}: base is only available inside a track`);
+    try{angleExpression(word,true,rangeHeader);}catch(error){throw Error(`Animation line ${n}: ${error.message}`);}
+  }
+  function checkName(word,n){
+    const remainder=word.replace(/\$\{([^{}]+)\}/g,(_,expression)=>{
+      validateExpression(expression,n);
+      return '0';
+    });
+    if(remainder.includes('${'))throw Error(`Animation line ${n}: unclosed or nested \${expression}`);
+    return remainder;
+  }
+  function flattenControl(lines,syntaxOnly){
+    // Only the server evaluates authored definitions and expands loops. For
+    // editor validation, retain one symbolic copy of each loop body.
+    const stack=[],loopNames=new Set(),definitions=new Set(),filtered=[];
+    for(const [n,w] of lines){
+      const op=w[0],fail=message=>{throw Error(`Animation line ${n}: ${message}`);};
+      if(op==='end'){
+        if(w.length!==1 || !stack.length)fail('end takes no arguments and requires an open block');
+        const block=stack.pop();
+        if(block.kind==='for')loopNames.delete(block.name);
+        else filtered.push([n,w]);
+        continue;
+      }
+      const context=stack.findLast(block=>block.kind!=='for')?.kind || 'root';
+      if(op==='let' || op==='for'){
+        if(!syntaxOnly){const error=Error('animation definitions and loops require server resolution');error.modelReference=true;throw error;}
+        if(op==='let'){
+          if(stack.length)fail('let is only allowed at the top level');
+          const match=w.join(' ').match(/^let\s+([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.+)$/);
+          if(!match)fail('let: expected name = expression');
+          if(definitions.has(match[1]))fail(`duplicate variable: ${match[1]}`);
+          definitions.add(match[1]);
+          validateExpression(match[2],n);
+        }else{
+          const match=w.join(' ').match(/^for\s+([A-Za-z_][A-Za-z_0-9]*)\s+in\s+range\((.*)\)$/i);
+          if(!match)fail('expected for <name> in range(...)');
+          if(loopNames.has(match[1]))fail(`loop variable already defined: ${match[1]}`);
+          validateExpression(`range(${match[2]})`,n,context==='track',true);
+          loopNames.add(match[1]);
+          if(loopNames.size>32)fail('loop nesting limit exceeded (32)');
+          stack.push({kind:'for',name:match[1]});
+        }
+        continue;
+      }
+      if(op==='animation' && context==='root' || op==='track' && context==='animation'){
+        if((op==='animation' && w.length===4 || op==='track' && w.length===2) && w[1].includes('${')){
+          if(!syntaxOnly){const error=Error('animation names require server resolution');error.modelReference=true;throw error;}
+          checkName(w[1],n);
+        }
+        stack.push({kind:op});
+      }else if(!(context==='track' && (op==='key' || op==='cycle' && stack.at(-1)?.kind!=='for'))){
+        fail(`unexpected ${op} in ${context}`);
+      }
+      filtered.push([n,w,loopNames.size>0]);
+    }
+    if(stack.length)throw Error('close all blocks with end');
+    return filtered;
   }
   function quaternion([x,y,z]) {
     [x,y,z]=[x,y,z].map(v=>v*Math.PI/360);
@@ -135,60 +239,40 @@
     }
     return merged;
   }
-  function parseClip(source='',syntaxOnly=false) {
-    if(typeof source!=='string' || source.length>100000)throw Error('animationSource must be text (at most 100000 characters)');
-    let lines=source.split(/\r?\n/).map((line,i)=>[i+1,animationWords(line.split('#')[0],i+1)]).filter(([,w])=>w.length);
-    if(!lines.length)return null;
-    if(lines.some(([,w])=>w[0]==='for')){
-      if(!syntaxOnly){const error=Error('animation loops require server resolution');error.modelReference=true;throw error;}
-      const filtered=[],stack=[];
-      for(const [n,w] of lines){
-        const inside=stack.includes('for');
-        if(w[0]==='for'){
-          if(!stack.includes('track'))throw Error(`Animation line ${n}: for is only allowed inside a track`);
-          const match=w.join(' ').match(/^for\s+([A-Za-z_][A-Za-z_0-9]*)\s+in\s+range\((.*)\)$/);
-          if(!match)throw Error(`Animation line ${n}: expected for <name> in range(...)`);
-          angleExpression(`range(${match[2]})`,true);
-          stack.push('for');
-          if(stack.filter(v=>v==='for').length>32)throw Error(`Animation line ${n}: loop nesting limit exceeded (32)`);
-        }else if(w.length===1 && w[0]==='end'){
-          const block=stack.pop();
-          if(block!=='for')filtered.push([n,w]);
-        }else{
-          if(inside && w[0]!=='key')throw Error(`Animation line ${n}: for body allows only key and nested for blocks`);
-          if(w[0]==='animation' || w[0]==='track')stack.push(w[0]);
-          filtered.push([n,w]);
-        }
-      }
-      if(stack.length)throw Error('close all blocks with end');
-      lines=filtered;
-    }
+  function parseClip(lines,syntaxOnly,deferExpressions) {
     function fail(n,text){throw Error(`Animation line ${n}: ${text}`);}
     function number(word,n,angle=false){
-      if(angle || syntaxOnly || !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(word)){
+      if(!decimal.test(word)){
+        if(deferExpressions && !syntaxOnly){
+          const error=Error(`Animation line ${n}: expression requires server resolution`);
+          error.modelReference=true;
+          throw error;
+        }
+        let value;
         try{
-          const value=angleExpression(word,syntaxOnly);
-          if(!syntaxOnly && !angle && Math.abs(value)>1e9)fail(n,'number must be finite and within ±1e9');
-          return value;
+          value=angleExpression(word,syntaxOnly);
         }catch(error){
           if(error.modelReference){error.message=`Animation line ${n}: ${error.message}`;throw error;}
           fail(n,error.message);
         }
+        if(!syntaxOnly && !angle && Math.abs(value)>1e9)fail(n,'number must be finite and within ±1e9');
+        return value;
       }
-      // Match Python float's decimal syntax; reject JavaScript-only hex/binary numbers.
       const value=Number(word);
-      if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(word) || !Number.isFinite(value))fail(n,'number must be finite');
+      if(!Number.isFinite(value))fail(n,'number must be finite');
+      if(syntaxOnly)return 1;
       if(!angle && Math.abs(value)>1e9)fail(n,'number must be finite and within ±1e9');
       return value;
     }
     const [n,w]=lines[0];
     if(w.length===3 && w[0]==='animation' && w[1]==='loop')w.splice(1,0,'main');
-    if(w.length!==4 || w[0]!=='animation' || w[2]!=='loop' || !/^[A-Za-z_][A-Za-z_0-9-]*$/.test(w[1]))fail(n,'expected animation [name] loop <seconds>');
+    if(w.length!==4 || w[0]!=='animation' || w[2]!=='loop' || !/^[A-Za-z_][A-Za-z_0-9-]*$/.test(syntaxOnly?checkName(w[1],n):w[1]))fail(n,'expected animation [name] loop <seconds>');
+    if(/\bbase\./.test(w[3]))fail(n,'base is only available inside a track');
     const duration=number(w[3],n);
     if(!syntaxOnly && (duration<=0 || duration>1000))fail(n,'duration must be greater than 0 and at most 1000 seconds');
-    const tracks=[];
+    const tracks=[],targets=new Set();
     let track=null,closed=false,keyCount=0;
-    for(const [n,w] of lines.slice(1)){
+    for(const [n,w,looped] of lines.slice(1)){
       if(closed)fail(n,'only one animation block is allowed');
       if(w.length===1 && w[0]==='end'){
         if(!track){closed=true;continue;}
@@ -205,7 +289,10 @@
         }
         tracks.push(track);track=null;
       }else if(w.length===2 && w[0]==='track' && !track){
-        if(tracks.length>=256 || tracks.some(t=>t.target===w[1]))fail(n,'duplicate target or more than 256 tracks');
+        if(!syntaxOnly || (!looped && !w[1].includes('${'))){
+          if(targets.size>=256 || targets.has(w[1]))fail(n,'duplicate target or more than 256 tracks');
+          targets.add(w[1]);
+        }
         track={target:w[1],channels:{}};
       }else if(w.length===3 && w[0]==='cycle' && track && Object.hasOwn(defaults,w[1])){
         const channel=w[1],cycles=track.cycles ||= {};
@@ -223,33 +310,41 @@
       }else fail(n,'expected track <group>, cycle position|euler|scale <seconds>, key <seconds> position|euler|scale x y z, or end');
     }
     if(!closed || track || !tracks.length)fail(lines.at(-1)[0],'close all blocks with end; at least one track is required');
-    if(!syntaxOnly && tracks.reduce((s,t)=>s+sampleTimes(t,duration).length,0)>120000)throw Error('Animation exceeds 120000 generated samples');
     return {name:w[1],duration,tracks};
   }
-  function parse(source='',syntaxOnly=false){
-    if(typeof source!=='string' || source.length>100000)throw Error('animationSource must be text (at most 100000 characters)');
-    const clips=[],lines=source.split(/\r?\n/);
+  function parse(source='',syntaxOnly=false,{resolved=false,deferExpressions=false}={}){
+    // A server response has already passed source, key, and sample limits. Its
+    // expanded text can be longer than the source typed into the editor.
+    if(typeof source!=='string' || (!resolved && source.length>100000))throw Error('animationSource must be text (at most 100000 characters)');
+    const clips=[],names=new Set(),lines=flattenControl(logicalLines(source).map(([n,line])=>[n,normalizeWords(animationWords(line,n))]),syntaxOnly);
     let start=0,depth=0;
     for(let i=0;i<lines.length;i++){
-      const words=lines[i].split('#')[0].trim().split(/\s+/);
-      if(!words[0])continue;
+      const [,words]=lines[i];
       if(['animation','track','for'].includes(words[0]))depth++;
       else if(words.length===1 && words[0]==='end')depth--;
       if(depth<=0){
-        const clip=parseClip('\n'.repeat(start)+lines.slice(start,i+1).join('\n'),syntaxOnly);
-        if(clip){
-          if(clips.length>=64 || clips.some(c=>c.name===clip.name))throw Error('Animation: duplicate clip name or more than 64 clips');
-          clips.push(clip);
+        const clip=parseClip(lines.slice(start,i+1),syntaxOnly,deferExpressions);
+        if(syntaxOnly && lines[start][2])clip.looped=true;
+        if(!syntaxOnly || (!lines[start][2] && !clip.name.includes('${'))){
+          if(names.size>=64 || names.has(clip.name))throw Error(`Animation line ${lines[start][0]}: duplicate clip name or more than 64 clips`);
+          names.add(clip.name);
         }
+        clips.push(clip);
         start=i+1;
       }
     }
-    if(depth || lines.slice(start).some(line=>line.split('#')[0].trim()))parseClip('\n'.repeat(start)+lines.slice(start).join('\n'),syntaxOnly);
-    if(!syntaxOnly && clips.reduce((n,c)=>n+c.tracks.reduce((m,t)=>m+sampleTimes(t,c.duration).length,0),0)>120000)throw Error('Animation exceeds 120000 generated samples');
+    if(start<lines.length)parseClip(lines.slice(start),syntaxOnly,deferExpressions);
+    if(!syntaxOnly){
+      let samples=0;
+      for(const clip of clips)for(const track of clip.tracks){
+        samples+=sampleTimes(track,clip.duration).length;
+        if(samples>120000)throw Error('Animation exceeds 120000 generated samples');
+      }
+    }
     return clips.length?{clips}:null;
   }
   function validate(source){
-    try{parse(source);}catch(error){if(!error.modelReference)throw error;parse(source,true);}
+    try{parse(source,false,{deferExpressions:true});}catch(error){if(!error.modelReference)throw error;parse(source,true);}
   }
   function bind(animation, meshes){
     const paths=new Map(),bound=new Map();
@@ -311,8 +406,8 @@
       }
       return target;
     }
-    configure(source,meshes,rendered,name=this.animation?.name){
-      const collection=parse(source),clips=collection?.clips||[];
+    configure(source,meshes,rendered,name=this.animation?.name,{resolved=false}={}){
+      const collection=parse(source,false,{resolved}),clips=collection?.clips||[];
       const bindings=clips.map(clip=>bind(clip,meshes));
       const animation=clips.find(clip=>clip.name===name)||clips[0]||null;
       const bound=bindings[clips.indexOf(animation)]||new Map(); // Validate all clips before replacing playback.
@@ -330,11 +425,11 @@
         });
         return {frames,inverse:base.invert(),objects:[rendered[i].solid,rendered[i].normal,rendered[i].wire]};
       });
-      this.pause();this.collection=collection;this.meshes=meshes;this.rendered=rendered;this.source=source;this.animation=animation;this.records=records;this.tracks=bound;this.poses=poses;this.clipTimes=clipTimes;this.seek(animation?clipTimes.get(animation.name)||0:0);
+      this.pause();this.collection=collection;this.meshes=meshes;this.rendered=rendered;this.source=source;this.resolved=resolved;this.animation=animation;this.records=records;this.tracks=bound;this.poses=poses;this.clipTimes=clipTimes;this.seek(animation?clipTimes.get(animation.name)||0:0);
     }
     select(name){
       if(!this.collection?.clips.some(clip=>clip.name===name))throw Error(`Unknown animation clip: ${name}`);
-      this.configure(this.source,this.meshes,this.rendered,name);
+      this.configure(this.source,this.meshes,this.rendered,name,{resolved:this.resolved});
     }
     seek(time){
       this.time=this.animation?Math.max(0,Math.min(this.animation.duration,time)):0;
@@ -375,5 +470,5 @@
     reset(){this.pause();this.seek(0);}
     clear(){this.pause();this.records=[];this.tracks.clear();this.poses.clear();this.clipTimes.clear();this.meshes=null;this.rendered=null;this.animation=null;this.collection=null;this.time=0;this.status?.(0,0,false);}
   }
-  globalThis.ModelAnimation={parse,validate,bind,sample,sampleTimes,quaternion,Player};
+  globalThis.ModelAnimation={globalDefinitions,parse,validate,bind,sample,sampleTimes,quaternion,Player};
 })();

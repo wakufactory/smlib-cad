@@ -178,7 +178,30 @@ assert.doesNotThrow(()=>A.validate(forSource.replace('for i in range(5)','for j 
 for(const bad of [forSource.replace('track rotor\n',''),forSource+'\nend',
   forSource.replace('for i in range(5)','for i in range(5)\ncycle euler 4'),
   forSource.replace('for i in range(5)','for i range(5)'),
-  forSource.replace('range(5)','range(5 +)'),forSource.replace('key i','key (i +)')])assert.throws(()=>A.validate(bad));
+  forSource.replace('range(5)','range(5 +)'),forSource.replace('key i','key (i +)'),
+  forSource.replace('range(5)','range()'),
+  forSource.replace('range(5)','range(1,2,3,4)'),
+  forSource.replace('for i in range(5)','for i in range(1)\nfor i in range(5)')+'\nend',
+  forSource.replace('loop 4','loop base.position.x')])assert.throws(()=>A.validate(bad));
+
+const expanded='animation long loop 511.875\ntrack rotor\n'
+  + Array.from({length:4096},(_,i)=>`key ${i/8} position ${i/7} 0 0\n`).join('')+'end\nend';
+assert(expanded.length>100000);
+assert.throws(()=>A.parse(expanded),/100000 characters/);
+assert.equal(A.parse(expanded,false,{resolved:true}).clips[0].tracks[0].channels.position.length,4096);
+
+const generated=[
+  'LET count = 2', 'FOR i IN RANGE(count)', '  ANIMATION take_${i} LOOP '+String.fromCharCode(92),
+  '    (i + 1)', '    FOR t in range(count)', '      TRACK rotor_${t}',
+  '        KEY 0 POSITION base.position.x 0 0', '        KEY (i + 1) POSITION 2 0 0',
+  '      END', '    END', '  END', 'END',
+].join('\n');
+assert.throws(()=>A.parse(generated),error=>error.modelReference===true);
+assert.doesNotThrow(()=>A.validate(generated));
+assert.deepEqual(plain(A.globalDefinitions(generated)),['count = 2']);
+assert.throws(()=>A.validate('let count = 1\n'+generated),/duplicate variable/);
+assert.throws(()=>A.validate(generated.replace('    FOR t', '    let speed = 2\n    FOR t')),/top level/);
+assert.doesNotThrow(()=>A.validate(`for i in range(0)\n${source}\nend\n${source}`));
 
 // A tiny symbolic matrix harness records transform order. Applying the recorded
 // operations to points gives independent numeric checks without a WebGL context.

@@ -9,31 +9,34 @@ from pathlib import Path
 
 from modeler import evaluate, tessellate
 from model_export import to_glb, to_usdz
-from animation import prepare_animation, resolve_animation_source, select_clip
+from animation import ModelAnimationSources, animation_text, prepare_animation, select_clip
 
 
 def main(request_path: str, output_path: str, error_path: str) -> None:
     try:
         request = json.loads(Path(request_path).read_text(encoding="utf-8"))
+        mode = request.get("mode", "python")
+        sources = ModelAnimationSources(request["source"], mode, request.get("animationSource", ""))
         if request["path"] == "/animation/resolve":
-            animation_source = resolve_animation_source(request.get("animationSource", ""),
-                request["source"], request.get("mode", "python"), request.get("animationGroups", []))
-            Path(output_path).write_text(json.dumps({"resolvedAnimationSource": animation_source}), encoding="utf-8")
+            animation = sources.resolve(request.get("animationGroups", []))
+            Path(output_path).write_text(json.dumps({"resolvedAnimationSource": animation_text(animation)}),
+                                         encoding="utf-8")
             return
         import _smlib_core as sm
 
-        objects, materials, log = evaluate(request["source"], request.get("mode", "python"), sm)
+        objects, materials, log = evaluate(sources.model, mode, sm, variables=sources.model_variables())
         meshes = tessellate(objects, sm, float(request.get("chord", 0.08)),
                             angle=float(request.get("angle", 20)), materials=materials)
-        animation_source = resolve_animation_source(request.get("animationSource", ""),
-            request["source"], request.get("mode", "python"), meshes)
-        animation, _ = prepare_animation(animation_source, meshes)
+        animation = sources.resolve(meshes)
         if request["path"] in ("/export/usdz", "/preview/usdz"):
-            data = to_usdz(meshes, scale=request.get("exportScale", 1), animation_source=animation_source, animation_clip=request.get("animationClip"))
+            data = to_usdz(meshes, scale=request.get("exportScale", 1), resolved_animation=animation,
+                           animation_clip=request.get("animationClip"))
         elif request["path"] == "/export":
-            data = to_glb(meshes, scale=request.get("exportScale", 1), animation_source=animation_source)
+            data = to_glb(meshes, scale=request.get("exportScale", 1), resolved_animation=animation)
         else:
-            data = json.dumps({"meshes": meshes, "log": log, "resolvedAnimationSource": animation_source}).encode("utf-8")
+            prepare_animation("", meshes, resolved=animation)  # Validate targets before returning the preview.
+            data = json.dumps({"meshes": meshes, "log": log,
+                               "resolvedAnimationSource": animation_text(animation)}).encode("utf-8")
         if request["path"] == "/preview/usdz":
             # Keep the USDZ response binary; pass small UI metadata separately.
             selected = select_clip(animation, request.get("animationClip"))

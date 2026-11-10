@@ -171,6 +171,98 @@ class AnimationClipTests(unittest.TestCase):
         self.assertIn('endTimeCode = 120',usd)
         self.assertIn('xformOp:translate = (10, 20, 30)',usd)
 
+    def test_duration_cycle_time_and_values_share_numeric_syntax(self):
+        source = """# comment
+animation motion loop (02 + 2)
+track rotor
+cycle position ${8 / 2}
+key 0 position 0 0 0
+key (2 * 2) position (9007199254740993 - 9007199254740992) ${6 / 2} 0
+end
+end"""
+        animation = parse_animation(source)
+        self.assertEqual(animation, parse_animation(resolve_animation_source(source, meshes=[mesh()])))
+        self.assertEqual(animation["clips"][0]["tracks"][0]["channels"]["position"][-1],
+                         [4, [1, 3, 0]])
+        for syntax_only in (False, True):
+            with self.assertRaisesRegex(ValueError, "Animation line 6:"):
+                resolve_animation_source(source.replace("${6 / 2}", "0x10"), syntax_only=syntax_only)
+
+    def test_loop_expansion_can_exceed_authored_source_limit(self):
+        source = """animation long loop 511.875
+track rotor
+for i in range(4096)
+key (i / 8) position (i / 7) 0 0
+end
+end
+end"""
+        self.assertGreater(len(resolve_animation_source(source, meshes=[mesh()])), 100_000)
+        model = "group rotor\nbox body 0 0 0 1 1 1\nend"
+        document = {**MODEL, "source": model, "animationSource": source}
+        glb, accessor = decode_glb(build_glb(document, FakeBrep()))
+        self.assertEqual(len(accessor(glb["animations"][0]["samplers"][0]["input"])), 4096)
+        self.assertIn("endTimeCode = 30712.5", stage(build_usdz(document, FakeBrep())))
+
+    def test_shared_globals_and_loops_generate_geometry_clips_and_tracks(self):
+        model = """let width = 4
+fn spacing(x) = x + width
+let count = copies
+for i in range(count)
+  group rotor_${i}
+    position (i * pitch) 0 0
+    box body_${i} 0 0 0 width (width / 2) sqrt(width)
+  end
+end"""
+        source = "\n".join((
+            "LET copies = 2",
+            "LET pitch = spacing(3)",
+            "FOR shot IN RANGE(copies)",
+            "  ANIMATION take_${shot} LOOP " + "\\",
+            "    (shot + 1)",
+            "    for i in range(count)",
+            "      TRACK rotor_${i}",
+            "        KEY 0 POSITION base.position.x 0 0",
+            "        KEY (shot + 1) POSITION (base.position.x + pitch) 0 0",
+            "      END", "    end", "  END", "END",
+        ))
+        document = {**MODEL, "source": model, "animationSource": source, "animationClip": "take_1"}
+        validate_document(document)
+        response = json.loads(run_model_request(document, "/preview"))
+        tracks = parse_animation(response["resolvedAnimationSource"])["clips"]
+        self.assertEqual([c["name"] for c in tracks], ["take_0", "take_1"])
+        self.assertEqual([t["target"] for t in tracks[1]["tracks"]], ["rotor_0", "rotor_1"])
+        self.assertEqual(tracks[1]["tracks"][1]["channels"]["position"], [[0, [7, 0, 0]], [2, [14, 0, 0]]])
+        glb, _ = decode_glb(build_glb(document, FakeBrep()))
+        self.assertEqual([c["name"] for c in glb["animations"]], ["take_0", "take_1"])
+        self.assertIn("endTimeCode = 120", stage(build_usdz(document, FakeBrep())))
+
+    def test_shared_declarations_fail_on_duplicates_cycles_and_local_animation_let(self):
+        for model, animation, error in (
+            ("let rate = 1", "LET rate = 2", "Animation line 1: duplicate variable: rate"),
+            ("fn rate() = 1", "let rate = 2", "Animation line 1: duplicate function or variable: rate"),
+            ("", "let rate = 1\nlet rate = 2", "Animation line 2: duplicate variable: rate"),
+            ("let rate = pace", "let pace = rate", "cyclic global definition"),
+            ("", "for i in range(2)\nlet rate = i\nend", "Animation line 2: let is only allowed at the top level"),
+            ("", "animation loop 1\nlet rate = 2\nend", "Animation line 2: let is only allowed at the top level"),
+            ("", "let rate = base.position.x", "Animation line 1:"),
+        ):
+            with self.subTest(model=model, animation=animation), self.assertRaisesRegex(ValueError, error):
+                resolve_animation_source(animation, model)
+
+    def test_animation_let_without_clips_can_drive_model(self):
+        document = {**MODEL, "source": "group g\nposition lift 0 0\nbox a 0 0 0 1 1 1\nend",
+                    "animationSource": "let lift = 3"}
+        response = json.loads(run_model_request(document, "/preview"))
+        self.assertEqual(response["meshes"][0]["groupPath"][0]["position"], [3, 0, 0])
+        self.assertEqual(response["resolvedAnimationSource"], "")
+
+    def test_clip_duplicates_are_checked_after_expanding_outer_loops(self):
+        source = f"for i in range(0)\n{clip()}\nend\n{clip()}"
+        resolve_animation_source(source, syntax_only=True)
+        self.assertEqual(parse_animation(source), parse_animation(clip()))
+        with self.assertRaisesRegex(ValueError, "duplicate clip name"):
+            parse_animation(source.replace("range(0)", "range(1)"))
+
 
 if __name__=='__main__':
     unittest.main()

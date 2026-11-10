@@ -172,9 +172,14 @@ function previewNodeKeys(mesh){
     JSON.stringify([...path,['solid',mesh.name]])];
 }
 let currentMeshKey=null;
-function modelingKey(){return JSON.stringify(['source','mode','chord','angle'].map(id=>$(id).value));}
+function modelingKey(){
+  const fields=['source','mode','chord','angle'].map(id=>$(id).value);
+  const shared=fields[1]==='text' ? globalThis.ModelAnimation?.globalDefinitions?.(animationText()) : [];
+  return JSON.stringify([...fields,shared||[]]);
+}
 let animationPlayer = null;
 let resolvedAnimation = null;
+let clipSelectionKey = null;
 let animationApplyId = 0;
 let pendingAnimationSeek = null;
 let animationSeekFrame;
@@ -182,8 +187,16 @@ function animationKey(){return JSON.stringify([$('mode').value,$('source').value
 function animationText(){return $('animation-source')?.value || '';}
 function selectedAnimationClip(){
   if(!animationText().trim())return '';
-  const clips=ModelAnimation.parse(animationText(),true)?.clips||[];
-  return clips.find(clip=>clip.name===$('animation-clip').value)?.name||clips[0]?.name||'';
+  const resolved=resolvedAnimation?.key===animationKey();
+  const source=resolved?resolvedAnimation.source:animationText();
+  const clips=ModelAnimation.parse(source,true,{resolved})?.clips||[];
+  const name=$('animation-clip').value;
+  const generated=clip=>clip.looped||clip.name.includes('${');
+  if(clips.some(clip=>clip.name===name && !generated(clip)))return name;
+  // Keep a generated selection restored from a file or returned by a preview
+  // for these sources. After editing a loop, let the server pick the first clip.
+  if(!resolved && name && clipSelectionKey===animationKey() && clips.some(generated))return name;
+  return clips[0] && !generated(clips[0]) ? clips[0].name : '';
 }
 function updateClipOptions(clips,selected){
   if(!clips.length){restoreClipSelection();return;}
@@ -191,10 +204,12 @@ function updateClipOptions(clips,selected){
     const option=document.createElement('option');option.value=clip.name;option.textContent=clip.name;return option;
   }));
   $('animation-clip').value=selected||'';
+  clipSelectionKey=animationKey();
 }
 function restoreClipSelection(name=''){
   const option=document.createElement('option');option.value=name||'';option.textContent=name||'なし';
   $('animation-clip').replaceChildren(option);$('animation-clip').value=name||'';
+  clipSelectionKey=name?animationKey():null;
 }
 function animationStatus(time,duration,running){
   $('animation-play').textContent=running?'一時停止':'再生';
@@ -212,7 +227,7 @@ async function applyAnimation(){
   let numericSource=source;
   if(resolvedAnimation?.key===key)numericSource=resolvedAnimation.source;
   else{
-    try{ModelAnimation.parse(source);}catch(error){
+    try{ModelAnimation.parse(source,false,{deferExpressions:true});}catch(error){
       if(!error.modelReference)throw error;
       const data=await(await request('/animation/resolve')).json();
       if(id!==animationApplyId || key!==animationKey() || currentMeshKey!==modelingKey())return false;
@@ -222,7 +237,8 @@ async function applyAnimation(){
     }
   }
   cancelAnimationSeek();
-  animationPlayer.configure(numericSource,currentMeshes,rendered,$('animation-clip').value);
+  animationPlayer.configure(numericSource,currentMeshes,rendered,$('animation-clip').value,
+    {resolved:resolvedAnimation?.key===key});
   updateClipOptions(animationPlayer.collection?.clips||[],animationPlayer.animation?.name);
   appliedAnimationSource=source;
   return true;
@@ -235,7 +251,7 @@ async function updateAnimationPreview(){
   return true;
 }
 $('animation-apply').onclick=async()=>{
-  try{if(!await applyAnimation())return;saveDraft();note('アニメーション設定を適用しました');}catch(error){note(error.message,true);}
+  try{if(!await updateAnimationPreview())return;note('アニメーション設定を適用しました');}catch(error){note(error.message,true);}
 };
 $('animation-play').onclick=async()=>{
   try{

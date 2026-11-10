@@ -3,8 +3,8 @@
   'use strict';
   document.getElementById('command-reference-content').innerHTML = `<div class="command-list" tabindex="0" role="region" aria-label="テキストコマンド一覧">
 <h3>モデル定義</h3>
-<p>通常1行に1命令。行末の <code>\\</code> で次の行へ接続。<code>#</code> 以降はコメント。<code>[…]</code> は省略可能な引数です。名前は英字・下線で始め、英数字・下線を使います。角度は度数です。</p>
-<p><code>x y z</code> は位置、<code>dx dy dz</code> は軸方向（省略時は +Z）、<code>ux uy uz</code> は断面のX方向です。</p>
+<p>通常1行に1命令。行末の <code>\\</code> で次の行へ接続。<code>#</code> 以降はコメント（<code>property</code> の文字列内を除く）。<code>[…]</code> は省略可能な引数です。名前は英字・下線で始め、英数字・下線を使います。命令名は大文字・小文字を区別せず、形状名などの名前は区別します。角度は度数です。</p>
+<p><code>x y z</code> は位置、<code>dx dy dz</code> は軸方向（省略時は +Z）、<code>ux uy uz</code> は断面のX方向です。数値欄にはアニメーションと同じ式を使えます。空白を含む式は <code>(式)</code> または <code>\${式}</code> で囲みます。</p>
 <dl><div class="command-entry"><dt><code>box</code></dt><dd><code>名前 x y z 幅 奥行 高さ</code></dd></div>
 <div class="command-entry"><dt><code>sphere</code></dt><dd><code>名前 x y z 半径</code></dd></div>
 <div class="command-entry"><dt><code>cylinder</code></dt><dd><code>名前 x y z 半径 高さ [dx dy dz]</code></dd></div>
@@ -49,16 +49,17 @@
 <pre>box body 0 0 0 20 20 8
 cylinder hole 10 10 -1 3 10
 subtract result body hole</pre>
-<p>Boolean は左右の入力を消費し、出力名に結果を作ります。材質の RGB・metallic・roughness は 0〜1。グループの変換は scale → 回転（euler / quaternion）→ position の順です。</p>
+<p>プリミティブや押し出し・回転体で既存の形状・グループを上書きできません。Boolean は左右の入力を消費し、出力にその名前を再利用できます（<code>subtract body body hole</code>）。材質の RGB・metallic・roughness は 0〜1。グループの変換は scale → 回転（euler / quaternion）→ position の順です。</p>
 
 <h3>アニメーション定義</h3>
-<p>右側の「アニメーション」タブに記述します。テキスト命令・Python の両モードで共通です。時刻は秒、回転は度、座標は対象グループのローカル座標です。<code>#</code> 以降はコメントです。</p>
+<p>右側の「アニメーション」タブに記述します。テキスト命令・Python の両モードで共通です。時刻は秒、回転は度、座標は対象グループのローカル座標です。モデル定義と同様、命令名の大文字・小文字を区別せず、行末の <code>\\</code> で行継続できます。<code>#</code> 以降はコメントです。</p>
 <dl>
+<div class="command-entry"><dt><code>let 名前 = 式</code></dt><dd>トップレベルで数値変数を定義。テキストモデルのトップレベルの <code>let</code>・<code>fn</code> と同じ名前空間を使います。両欄から参照でき、同名定義や循環参照はエラーです。テキストモデルではこの変数を変更すると形状を再計算します。</dd></div>
 <div class="command-entry"><dt><code>animation [名前] loop 秒数</code> / <code>end</code></dt><dd>名前付きクリップ。名前を省略した <code>animation loop 4</code> は <code>main</code> として扱います。省略名同士や明示した main との重複はエラーです。最大64個、名前は英字または _ で始まる英数字・_・-、重複不可。左ペインで1本を選択して再生します。周期は <code>0 &lt; 秒数 &lt;= 1000</code>。内部に <code>track</code> を記述します。</dd></div>
 <div class="command-entry"><dt><code>track グループ名</code> / <code>end</code></dt><dd>出力に残るグループを対象にします。形状はグループで包んでください。同名グループは <code>assembly/rotor</code>、ルートからの指定は <code>/assembly/rotor</code> のようにパスで区別します。非表示・空・Booleanで消費されたグループや対象の重複指定はエラーです。</dd></div>
 <div class="command-entry"><dt><code>key 秒数 position|euler|scale X Y Z</code></dt><dd>1行に1チャンネルのキーを記述します。チャンネルごとに時刻を厳密に増やし、0秒と正の時刻の最終キーが必要です。移動はモデルの座標単位、Euler回転は度、拡縮は正の倍率。指定チャンネルを上書きし、省略したチャンネルは現在値を維持します（初回は初期値）。各成分を線形補間し、回転の <code>360</code> は1回転、<code>720</code> は2回転になります。</dd></div>
 <div class="command-entry"><dt><code>cycle position|euler|scale 秒数</code></dt><dd><code>track</code> 内でチャンネルごとの周期を指定します。そのチャンネルは0秒と周期の終端までのキーだけを書き、クリップの長さが周期で割り切れない場合は、余りの位置まで再生してから先頭へ戻ります。周期を省略したチャンネルの最終キーがクリップの長さより手前にある場合は、最終キーの時刻を周期にして繰り返します。例えば5秒のクリップで最終キーが2秒なら、5秒時点は <code>5 mod 2 = 1</code> 秒の値です。先頭に戻る際のジャンプを許容します。両端の値・姿勢が異なっていても指定できます。移動・拡縮は周期の境界で開始値へジャンプします。明示した <code>cycle euler</code> では回転差分を周期ごとに累積します。同じチャンネルへの重複指定やキーのない指定はエラーです。</dd></div>
-<div class="command-entry"><dt><code>for 変数 in range(...)</code> / <code>end</code></dt><dd><code>track</code> 内でキーを繰り返し生成します。<code>range(回数)</code>、<code>range(開始, 終了[, 刻み])</code> に対応し、終了値を含みません。内部には <code>key</code> と入れ子の <code>for</code> のみ記述できます。ループ変数は時刻・値の式で使えます。展開後もチャンネルごとの時刻を増やし、境界のキーを重複させないでください。長時間の同じ動きの反復には <code>cycle</code> を使います。</dd></div>
+<div class="command-entry"><dt><code>for 変数 in range(...)</code> / <code>end</code></dt><dd>トップレベルではクリップ、クリップ内ではトラック、トラック内ではキーを生成します。<code>range(回数)</code>、<code>range(開始, 終了[, 刻み])</code> に対応し、終了値を含みません。ループは入れ子にでき、名前には <code>\${式}</code> を埋め込めます。<code>cycle</code> はキーループの外に書きます。</dd></div>
 <div class="command-entry"><dt>数式・<code>let</code>・<code>fn</code> の参照</dt><dd>周期・キー時刻・各値・<code>range</code> の引数には数式が使えます。テキストモデルのトップレベルの <code>let</code>・<code>fn</code> と数学関数・定数を参照できます。例：<code>key 4 euler 0 0 \${360 * 2}</code>。空白を含む式は <code>(式)</code> または <code>\${式}</code> で囲みます。モデル内のローカル定義やPythonの変数・関数は参照できません。</dd></div>
 </dl>
 <p>例：グループ <code>rotor</code> を2秒で1回転させ、全体で4秒のループにする</p>

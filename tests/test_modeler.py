@@ -3,7 +3,8 @@ import math
 import struct
 import unittest
 
-from modeler import _number_expression, evaluate, tessellate, to_glb
+from modeler import evaluate, tessellate, to_glb
+from model_syntax import number_expression as _number_expression
 
 
 class Solid:
@@ -185,6 +186,29 @@ end'''
                 evaluate(f"group g\n{command}\nend", "text", FakeBrep())
         with self.assertRaisesRegex(ValueError, "inside a group required"):
             evaluate('property key "value"', "text", FakeBrep())
+
+    def test_continued_property_keeps_hashes_and_literal_interpolation(self):
+        source = (
+            "group g\n"
+            "property label `prefix \\\n"
+            "#literal ${undefined} \\\n"
+            "tail` # trailing comment\n"
+            "box body 0 0 0 1 1 1\nend"
+        )
+        objects, _, _ = evaluate(source, "text", FakeBrep())
+        self.assertEqual(objects.group_paths["body"][0]["properties"]["label"],
+                         "prefix #literal ${undefined} tail")
+
+    def test_shape_creation_rejects_existing_names_and_invalid_boolean_outputs(self):
+        source = "box body 0 0 0 1 1 1\nmaterial body 1 0 0 0 0.5\n"
+        with self.assertRaisesRegex(ValueError, "Line 3: duplicate solid name: body"):
+            evaluate(source + "sphere body 0 0 0 1", "text", FakeBrep())
+        source += "box tool 0 0 0 1 1 1\n"
+        with self.assertRaisesRegex(ValueError, "Line 4: output name must be a valid identifier"):
+            evaluate(source + "subtract 9bad body tool", "text", FakeBrep())
+        objects, materials, _ = evaluate(source + "subtract body body tool", "text", FakeBrep())
+        self.assertEqual(list(objects), ["body"])
+        self.assertEqual(materials, {})
 
     def test_include_moves_group_and_preserves_settings(self):
         sm = FakeBrep()
@@ -706,6 +730,19 @@ end
         objects, _, _ = evaluate(source, "text", sm)
         self.assertEqual(list(objects), ["body"])
         self.assertEqual([call[0] for call in sm.booleans], ["union"])
+
+    def test_skipped_part_and_if_still_require_balanced_block_syntax(self):
+        for source in ("part unused\nif 0\nend extra\nend", "if 0\ngroup unused\nend extra\nend"):
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "Line 3: end takes no arguments"):
+                evaluate(source, "text", FakeBrep())
+
+    def test_empty_nested_loops_are_bounded(self):
+        with self.assertRaisesRegex(ValueError, "expansion work limit"):
+            evaluate("for i in range(512)\nfor j in range(512)\nend\nend", "text", FakeBrep())
+
+    def test_quaternion_expression_does_not_expand_in_other_commands(self):
+        with self.assertRaisesRegex(ValueError, "Line 1: dquaternion is only allowed in a quaternion command"):
+            evaluate("box a ${dquaternion(0,0,1,90)} 1 1", "text", FakeBrep())
 
     def test_if_nested_in_for_group_and_part(self):
         source = ("part piece\n"

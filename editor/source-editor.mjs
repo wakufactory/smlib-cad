@@ -14,7 +14,7 @@ const modelCommands = [
   "plane", "planar_circle", "profile", "polygon", "spline", "extrude", "revolve",
   "union", "subtract", "intersect", "faces", "offset", "shell", "chamfer", "fillet",
 ];
-const animationCommands = ["animation", "track", "key", "cycle", "for", "end"];
+const animationCommands = ["let", "animation", "track", "key", "cycle", "for", "end"];
 const mathFunctions = new Set([
   "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "exp", "log", "sqrt",
   "abs", "radians", "degrees",
@@ -77,7 +77,7 @@ const textLanguage = commandLanguage(
   modelCommands, ["for", "if", "part", "group", "profile"], new Set(["in", "range", "as", "default"]), true,
 );
 const animationLanguage = commandLanguage(
-  animationCommands, ["animation", "track", "for"], new Set(["loop", "position", "euler", "scale", "in", "range"]),
+  animationCommands, ["animation", "track", "for"], new Set(["loop", "position", "euler", "scale", "in", "range"]), true,
 );
 
 const pythonApi = [
