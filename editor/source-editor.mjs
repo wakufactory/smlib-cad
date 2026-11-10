@@ -1,6 +1,6 @@
 import {basicSetup, EditorView} from "codemirror";
-import {EditorState, Prec} from "@codemirror/state";
-import {keymap, placeholder} from "@codemirror/view";
+import {Compartment, EditorState, Prec} from "@codemirror/state";
+import {Decoration, keymap, MatchDecorator, placeholder, ViewPlugin} from "@codemirror/view";
 import {indentService, indentUnit, StreamLanguage, syntaxTree} from "@codemirror/language";
 import {completeFromList} from "@codemirror/autocomplete";
 import {python, pythonLanguage} from "@codemirror/lang-python";
@@ -118,11 +118,46 @@ const editorTheme = EditorView.theme({
   ".cm-scroller": {
     lineHeight: "1.55", overscrollBehavior: "contain", userSelect: "text", WebkitUserSelect: "text",
   },
-  ".cm-content, .cm-gutter": {paddingTop: "12px", paddingBottom: "12px"},
+  ".cm-content": {paddingTop: "12px", paddingBottom: "12px"},
   ".cm-line": {paddingLeft: "8px", paddingRight: "8px"},
+  ".cm-object-match": {backgroundColor: "#245166", boxShadow: "inset 0 -2px #64dcff"},
 });
 
 const editors = new Map();
+const objectHighlight = new Compartment();
+const objectMark = Decoration.mark({class: "cm-object-match"});
+let highlightedName = null;
+let highlightExtension = [];
+
+function setObjectHighlight(name) {
+  if (highlightedName === name) return;
+  highlightedName = name;
+  highlightExtension = [];
+  if (name) {
+    const matcher = new MatchDecorator({
+      regexp: new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gu"),
+      decoration(match, view, from) {
+        const line = view.state.doc.lineAt(from);
+        const start = from - line.from;
+        const end = start + match[0].length;
+        if (/\p{ID_Continue}$/u.test(line.text.slice(0, start))
+            || /^\p{ID_Continue}/u.test(line.text.slice(end))) return null;
+        return objectMark;
+      },
+    });
+    highlightExtension = ViewPlugin.fromClass(class {
+      constructor(view) {
+        this.decorations = matcher.createDeco(view);
+      }
+      update(update) {
+        this.decorations = matcher.updateDeco(update, this.decorations);
+      }
+    }, {decorations: plugin => plugin.decorations});
+  }
+  for (const {view} of editors.values()) {
+    view.dispatch({effects: objectHighlight.reconfigure(highlightExtension)});
+  }
+}
 
 function sync(textarea, mode, preview) {
   let editor = editors.get(textarea);
@@ -130,7 +165,7 @@ function sync(textarea, mode, preview) {
 
   const language = mode === "animation" ? animationLanguage : mode === "python" ? pythonExtensions : textLanguage;
   const extensions = [
-    basicSetup, vscodeDark, editorTheme, language,
+    basicSetup, vscodeDark, editorTheme, language, objectHighlight.of(highlightExtension),
     EditorView.contentAttributes.of({
       "aria-label": textarea.getAttribute("aria-label"),
       spellcheck: "false", autocapitalize: "off", autocorrect: "off",
@@ -165,4 +200,4 @@ function sync(textarea, mode, preview) {
   }
 }
 
-globalThis.CadSourceEditor = {sync};
+globalThis.CadSourceEditor = {sync, setObjectHighlight};

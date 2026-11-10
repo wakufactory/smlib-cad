@@ -642,6 +642,7 @@ function renderObjectTree(nodes){
   currentObjectTree=ModelFile.objectTree(nodes);
   hiddenPreviewNodes.clear();
   selectedPreviewNode=null;
+  globalThis.CadSourceEditor?.setObjectHighlight(null);
   const tree=$('object-tree'),entries=[];
   tree.textContent='';
   function refresh(){
@@ -670,6 +671,7 @@ function renderObjectTree(nodes){
       label.onclick=()=>{
         if($('preview-mode').value!=='webgl')return;
         selectedPreviewNode=selectedPreviewNode===key?null:key;
+        globalThis.CadSourceEditor?.setObjectHighlight(selectedPreviewNode===null?null:node.name);
         refresh();draw();
       };
       checkbox.onclick=()=>{

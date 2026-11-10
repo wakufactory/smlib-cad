@@ -77,8 +77,9 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 .object-tree-branch{flex:none;white-space:pre}
 .object-tree-label{flex:1;border:0;padding:0 4px;background:transparent;color:inherit;font:inherit;text-align:left;white-space:pre}
 .object-tree-label:focus-visible{outline:2px solid #64dcff;outline-offset:-2px}
-.object-tree-row.is-selected{background:#21485d;color:#b7f0ff;border-radius:4px}
-.object-tree-row.is-hidden .object-tree-branch,.object-tree-row.is-hidden .object-tree-label{opacity:.45}
+.object-tree-label[aria-pressed="true"]{color:#b7f0ff;font-weight:700}
+.object-tree-row.is-selected{background:#21485d;border-radius:4px}
+.object-tree-row.is-hidden .object-tree-branch,.object-tree-row.is-hidden .object-tree-label:not([aria-pressed="true"]){opacity:.45}
 .object-visibility{flex:none;width:12px;height:12px;min-height:0;margin:0 5px 0 0;padding:0;accent-color:#32a5ca;cursor:pointer}
 .object-visibility:disabled{opacity:.45;cursor:default}
 #export-stats{font-size:12px;line-height:1.7;font-variant-numeric:tabular-nums;white-space:pre-line;color:#dbe8f0}
