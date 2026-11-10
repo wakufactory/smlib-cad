@@ -176,6 +176,8 @@ function modelingKey(){return JSON.stringify(['source','mode','chord','angle'].m
 let animationPlayer = null;
 let resolvedAnimation = null;
 let animationApplyId = 0;
+let pendingAnimationSeek = null;
+let animationSeekFrame;
 function animationKey(){return JSON.stringify([$('mode').value,$('source').value,animationText()]);}
 function animationText(){return $('animation-source')?.value || '';}
 function selectedAnimationClip(){
@@ -196,9 +198,11 @@ function restoreClipSelection(name=''){
 }
 function animationStatus(time,duration,running){
   $('animation-play').textContent=running?'一時停止':'再生';
-  $('animation-seek').max=duration || 1;
-  $('animation-seek').value=time;
-  $('animation-time').textContent=`${time.toFixed(2)} / ${duration.toFixed(2)} s`;
+  const slider=$('animation-seek'), maximum=duration || 1;
+  if(Number(slider.max)!==maximum)slider.max=maximum;
+  if(!pendingAnimationSeek && Number(slider.value)!==time)slider.value=time;
+  const durationText=duration.toFixed(2);
+  $('animation-time').textContent=`${time.toFixed(2).padStart(durationText.length,'\u2007')} / ${durationText} s`;
 }
 async function applyAnimation(){
   if(!animationPlayer)throw Error('WebGL プレビューを準備してください');
@@ -217,6 +221,7 @@ async function applyAnimation(){
       resolvedAnimation={key,source:numericSource};
     }
   }
+  cancelAnimationSeek();
   animationPlayer.configure(numericSource,currentMeshes,rendered,$('animation-clip').value);
   updateClipOptions(animationPlayer.collection?.clips||[],animationPlayer.animation?.name);
   appliedAnimationSource=source;
@@ -235,6 +240,7 @@ $('animation-apply').onclick=async()=>{
 $('animation-play').onclick=async()=>{
   try{
     if($('preview-mode').value==='model')throw Error('再生コントロールは WebGL プレビューで使用してください');
+    flushAnimationSeek();
     if(animationPlayer?.running){animationPlayer.pause();return;}
     if(animationText()!==appliedAnimationSource || currentMeshKey!==modelingKey())if(!await applyAnimation())return;
     if(!animationPlayer?.animation)throw Error('アニメーションを設定して「設定を適用」を押してください');
@@ -245,13 +251,30 @@ let appliedAnimationSource='';
 $('animation-clip').onchange=async()=>{
   try{if($('preview-mode').value==='model'){saveDraft();await preview();}else{if(!await applyAnimation())return;saveDraft();}}catch(error){note(error.message,true);}
 };
-$('animation-reset').onclick=()=>animationPlayer?.reset();
+$('animation-reset').onclick=()=>{
+  cancelAnimationSeek();
+  animationPlayer?.reset();
+};
+function cancelAnimationSeek(){
+  if(animationSeekFrame!==undefined)cancelAnimationFrame(animationSeekFrame);
+  animationSeekFrame=undefined;
+  pendingAnimationSeek=null;
+}
+function flushAnimationSeek(){
+  const pending=pendingAnimationSeek;
+  cancelAnimationSeek();
+  if(pending && pending.clip===animationPlayer?.animation && $('preview-mode').value==='webgl'){
+    animationPlayer.seek(pending.time);
+  }
+}
 function seekAnimation(){
-  // pause() refreshes the controls with the old playback time. Capture the
-  // slider's requested time first so that refresh cannot overwrite the seek.
+  if(!animationPlayer)return;
   const time=Number($('animation-seek').value);
-  animationPlayer?.pause();
-  animationPlayer?.seek(time);
+  if(!pendingAnimationSeek && !animationPlayer.running && time===animationPlayer.time)return;
+  pendingAnimationSeek={time,clip:animationPlayer.animation};
+  if(animationPlayer.running)animationPlayer.pause();
+  // Drag events can arrive faster than the viewport can paint.
+  if(animationSeekFrame===undefined)animationSeekFrame=requestAnimationFrame(flushAnimationSeek);
 }
 $('animation-seek').oninput=seekAnimation;
 $('animation-seek').onchange=seekAnimation;

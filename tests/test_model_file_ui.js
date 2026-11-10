@@ -416,21 +416,51 @@ assert.equal(ModelFile.parse(JSON.stringify({...document,animationSource:formula
   elements['animation-clip'].value='removed';
   assert.equal(context.modelDocument().animationClip,'move','unapplied edits fall back to the first available clip');
   elements['animation-source'].value=beforeFormula.animation;
-  // Pausing updates the slider with the old time; preserve the user's target.
+  // Several input events before a paint should render only the last target.
+  const scrubFrames=new Map();
+  let nextFrame=0;
+  context.requestAnimationFrame=callback=>{
+    const id=++nextFrame;
+    scrubFrames.set(id,callback);
+    return id;
+  };
+  context.cancelAnimationFrame=id=>scrubFrames.delete(id);
+  const paintScrub=()=>{
+    assert.equal(scrubFrames.size,1);
+    [...scrubFrames.values()][0]();
+    assert.equal(scrubFrames.size,0);
+  };
   vm.runInContext(`
-    globalThis.seekedTime=null;
+    globalThis.seekedTimes=[];
     animationPlayer={
-      pause(){animationStatus(0.25,4,false);},
-      seek(time){globalThis.seekedTime=time;animationStatus(time,4,false);}
+      animation:{duration:4.0005},time:0.25,running:true,
+      pause(){this.running=false;animationStatus(this.time,this.animation.duration,false);},
+      seek(time){this.time=time;seekedTimes.push(time);animationStatus(time,this.animation.duration,false);},
+      reset(){this.seek(0);}
     };
   `,context);
-  for(const [event,target] of [['oninput',1.75],['oninput',0],['onchange',4]]){
-    elements['animation-seek'].value=String(target);
-    elements['animation-seek'][event]();
-    assert.equal(context.seekedTime,target);
-    assert.equal(Number(elements['animation-seek'].value),target);
-    assert.equal(elements['animation-time'].textContent,`${target.toFixed(2)} / 4.00 s`);
+  const slider=elements['animation-seek'];
+  for(const [event,target] of [['oninput',1.75],['oninput',0],['onchange',4.0005]]){
+    slider.value=String(target);
+    slider[event]();
+    assert.equal(Number(slider.value),target,'pausing must not move the dragged thumb');
   }
+  assert.equal(context.seekedTimes.length,0);
+  paintScrub();
+  assert.deepEqual([...context.seekedTimes],[4.0005]);
+  assert.equal(elements['animation-time'].textContent,'4.00 / 4.00 s');
+  slider.onchange();
+  assert.equal(scrubFrames.size,0,'a duplicate change after input must not redraw');
+  slider.value='2';
+  slider.oninput();
+  elements['animation-reset'].onclick();
+  assert.equal(scrubFrames.size,0,'reset cancels the pending drag');
+  assert.deepEqual([...context.seekedTimes],[4.0005,0]);
+  slider.value='3';
+  slider.oninput();
+  vm.runInContext('animationPlayer.animation={duration:6};',context);
+  paintScrub();
+  assert.deepEqual([...context.seekedTimes],[4.0005,0],'a pending drag cannot seek a different clip');
   assert.equal(geometryFallbacks,2,'seeking never regenerates geometry');
   console.log('model-file UI: text/Python save, restore, auto-preview, and invalid-file preservation passed');
 })().catch(error => {console.error(error); process.exitCode = 1;});
