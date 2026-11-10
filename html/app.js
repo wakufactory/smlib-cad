@@ -136,6 +136,11 @@ function syncSourceLineScroll(id='source'){
 function refreshSourceLines(){
   for(const id of ['source','animation-source']){
     const source=$(id),gutter=$(id+'-line-numbers'),numbers=$(id+'-line-numbers-inner');
+    if(source && globalThis.CadSourceEditor){
+      const isModel=id==='source';
+      globalThis.CadSourceEditor.sync(source,isModel?$('mode').value:'animation',isModel?preview:null);
+      continue;
+    }
     if(!source || !gutter?.style || !numbers?.style)continue;
     let count=1;
     for(const char of source.value||'')if(char==='\n')count++;

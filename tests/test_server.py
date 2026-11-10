@@ -178,6 +178,7 @@ class ChatRouteTests(unittest.TestCase):
         html_dir = Path(__file__).resolve().parents[1] / "html"
         for route, name in (("/", "index.html"), ("/app.js", "app.js"),
                             ("/animation.js", "animation.js"), ("/chat.js", "chat.js"),
+                            ("/source-editor.bundle.js", "source-editor.bundle.js"),
                             ("/command-reference.js", "command-reference.js")):
             with self.subTest(route=route):
                 handler = self.handler(route)

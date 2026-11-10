@@ -19,6 +19,7 @@ aside{border-right:1px solid #2c4154;overflow:hidden}
 .source-pane{border-left:1px solid #2c4154;background:#101b29;overflow-y:auto}
 .source-editor{display:flex;flex:1 1 55%;min-height:180px;flex-direction:column;gap:10px;overflow:hidden}
 .source-code{display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;border:1px solid #36516a;border-radius:8px;background:#101f2e}
+.source-code.cm-mounted>:not(.cm-editor){display:none}
 #source-line-numbers,#animation-source-line-numbers{flex:none;overflow:hidden;border-right:1px solid #36516a;color:#7794a8;background:#122435;text-align:right;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre;user-select:none;-webkit-user-select:none}
 #source-line-numbers-inner,#animation-source-line-numbers-inner{padding:12px 8px 12px 4px;will-change:transform}
 #source,#animation-source{flex:1;min-width:0;height:100%;border:0;border-radius:0;white-space:pre;overflow-wrap:normal}
@@ -140,7 +141,7 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 <button id="tab-animation" type="button" role="tab" aria-selected="false" aria-controls="animation-panel" tabindex="-1">アニメーション</button>
 </div>
 <section id="model-panel" class="editor-panel" role="tabpanel" aria-labelledby="tab-model">
-<div class="source-code"><div id="source-line-numbers" aria-hidden="true"><div id="source-line-numbers-inner">1</div></div><textarea id="source" wrap="off" spellcheck="false"></textarea></div></section>
+<div class="source-code"><div id="source-line-numbers" aria-hidden="true"><div id="source-line-numbers-inner">1</div></div><textarea id="source" wrap="off" spellcheck="false" aria-label="モデルのソース"></textarea></div></section>
 <section id="animation-panel" class="editor-panel" role="tabpanel" aria-labelledby="tab-animation" hidden>
 <div class="source-code"><div id="animation-source-line-numbers" aria-hidden="true"><div id="animation-source-line-numbers-inner">1</div></div><textarea id="animation-source" spellcheck="false" wrap="off" aria-label="アニメーション定義" placeholder="animation loop 4&#10;  track rotor&#10;    key 0 euler 0 0 0&#10;    key 4 euler 0 0 360&#10;  end&#10;end"></textarea></div>
 
@@ -158,4 +159,5 @@ canvas[hidden],#usd-model[hidden],#model-status[hidden],#shading-mode[hidden],#p
 </section>
 </section></main>
 <script src="/command-reference.js"></script>
+<script src="/source-editor.bundle.js"></script>
 <script src="/animation.js"></script><script src="/app.js"></script><script src="/chat.js"></script></body></html>
