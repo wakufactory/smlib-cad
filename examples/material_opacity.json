@@ -1,0 +1,13 @@
+{
+  "format": "smlib-model",
+  "version": 1,
+  "mode": "text",
+  "source": "# Opaque core inside an alpha-blended cover; group opacity with a solid override.\ngroup display\n  box base -10 -8 -2 20 16 2\n  sphere core 0 0 5 4\n  box cover -7 -6 0 14 12 12\n  material display 0.2 0.6 0.9 0 0.25 0.25\n  material core 1 0.25 0.05 0.2 0.35\n  material base 0.3 0.35 0.4 0.6 0.4\nend\n",
+  "parameters": {
+    "chord": 0.08,
+    "angle": 20,
+    "finish": "none",
+    "finishSize": 1,
+    "exportScale": 1
+  }
+}

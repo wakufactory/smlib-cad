@@ -103,13 +103,14 @@ def to_glb(meshes, scale=1, animation_source="", *, resolved_animation=None):
 
     for mesh in meshes:
         material = normalize_material(mesh.get("material", {}))
-        material_key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
+        material_key = (tuple(material["baseColor"]), material["metallic"], material["roughness"], material["opacity"])
         if material_key not in material_indices:
             material_indices[material_key] = len(doc["materials"])
             doc["materials"].append({"pbrMetallicRoughness": {
-                "baseColorFactor": [*material["baseColor"], 1.0],
+                "baseColorFactor": [*material["baseColor"], material["opacity"]],
                 "metallicFactor": material["metallic"],
-                "roughnessFactor": material["roughness"]}, "doubleSided": True})
+                "roughnessFactor": material["roughness"]}, "doubleSided": True,
+                **({"alphaMode": "BLEND"} if material["opacity"] < 1 else {})})
         key = _mesh_group_key(mesh, material_key)
         if key not in groups:
             groups[key] = {"materials": {}, "names": [], "path": mesh.get("groupPath", []),
@@ -249,7 +250,7 @@ def to_usdz(meshes, scale=1, animation_source="", animation_clip=None, *, resolv
     material_indices = {}
     for mesh in meshes:
         material = normalize_material(mesh.get("material", {}))
-        key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
+        key = (tuple(material["baseColor"]), material["metallic"], material["roughness"], material["opacity"])
         if key in material_indices:
             continue
         index = len(material_indices)
@@ -263,6 +264,8 @@ def to_usdz(meshes, scale=1, animation_source="", animation_clip=None, *, resolv
             f'                color3f inputs:diffuseColor = {color}',
             f'                float inputs:metallic = {material["metallic"]:.9g}',
             f'                float inputs:roughness = {material["roughness"]:.9g}',
+            f'                float inputs:opacity = {material["opacity"]:.9g}',
+            '                float inputs:opacityThreshold = 0',
             '                token outputs:surface', "            }", "        }",
         ])
     lines.extend(["    }", '    def Xform "Geometry"', "    {"])
@@ -272,7 +275,7 @@ def to_usdz(meshes, scale=1, animation_source="", animation_clip=None, *, resolv
         if not positions or len(positions) != len(normals) or len(positions) % 9:
             raise ValueError("Mesh positions and normals must contain matching triangles")
         material = normalize_material(mesh.get("material", {}))
-        key = (tuple(material["baseColor"]), material["metallic"], material["roughness"])
+        key = (tuple(material["baseColor"]), material["metallic"], material["roughness"], material["opacity"])
         group_key = _mesh_group_key(mesh, key)
         if group_key not in groups:
             groups[group_key] = {"positions": [], "normals": [], "names": [], "faces": {},

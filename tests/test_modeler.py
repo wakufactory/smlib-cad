@@ -1073,7 +1073,7 @@ end
                   "'metallic': 0.7, 'roughness': 0.25}}")
         objects, materials, _ = evaluate(source, "python", FakeBrep())
         self.assertEqual(materials["result"], {"baseColor": [0.2, 0.4, 0.6],
-                                                "metallic": 0.7, "roughness": 0.25})
+                                                "metallic": 0.7, "roughness": 0.25, "opacity": 1.0})
         self.assertEqual(tessellate(objects, FakeBrep(), materials=materials)[0]["material"],
                          materials["result"])
         with self.assertRaisesRegex(ValueError, "Line 2: roughness"):

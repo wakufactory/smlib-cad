@@ -134,6 +134,16 @@ const mesh = {name: 'face', positions: [0, 0, 0, 1, 0, 0, 0, 1, 0],
   normals: [0, 0, -1, 0, 0, -1, 0, 0, -1],
   material: {baseColor: [0.2, 0.4, 0.6], metallic: 0, roughness: 1}};
 context.show([mesh]);
+// Rebuilds must restore opaque depth writes after alpha-blended preview.
+for (const opacity of [0, 0.35, 1, undefined]) {
+  context.show([{...mesh, material:{...mesh.material, opacity}}]);
+  const options=vm.runInContext('rendered[0].solid.material.options',context);
+  assert.equal(options.opacity,opacity??1);
+  assert.equal(options.transparent,(opacity??1)<1);
+  assert.equal(options.depthWrite,(opacity??1)===1);
+  assert.equal(options.side,THREE.DoubleSide);
+}
+
 // Rebuilding changed geometry preserves the entire view in either projection.
 vm.runInContext('yaw=1.2; pitch=-0.3; zoom=1.7;', context);
 const viewState = () => vm.runInContext('JSON.stringify([center,radius,yaw,pitch,zoom,cameraEye()])', context);

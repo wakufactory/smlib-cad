@@ -32,7 +32,7 @@ def load_examples():
     variants = {"default": {"python": EXAMPLE_SCRIPT, "text": EXAMPLE_TEXT}}
     for key, stem in {"gallery": "all_primitives_materials", "sweeps": "extrude_revolve",
                       "offsets": "offset_shell", "functions": "calculation_functions",
-                      "circular": "circular_csg_array", "groups": "python_groups", "animation": "animation_loop"}.items():
+                      "opacity": "material_opacity", "circular": "circular_csg_array", "groups": "python_groups", "animation": "animation_loop"}.items():
         variants[key] = {}
         for mode, suffix in (("text", ".txt"), ("python", ".py")):
             path = ROOT / "examples" / (stem + suffix)

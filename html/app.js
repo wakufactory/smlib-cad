@@ -619,8 +619,10 @@ function show(meshes){
     geometry.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(mesh.normals),3));
     geometry.setAttribute('color',new THREE.BufferAttribute(faceNormalColors(mesh.positions),3));
     const color=new THREE.Color().setRGB(...mesh.material.baseColor,THREE.LinearSRGBColorSpace);
+    const opacity=mesh.material.opacity??1;
     const solid=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({
-      color,metalness:mesh.material.metallic,roughness:mesh.material.roughness
+      color,metalness:mesh.material.metallic,roughness:mesh.material.roughness,
+      opacity,transparent:opacity<1,depthWrite:opacity===1,side:THREE.DoubleSide
     }));
     const normal=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({vertexColors:true,side:THREE.DoubleSide,toneMapped:false}));
     const edgeGeometry=new THREE.BufferGeometry();

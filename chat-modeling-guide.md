@@ -49,7 +49,7 @@ material result 0.85 0.24 0.12 0.65 0.3
 | `offset` | `形状名 距離`（正は外側、負は内側） |
 | `shell` | `形状名 厚み [開口面の番号 ...]`（正は外側、負は内側。面指定なしは閉じた中空体） |
 | `faces` | `形状名`（現在の面番号と各面の座標範囲をログへ表示） |
-| `material` | `形状名またはグループ名 baseColorのR G B metallic roughness`。グループ指定は個別指定のない形状に適用 |
+| `material` | `形状名またはグループ名 baseColorのR G B metallic roughness [opacity]`。グループ指定は個別指定のない形状に適用 |
 | `part` / `end` | ルート階層で `part 部品名` から `end` までを再利用可能な定義にする |
 | `fn` | `fn 名前(引数, ...) = 式` で数値を返す計算関数を定義 |
 | `use` | `use 部品名 [配置名]` で部品を新しく生成する |
@@ -403,6 +403,10 @@ GLB・USDZ は group 階層と各 group のローカル TRS を再帰的に保�
 追加プリミティブの Python 名は各テキスト命令に `create_` を付けたものです。例えば `sm.create_ellipsoid((0, 0, 0), 8, 5, 3)`、`sm.create_cone((0, 0, 0), 4, 0, 7)`、`sm.create_partial_torus((0, 0, 0), 6, 1, 0, 180)` と書けます。
 
 ## 材質
+
+半透明は `material 形状名またはグループ名 R G B metallic roughness [opacity]` の末尾に不透明度を指定します。`opacity` は `0`（完全透明）〜 `1`（不透明）、省略時は `1` です。Python は `materials = {"body": {"baseColor": [0.2, 0.6, 0.9], "opacity": 0.35}}`、グループは `Group(..., material={"opacity": 0.35})` と書けます。例: `material body 0.2 0.6 0.9 0 0.25 0.35`。半透明でも材質の継承・個別指定の優先順位は同じです。
+
+プレビューの Shading はアルファブレンド、GLB は `baseColorFactor` のアルファと `alphaMode: BLEND`、USDZ は `UsdPreviewSurface` の `opacity` に保存します。Wireframe と面法線 RGB は診断表示のため不透明です。半透明面が交差・重複する場合は描画順による見え方の制約があります。屈折は行いません。編集できる例は `examples/material_opacity.json`（同内容の `.txt` / `.py` あり）、再生成は `make glb MODEL=examples/material_opacity.json GLB=outputs/material_opacity.glb` と `make usdz MODEL=examples/material_opacity.json USDZ=outputs/material_opacity.usdz` です。
 
 材質は完成したソリッド名かグループ名に指定します。`material グループ名 R G B metallic roughness` は子グループと `use` の形状を含め、個別指定のない形状に適用します。グループ内でも `end` の後でも指定できます。個別指定はグループ指定より優先し、子グループ指定は親グループ指定より優先します。`baseColor` は線形 RGB の3値、`metallic` と `roughness` はそれぞれ1値で、いずれも `0` から `1` の範囲です。省略したソリッドには既定の水色の材質を使います。Boolean 演算で作った形状には、演算後の名前を指定してください。GLB と USDZ に PBR 材質として保存されます。ブラウザのプレビューは three.js の `MeshStandardMaterial` で同じ値を使い、環境マップなしの平行光と環境光で照らします。
 

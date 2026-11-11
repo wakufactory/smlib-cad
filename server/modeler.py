@@ -73,11 +73,11 @@ def validate_primitive(op, values):
         if end <= start or end - start > 360:
             raise ValueError("angle range must be greater than 0 and at most 360 degrees")
 
-DEFAULT_MATERIAL = {"baseColor": [0.29, 0.68, 0.88], "metallic": 0.0, "roughness": 0.55}
+DEFAULT_MATERIAL = {"baseColor": [0.29, 0.68, 0.88], "metallic": 0.0, "roughness": 0.55, "opacity": 1.0}
 
 
 def normalize_material(value):
-    """Validate the three opaque PBR properties shared by preview and glTF."""
+    """Validate PBR color, surface properties and alpha-blend opacity."""
     if not isinstance(value, dict):
         raise ValueError("material must be a dictionary")
     unknown = set(value) - set(DEFAULT_MATERIAL)
@@ -88,12 +88,14 @@ def normalize_material(value):
     if not isinstance(color, (list, tuple)) or len(color) != 3:
         raise ValueError("baseColor must contain three RGB values")
     for key, components in (("baseColor", color), ("metallic", [result["metallic"]]),
-                            ("roughness", [result["roughness"]])):
+                            ("roughness", [result["roughness"]]),
+                            ("opacity", [result["opacity"]])):
         if any(isinstance(x, bool) or not isinstance(x, (int, float)) or
                not math.isfinite(x) or not 0 <= x <= 1 for x in components):
             raise ValueError(f"{key} values must be finite numbers from 0 to 1")
     return {"baseColor": [float(x) for x in color],
-            "metallic": float(result["metallic"]), "roughness": float(result["roughness"])}
+            "metallic": float(result["metallic"]), "roughness": float(result["roughness"]),
+            "opacity": float(result["opacity"])}
 
 
 def normalize_materials(materials, objects):
@@ -734,12 +736,13 @@ class _TextEvaluator:
         objects = frame.objects
         groups = frame.groups
         materials = frame.materials
-        if len(args) != 6 or (args[0] not in objects and args[0] not in groups and
+        if len(args) not in (6, 7) or (args[0] not in objects and args[0] not in groups and
                                args[0] != frame.name):
-            raise ValueError("material: existing solid or group name and five numbers required")
+            raise ValueError("material: existing solid or group name and five numbers required, with optional opacity")
         material = normalize_material({
             "baseColor": [number_argument(x, variables) for x in args[1:4]],
-            "metallic": number_argument(args[4], variables), "roughness": number_argument(args[5], variables)})
+            "metallic": number_argument(args[4], variables), "roughness": number_argument(args[5], variables),
+            "opacity": number_argument(args[6], variables) if len(args) == 7 else 1.0})
         if args[0] in objects:
             materials[args[0]] = material
             frame.material_priority[args[0]] = float("inf")
